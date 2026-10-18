@@ -2,13 +2,14 @@
 
 #include "DustToGlory.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/PlatformFile.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
 void UDTGGameSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	bContentLoaded = LoadContent();
+	bContentLoaded = LoadContent(CurrentState);
 }
 
 void UDTGGameSubsystem::Deinitialize()
@@ -28,30 +29,104 @@ FString UDTGGameSubsystem::DataDir()
 	return FPaths::Combine(FPaths::ProjectContentDir(), TEXT("Data"));
 }
 
-bool UDTGGameSubsystem::LoadContent()
+FString UDTGGameSubsystem::ModsDir()
 {
-	const FString Dir = DataDir();
-	auto Read = [&Dir](const TCHAR* Name)
+	return FPaths::Combine(FPaths::ProjectDir(), TEXT("Mods"));
+}
+
+std::string UDTGGameSubsystem::ReadData(const FString& Name)
+{
+	// A mod is a folder of data files. Several can be installed at once; later folders win, so a mod that
+	// only replaces vehicles.json leaves everything else alone.
+	FString Path = FPaths::Combine(DataDir(), Name);
+	for (const FString& Mod : Mods)
 	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *FPaths::Combine(Dir, Name)))
+		const FString Candidate = FPaths::Combine(ModsDir(), Mod, Name);
+		if (FPlatformFileManager::Get().GetPlatformFile().FileExists(*Candidate))
 		{
-			UE_LOG(LogDTG, Error, TEXT("Missing content file %s in %s"), Name, *Dir);
-			return std::string();
+			UE_LOG(LogDTG, Log, TEXT("%s comes from the mod '%s'"), *Name, *Mod);
+			Path = Candidate;
 		}
-		return std::string(TCHAR_TO_UTF8(*Text));
+	}
+	FString Text;
+	if (!FFileHelper::LoadFileToString(Text, *Path))
+	{
+		UE_LOG(LogDTG, Error, TEXT("Missing content file %s"), *Name);
+		return std::string();
+	}
+	return std::string(TCHAR_TO_UTF8(*Text));
+}
+
+TArray<FString> UDTGGameSubsystem::AvailableStates() const
+{
+	// Every state the game can be played in: the shipped ones plus any a mod adds.
+	TArray<FString> Found;
+	IPlatformFile& Platform = FPlatformFileManager::Get().GetPlatformFile();
+	auto Collect = [&Found, &Platform](const FString& Dir)
+	{
+		TArray<FString> Names;
+		Platform.FindFiles(Names, *Dir, TEXT(".json"));
+		for (const FString& Full : Names)
+		{
+			const FString Leaf = FPaths::GetCleanFilename(Full);
+			if (Leaf.StartsWith(TEXT("state")) && !Found.Contains(Leaf))
+			{
+				Found.Add(Leaf);
+			}
+		}
 	};
+	Collect(DataDir());
+	for (const FString& Mod : Mods)
+	{
+		Collect(FPaths::Combine(ModsDir(), Mod));
+	}
+	Found.Sort();
+	return Found;
+}
+
+bool UDTGGameSubsystem::SwitchState(const FString& FileName, const FString& PlayerName)
+{
+	const FString Previous = CurrentState;
+	if (!LoadContent(FileName))
+	{
+		LoadContent(Previous); // put it back rather than leave the game with no world
+		return false;
+	}
+	bContentLoaded = true;
+	CurrentState = FileName;
+	return StartNewGame(PlayerName);
+}
+
+bool UDTGGameSubsystem::LoadContent(const FString& StateFileName)
+{
+	// Note which mods are installed before reading anything, so every file sees the same set.
+	Mods.Reset();
+	IPlatformFile& Platform = FPlatformFileManager::Get().GetPlatformFile();
+	if (Platform.DirectoryExists(*ModsDir()))
+	{
+		TArray<FString> Folders;
+		Platform.IterateDirectory(*ModsDir(), [&Folders](const TCHAR* Path, bool bIsDirectory)
+		{
+			if (bIsDirectory)
+			{
+				Folders.Add(FPaths::GetCleanFilename(FString(Path)));
+			}
+			return true;
+		});
+		Folders.Sort();
+		Mods = Folders;
+	}
 
 	dtg::sim::ContentFiles Files;
-	Files.Economy = Read(TEXT("economy.json"));
-	Files.Vehicles = Read(TEXT("vehicles.json"));
-	Files.Parts = Read(TEXT("parts.json"));
-	Files.Careers = Read(TEXT("careers.json"));
-	Files.Powers = Read(TEXT("powers.json"));
-	Files.Furniture = Read(TEXT("furniture.json"));
-	Files.Companies = Read(TEXT("companies.json"));
-	Files.Laws = Read(TEXT("laws.json"));
-	Files.State = Read(TEXT("state.json"));
+	Files.Economy = ReadData(TEXT("economy.json"));
+	Files.Vehicles = ReadData(TEXT("vehicles.json"));
+	Files.Parts = ReadData(TEXT("parts.json"));
+	Files.Careers = ReadData(TEXT("careers.json"));
+	Files.Powers = ReadData(TEXT("powers.json"));
+	Files.Furniture = ReadData(TEXT("furniture.json"));
+	Files.Companies = ReadData(TEXT("companies.json"));
+	Files.Laws = ReadData(TEXT("laws.json"));
+	Files.State = ReadData(StateFileName);
 
 	dtg::sim::ContentReport ContentReport;
 	const bool bOk = State.LoadContent(Files, ContentReport);
@@ -61,9 +136,10 @@ bool UDTGGameSubsystem::LoadContent()
 	}
 	if (bOk)
 	{
-		UE_LOG(LogDTG, Log, TEXT("Loaded %d brands, %d nameplates, %d models, %d buildings across %d towns"),
-			ContentReport.Brands, ContentReport.Nameplates, ContentReport.Models,
-			static_cast<int32>(State.City.Buildings.size()), static_cast<int32>(State.City.Cities.size()));
+		UE_LOG(LogDTG, Log, TEXT("%s: %d brands, %d nameplates, %d models, %d buildings across %d towns%s"),
+			*StateFileName, ContentReport.Brands, ContentReport.Nameplates, ContentReport.Models,
+			static_cast<int32>(State.City.Buildings.size()), static_cast<int32>(State.City.Cities.size()),
+			Mods.Num() > 0 ? *FString::Printf(TEXT(" (mods: %s)"), *FString::Join(Mods, TEXT(", "))) : TEXT(""));
 	}
 	return bOk;
 }
@@ -76,7 +152,6 @@ bool UDTGGameSubsystem::StartNewGame(const FString& PlayerName, int64 Seed)
 	}
 	const uint64 UseSeed = Seed != 0 ? static_cast<uint64>(Seed) : static_cast<uint64>(FDateTime::UtcNow().GetTicks());
 	State.NewGame(UseSeed, TCHAR_TO_UTF8(*PlayerName));
-	Carry = 0.0;
 	return true;
 }
 

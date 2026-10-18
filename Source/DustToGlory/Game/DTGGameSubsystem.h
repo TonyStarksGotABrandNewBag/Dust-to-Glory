@@ -33,8 +33,17 @@ public:
 	const dtg::sim::GameState& Sim() const { return State; }
 	bool IsContentLoaded() const { return bContentLoaded; }
 
-	/** Starts a fresh game (Longs, SC) and returns false with a reason if content failed to load. */
+	/** Starts a fresh game and returns false if content failed to load. */
 	bool StartNewGame(const FString& PlayerName, int64 Seed = 0);
+
+	/** The state file in use ("state.json"), and the others found next to it. */
+	const FString& StateFile() const { return CurrentState; }
+	TArray<FString> AvailableStates() const;
+	/** Loads a different state and starts a new game in it; a save belongs to the state it was made in. */
+	bool SwitchState(const FString& FileName, const FString& PlayerName);
+
+	/** Mods that replaced one or more data files, in the order they were applied. */
+	const TArray<FString>& LoadedMods() const { return Mods; }
 	bool SaveGame(const FString& SlotName = TEXT("dust-to-glory"));
 	bool LoadGame(const FString& SlotName = TEXT("dust-to-glory"));
 	static FString SavePath(const FString& SlotName);
@@ -64,11 +73,15 @@ public:
 	}
 
 private:
-	bool LoadContent();
+	bool LoadContent(const FString& StateFileName);
 	static FString DataDir();
+	static FString ModsDir();
+	/** A data file's contents, from the last mod that replaces it or from the shipped data. */
+	std::string ReadData(const FString& Name);
 
 	dtg::sim::GameState State;
 	dtg::sim::TickReport Report;
 	bool bContentLoaded = false;
-	double Carry = 0.0;
+	FString CurrentState = TEXT("state.json");
+	TArray<FString> Mods;
 };

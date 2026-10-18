@@ -26,7 +26,9 @@ enum class EDTGScreen : uint8
 	Phone,      // calls, texts, email
 	Court,      // plea, trial, lawyer, co-defendant
 	Jail,       // serve the day, programs, parole, appeal -- and the ways out
-	Garage      // the player's cars
+	Garage,     // the player's cars
+	Talk,       // a conversation with someone in the street
+	Title       // the front end: new game, continue, slots
 };
 
 UCLASS()
@@ -42,6 +44,8 @@ public:
 
 	/** Opens a screen (the player controller calls this when the player interacts). */
 	void Open(EDTGScreen Screen, int32 Context = -1);
+	/** Opens a conversation with a particular NPC mind. */
+	void OpenTalk(const FString& MindId);
 	void Close();
 	EDTGScreen Screen() const { return Current; }
 
@@ -69,6 +73,8 @@ private:
 	void RunBuildingService(int32 Index);
 	void RunJailOption(int32 Index);
 	void RunCourtOption(int32 Index);
+	void RunTalkOption(int32 Index);
+	void RunTitleOption(int32 Index);
 
 	void Text(const FString& Line, float X, float Y, const FLinearColor& Colour = FLinearColor::White, float Scale = 1.0f);
 	void Panel(float X, float Y, float W, float H, const FLinearColor& Colour);
@@ -81,6 +87,8 @@ private:
 
 	EDTGScreen Current = EDTGScreen::None;
 	int32 ContextId = -1;
+	FString TalkingTo;
+	FString LastReply;
 	int32 Selection = 0;
 	TArray<FNotice> Notices;
 };

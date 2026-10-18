@@ -15,6 +15,7 @@ DATA = ROOT / "Content" / "Data"
 REQUIRED = [
     "economy.json", "vehicles.json", "parts.json", "careers.json",
     "powers.json", "furniture.json", "companies.json", "laws.json", "state.json",
+    "state-florida.json",
 ]
 
 

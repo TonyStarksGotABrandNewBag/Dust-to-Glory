@@ -320,6 +320,10 @@ void ADTGPlayerController::OnInteract()
 			Hud->Open(EDTGScreen::Building, Focus.BuildingId);
 		}
 	}
+	else if (!Focus.MindId.IsEmpty())
+	{
+		Hud->OpenTalk(Focus.MindId);
+	}
 	else if (!Focus.CarId.IsEmpty())
 	{
 		const OfferResponse Result = Game->Sim().OfferInPerson(TCHAR_TO_UTF8(*Focus.CarId), Game->Sim().Funds.Balance() / 4);
@@ -442,12 +446,19 @@ void ADTGPlayerController::OnPhone()
 
 void ADTGPlayerController::OnPause()
 {
-	if (ADTGHud* Hud = Cast<ADTGHud>(GetHUD()))
+	ADTGHud* Hud = Cast<ADTGHud>(GetHUD());
+	if (!Hud)
 	{
-		Hud->Close();
+		SetMenuOpen(false);
+		return;
+	}
+	// Escape closes whatever is open, or brings up the front end when nothing is.
+	if (Hud->Screen() == EDTGScreen::None)
+	{
+		Hud->Open(EDTGScreen::Title);
 	}
 	else
 	{
-		SetMenuOpen(false);
+		Hud->Close();
 	}
 }

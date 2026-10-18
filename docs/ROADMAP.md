@@ -28,27 +28,32 @@ most of it is deeper than "basic", and what's thin is thin on purpose.
 engine note is synthesised per sample, input and HUD are built in code, traffic and pedestrians fill the
 streets, and events run at the venues.
 
+**Geometry and interiors** — buildings with storeys, windows, roofs, doors and steeples; cars built from
+their body style and real dimensions; people; and rooms you can walk into, furnished with the furniture you
+bought. All generated in code and drawn with vertex colours, so the game ships no art files.
+
+**Florida** — a second playable state, chosen from the front end, with the Keys reached by causeway.
+
+**Mods** — any data file can be replaced from a `Mods/` folder, including a whole new state.
+
 ## Next
 
 In the order it's worth doing:
 
-1. **Art.** Everything is engine primitives right now: buildings are boxes, cars are boxes with cylinders
-   for wheels, people are boxes. The shapes, scales and positions are all correct, so this is swapping
-   meshes and materials in, not rebuilding anything. Vehicle models and a vertex-colour terrain material
-   would change the look of the whole game on their own.
-2. **Interiors.** Buildings are solid shells with working doors and menus; walking inside them — shops,
-   dealer showrooms, your own furnished home — is the biggest single gain in how the world feels.
-3. **Deeper NPC conversation.** The minds are there and they remember; what they can say back is short.
-4. **Animation.** Characters slide rather than walk; vehicles have no doors that open.
-5. **More of the state.** Florida next, as a second state file — the generator doesn't care which.
-6. **Mod support.** The data files are already the mod format; what's missing is loading them from a
-   folder the player controls, and a way to ship a set of them.
-7. **Save slots and a front end.** Saving works; choosing a slot from a menu doesn't exist yet.
+1. **Art.** The generated shapes are a floor, not a ceiling: they are the right size, in the right place,
+   with the right silhouette, which is exactly what makes them straightforward to replace with modelled
+   meshes and proper materials. Vehicle models would change the look of the game on their own.
+2. **Animation.** Characters slide rather than walk, and vehicles have no doors that open.
+3. **Deeper conversation.** The minds remember and wake up; what they can say back is still short.
+4. **Combat.** Powers push cars and people around; there is no fighting system behind it yet.
+5. **Weather and night.** The clock and the weather exist in the simulation but the sky doesn't change.
+6. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
+7. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
+   supports it yet either.
 
 ## Thin on purpose
 
-- **Buildings have no interiors yet.** Every one is interactable through its service menu, which is what
-  makes "100% interactable" true today; walking in comes with the interiors work above.
-- **Pedestrian and hero combat is minimal.** Powers push cars and people around; there's no fighting
-  system behind it yet.
-- **One state.** The map generator takes a state file; only South Carolina has one.
+- **Interiors are one room.** Walking in works everywhere and the fixtures suit the role, but a shop is
+  not yet a shop with a back office.
+- **No skeletal animation.** Everything moves rigidly, which is the single most noticeable gap.
+- **Two states.** South Carolina and Florida.

@@ -124,7 +124,6 @@ namespace dtg::sim
 			Bounds.MaxX = std::max(Bounds.MaxX, Corner[0]);
 			Bounds.MaxY = std::max(Bounds.MaxY, Corner[1]);
 		}
-		BuildSea();
 		for (const JsonValue& Pair : Root.Get("mountains").Get("outline").Items())
 		{
 			Mountains.push_back(ReadPoint(Pair));
@@ -287,61 +286,27 @@ namespace dtg::sim
 
 	bool StatePlan::IsOcean(double X, double Y) const
 	{
-		return !InsideState(X, Y) && detail_stateplan::PointInPolygon(Sea, X, Y);
-	}
-
-	void StatePlan::BuildSea()
-	{
-		// The sea: the coastline, continued straight past both ends (the neighbouring states' coasts), closed far offshore.
-		Sea.clear();
-		if (CoastEnd <= CoastStart)
+		// Outside the state, the nearest piece of border says what you are looking at: reach the state by
+		// crossing its coastline and you are at sea; reach it across the land border and you are in the next
+		// state. That holds whatever shape the state is -- a straight coast or a peninsula with both.
+		if (InsideState(X, Y))
 		{
-			return;
+			return false;
 		}
-		const Point2& First = Outline[static_cast<std::size_t>(CoastStart)];
-		const Point2& Second = Outline[static_cast<std::size_t>(CoastStart + 1)];
-		const Point2& Last = Outline[static_cast<std::size_t>(CoastEnd)];
-		const Point2& BeforeLast = Outline[static_cast<std::size_t>(CoastEnd - 1)];
-		const double Far = 4.0 * std::max(Bounds.Width(), Bounds.Depth()) + 10000.0;
-		auto Extend = [Far](const Point2& From, const Point2& Toward)
+		double Best = 1e18;
+		bool bCoast = false;
+		const int Count = static_cast<int>(Outline.size());
+		for (int Index = 0; Index < Count; ++Index)
 		{
-			const double Dx = Toward[0] - From[0];
-			const double Dy = Toward[1] - From[1];
-			const double Length = std::max(1e-6, std::sqrt(Dx * Dx + Dy * Dy));
-			return Point2{Toward[0] + Dx / Length * Far, Toward[1] + Dy / Length * Far};
-		};
-		// Offshore is away from the state's middle, perpendicular to the overall run of the coast.
-		double CenterX = 0.0;
-		double CenterY = 0.0;
-		for (const Point2& Corner : Outline)
-		{
-			CenterX += Corner[0];
-			CenterY += Corner[1];
+			const double Distance = SegmentDistance(Outline[static_cast<std::size_t>(Index)],
+				Outline[static_cast<std::size_t>((Index + 1) % Count)], X, Y);
+			if (Distance < Best)
+			{
+				Best = Distance;
+				bCoast = Index >= CoastStart && Index < CoastEnd;
+			}
 		}
-		CenterX /= static_cast<double>(Outline.size());
-		CenterY /= static_cast<double>(Outline.size());
-		const double RunX = Last[0] - First[0];
-		const double RunY = Last[1] - First[1];
-		double NormalX = -RunY;
-		double NormalY = RunX;
-		const double MidX = 0.5 * (First[0] + Last[0]);
-		const double MidY = 0.5 * (First[1] + Last[1]);
-		if (NormalX * (MidX - CenterX) + NormalY * (MidY - CenterY) < 0.0)
-		{
-			NormalX = -NormalX;
-			NormalY = -NormalY;
-		}
-		const double NormalLength = std::max(1e-6, std::sqrt(NormalX * NormalX + NormalY * NormalY));
-		const Point2 StartFar = Extend(Second, First);
-		const Point2 EndFar = Extend(BeforeLast, Last);
-		Sea.push_back(StartFar);
-		for (int Index = CoastStart; Index <= CoastEnd; ++Index)
-		{
-			Sea.push_back(Outline[static_cast<std::size_t>(Index)]);
-		}
-		Sea.push_back(EndFar);
-		Sea.push_back({EndFar[0] + NormalX / NormalLength * Far, EndFar[1] + NormalY / NormalLength * Far});
-		Sea.push_back({StartFar[0] + NormalX / NormalLength * Far, StartFar[1] + NormalY / NormalLength * Far});
+		return bCoast;
 	}
 
 	double StatePlan::Noise(double X, double Y, double Wavelength) const

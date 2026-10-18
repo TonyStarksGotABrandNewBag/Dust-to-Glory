@@ -99,6 +99,42 @@ void ADTGCharacter::UpdateFocus()
 		return;
 	}
 
+	// A person, if one is closer than any car. Their mind id is on the actor as a tag.
+	ACharacter* NearestPerson = nullptr;
+	FString NearestMind;
+	double PersonBest = FMath::Square(ReachM * DTGMetresToUnreal);
+	for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+	{
+		if (*It == this || It->IsPlayerControlled())
+		{
+			continue;
+		}
+		const double Distance = FVector::DistSquared(It->GetActorLocation(), GetActorLocation());
+		if (Distance >= PersonBest)
+		{
+			continue;
+		}
+		for (const FName& Tag : It->Tags)
+		{
+			const FString Name = Tag.ToString();
+			if (Name.StartsWith(TEXT("mind:")))
+			{
+				PersonBest = Distance;
+				NearestPerson = *It;
+				NearestMind = Name.RightChop(5);
+			}
+		}
+	}
+	if (NearestPerson)
+	{
+		const NpcMind& Mind = Game->Sim().Npcs.GetOrCreate(TCHAR_TO_UTF8(*NearestMind));
+		Current.Actor = NearestPerson;
+		Current.MindId = NearestMind;
+		Current.Title = UTF8_TO_TCHAR(Mind.Name.c_str());
+		Current.Prompt = TEXT("Talk");
+		return;
+	}
+
 	// Otherwise: a car parked at a house. Any of them can be asked after.
 	ADTGVehicle* NearestCar = nullptr;
 	double CarBest = FMath::Square(ReachM * DTGMetresToUnreal);

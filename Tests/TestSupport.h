@@ -35,6 +35,14 @@ namespace dtg_test
 		return Files;
 	}
 
+	/** The same content with a different state map, for testing the second one ships in working order. */
+	inline dtg::sim::ContentFiles LoadAllFiles(const char* StateFile)
+	{
+		dtg::sim::ContentFiles Files = LoadAllFiles();
+		Files.State = ReadDataFile(StateFile);
+		return Files;
+	}
+
 	/** A freshly loaded world; loading is cheap enough to do per test. */
 	inline dtg::sim::GameState& LoadedState()
 	{

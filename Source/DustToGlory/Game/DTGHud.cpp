@@ -367,6 +367,38 @@ TArray<FString> ADTGHud::BuildOptions() const
 				Car.Condition * 100.0, Car.MileageKm));
 		}
 		break;
+	case EDTGScreen::Talk:
+	{
+		if (const NpcMind* Mind = Sim.Npcs.Find(TCHAR_TO_UTF8(*TalkingTo)))
+		{
+			for (const DialogueOption& Option : Sim.Npcs.Options(*Mind))
+			{
+				Options.Add(Utf8(Option.Label));
+			}
+		}
+		Options.Add(TEXT("Walk away"));
+		break;
+	}
+	case EDTGScreen::Title:
+		Options.Add(TEXT("Continue"));
+		Options.Add(TEXT("New game"));
+		Options.Add(TEXT("Save"));
+		Options.Add(TEXT("Load"));
+		// Every state the game can be played in, the one in use marked.
+		for (const FString& File : Game->AvailableStates())
+		{
+			FString Label = File;
+			Label.RemoveFromStart(TEXT("state"));
+			Label.RemoveFromStart(TEXT("-"));
+			Label.RemoveFromEnd(TEXT(".json"));
+			if (Label.IsEmpty())
+			{
+				Label = TEXT("south-carolina");
+			}
+			Label = Label.Replace(TEXT("-"), TEXT(" "));
+			Options.Add(FString::Printf(TEXT("Play in %s%s"), *Label, File == Game->StateFile() ? TEXT("  (current)") : TEXT("")));
+		}
+		break;
 	default:
 		break;
 	}
@@ -411,6 +443,25 @@ void ADTGHud::DrawMenu()
 	case EDTGScreen::Garage:
 		Title = TEXT("Your cars");
 		break;
+	case EDTGScreen::Talk:
+		if (const NpcMind* Mind = Sim.Npcs.Find(TCHAR_TO_UTF8(*TalkingTo)))
+		{
+			Title = Utf8(Mind->Name);
+			Subtitle = FString::Printf(TEXT("%s  --  %s"), *Utf8(Mind->Occupation),
+				*Utf8(AwarenessStageName(Mind->Stage)));
+		}
+		break;
+	case EDTGScreen::Title:
+	{
+		Title = TEXT("Dust to Glory");
+		const StateCity* Start = Sim.Map.StartCity();
+		Subtitle = FString::Printf(TEXT("%s, %s"), Start ? *Utf8(Start->Name) : TEXT("somewhere"), *Utf8(Sim.Map.Name));
+		if (!Game->LoadedMods().IsEmpty())
+		{
+			Subtitle += FString::Printf(TEXT("  --  mods: %s"), *FString::Join(Game->LoadedMods(), TEXT(", ")));
+		}
+		break;
+	}
 	default:
 		break;
 	}
@@ -429,6 +480,10 @@ void ADTGHud::DrawMenu()
 		}
 		Text(Options[Index], X + 28.0f, Row, bSelected ? FLinearColor::White : Dim);
 		Row += 30.0f;
+	}
+	if (Current == EDTGScreen::Talk && !LastReply.IsEmpty())
+	{
+		Text(FString::Printf(TEXT("\"%s\""), *LastReply), X + 24.0f, Y + H - 58.0f, FLinearColor(0.85f, 0.85f, 0.8f), 0.95f);
 	}
 	Text(TEXT("[W]/[S] choose   [E] do it   [Esc] leave"), X + 24.0f, Y + H - 32.0f, Dim, 0.9f);
 }
@@ -449,6 +504,8 @@ void ADTGHud::Choose(int32 Index)
 	switch (Current)
 	{
 	case EDTGScreen::Building: RunBuildingService(Selection); break;
+	case EDTGScreen::Talk: RunTalkOption(Selection); break;
+	case EDTGScreen::Title: RunTitleOption(Selection); break;
 	case EDTGScreen::Court: RunCourtOption(Selection); break;
 	case EDTGScreen::Jail: RunJailOption(Selection); break;
 	case EDTGScreen::Phone:
@@ -555,6 +612,63 @@ void ADTGHud::RunBuildingService(int32 Index)
 		return;
 	}
 	OnNotice(FString::Printf(TEXT("%s: %s"), *Utf8(Building->Name), *Service));
+}
+
+void ADTGHud::OpenTalk(const FString& MindId)
+{
+	TalkingTo = MindId;
+	LastReply.Reset();
+	GameState& Sim = Game->Sim();
+	// Opening a conversation is itself something they remember.
+	NpcMind& Mind = Sim.Npcs.GetOrCreate(TCHAR_TO_UTF8(*MindId));
+	LastReply = Utf8(Sim.Npcs.Line(Mind, Sim.Random));
+	Open(EDTGScreen::Talk);
+}
+
+void ADTGHud::RunTalkOption(int32 Index)
+{
+	GameState& Sim = Game->Sim();
+	NpcMind* Mind = Sim.Npcs.Find(TCHAR_TO_UTF8(*TalkingTo));
+	if (!Mind)
+	{
+		Close();
+		return;
+	}
+	const std::vector<DialogueOption> Choices = Sim.Npcs.Options(*Mind);
+	if (Index < 0 || Index >= static_cast<int32>(Choices.size()))
+	{
+		Close(); // "Walk away"
+		return;
+	}
+	LastReply = Utf8(Sim.Npcs.Respond(*Mind, Choices[static_cast<std::size_t>(Index)].Id, Sim.Clock.TotalMinutes(), Sim.Random, Sim.Careers));
+}
+
+void ADTGHud::RunTitleOption(int32 Index)
+{
+	switch (Index)
+	{
+	case 0: Close(); break;
+	case 1:
+		Game->StartNewGame(TEXT("Newcomer"));
+		OnNotice(TEXT("A new life in Longs."));
+		Close();
+		break;
+	case 2: OnNotice(Game->SaveGame() ? TEXT("Saved.") : TEXT("Couldn't write the save file.")); break;
+	case 3: OnNotice(Game->LoadGame() ? TEXT("Loaded.") : TEXT("No save to load.")); break;
+	default:
+	{
+		// Switching states rebuilds the world and starts a new life in it.
+		const TArray<FString> States = Game->AvailableStates();
+		const int32 Which = Index - 4;
+		if (States.IsValidIndex(Which) && States[Which] != Game->StateFile())
+		{
+			OnNotice(Game->SwitchState(States[Which], TEXT("Newcomer")) ? TEXT("A new life, somewhere else entirely.")
+																		: TEXT("That state wouldn't load."));
+			Close();
+		}
+		break;
+	}
+	}
 }
 
 void ADTGHud::RunCourtOption(int32 Index)

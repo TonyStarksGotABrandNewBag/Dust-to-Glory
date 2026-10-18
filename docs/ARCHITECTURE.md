@@ -66,8 +66,22 @@ John Nash's work isn't decoration here; it decides numbers the player feels:
 | `DTGCharacter` | On foot: walking, what you're standing in front of, getting in and out, using powers. |
 | `DTGPlayerController` | Enhanced Input built entirely in code: on-foot and driving contexts, manual shifting. |
 | `DTGHud` | Instruments, minimap, notifications, and every menu — all drawn in code, no UMG assets. |
+| `DTGMeshBuilder` | Every shape in the game, generated: buildings, cars, people, rooms, furniture. |
+| `DTGInterior` | The room you are standing in when you walk through a door. |
 | `DTGTrafficDirector` | Traffic on the road graph, police who come looking, pedestrians carrying NPC minds, and cars parked outside houses. |
 | `DTGEventDirector` | Drag races, derbies, monster jam and circuit races at the venues; heroes and villains roaming. |
+
+### No art, either
+
+Nothing in the repository is a mesh or a texture. `DTGMeshBuilder` generates every shape from the
+simulation's numbers — a building from its footprint, floors and role; a car from its body style and real
+dimensions — and all of it is drawn with the engine's vertex-colour material, so colour is carried in the
+vertices. That is a floor rather than a ceiling: the shapes are the right size in the right places, which
+is what makes them straightforward to swap for modelled art later.
+
+Interiors work the same way. Rather than hollowing out a thousand shells, a room is built on demand in a
+pocket of space far below the world and the player is moved into it; stepping back through the door puts
+them where they were.
 
 Units: the simulation works in metres, Unreal in centimetres. `DTGMetresToUnreal` is the only conversion,
 and it lives in `DTGGameSubsystem.h`. Axes match Unreal throughout: X east, Y south, Z up.

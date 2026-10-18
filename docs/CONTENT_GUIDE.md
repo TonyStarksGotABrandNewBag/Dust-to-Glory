@@ -17,6 +17,7 @@ can open them in a text editor and change the game.
 | `laws.json` | Laws that can be proposed, and what each changes. |
 | `economy.json` | Prices, wages, the calendar year and the era's price level. |
 | `state.json` | The playable state: outline, coast, towns, highways, rivers, lakes, mountains, venues. |
+| `state-florida.json` | The same, for Florida. Any file starting with `state` shows up in the front end. |
 
 ## The one rule: nothing real
 
@@ -61,6 +62,13 @@ pairs, so a model knows which generation it belongs to.
 Prices are in 1990s money, which is the era the economy runs on. The catalog works out market value from
 age, desirability and condition — a 1969 coupe is worth many times its sticker now, and the code that
 decides that is in `Sim/Vehicles.cpp`.
+
+## Mods
+
+A mod is a folder under `Mods/` containing any of the files above. Whatever it holds replaces the shipped
+version; everything else is untouched, several can be installed at once, and later folders win. A mod that
+adds `state-ohio.json` adds a state to play in without touching anything else. The log says which mod each
+file came from.
 
 ## Adding a town
 

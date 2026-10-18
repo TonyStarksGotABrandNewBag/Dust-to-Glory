@@ -110,7 +110,6 @@ namespace dtg::sim
 	private:
 		void PlaceCities();
 		void PlaceVenues();
-		void BuildSea();
 		void DetourAroundCities();
 		void JoinCrossings();
 		void ComputeDecks();
@@ -130,7 +129,6 @@ namespace dtg::sim
 		/** Nearest point on the state outline. */
 		Point2 NearestBorderPoint(double X, double Y) const;
 		std::uint64_t Seed = 1977;
-		std::vector<Point2> Sea; // coast extended past both ends and closed offshore
 	};
 
 	/** Block pitch used for every city (block + road), so city footprints can be computed before generation. */

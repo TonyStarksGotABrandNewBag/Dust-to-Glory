@@ -264,7 +264,6 @@ DTG_TEST(RoadsStayDryAndDrivable)
 		{
 			const std::array<double, 3> Here = Road.At(Along);
 			const SurfaceInfo Info = State.SurfaceAt(Here[0], Here[1]);
-			EXPECT_MSG(!Info.bOcean, Road.Name + " runs out to sea");
 			if (Info.bWater)
 			{
 				++Bridged;
@@ -281,4 +280,87 @@ DTG_TEST(RoadsStayDryAndDrivable)
 		}
 	}
 	EXPECT(Bridged > 0); // rivers and lakes are crossed on bridges
+}
+
+DTG_TEST(FloridaShipsAsASecondState)
+{
+	// The generator takes a state file, so a second state is data rather than code. This is Florida's.
+	GameState Sunshine;
+	ContentReport Report;
+	const bool bOk = Sunshine.LoadContent(dtg_test::LoadAllFiles("state-florida.json"), Report);
+	for (const std::string& Error : Report.Errors)
+	{
+		EXPECT_MSG(false, Error);
+	}
+	EXPECT(bOk);
+	Sunshine.NewGame(5, "Tester");
+
+	const StatePlan& Map = Sunshine.Map;
+	EXPECT(Map.Name == "Florida");
+	EXPECT(Map.Cities.size() >= 20);
+	EXPECT(Map.StartCity() && Map.StartCity()->Name == "Jacksonville");
+	for (const char* Name : {"Miami", "Tampa", "Orlando", "Key West", "Tallahassee", "Pensacola", "Naples"})
+	{
+		EXPECT_MSG(Sunshine.City.FindCity(Name) != nullptr, Name);
+	}
+	// Towns stay on land and off each other, as in any state.
+	for (std::size_t A = 0; A < Map.Cities.size(); ++A)
+	{
+		const StateCity& City = Map.Cities[A];
+		EXPECT_MSG(Map.InsideState(City.Bounds.MinX, City.Bounds.MinY) && Map.InsideState(City.Bounds.MaxX, City.Bounds.MaxY) &&
+				Map.InsideState(City.Bounds.MinX, City.Bounds.MaxY) && Map.InsideState(City.Bounds.MaxX, City.Bounds.MinY),
+			City.Name + " is in the sea");
+		for (std::size_t B = A + 1; B < Map.Cities.size(); ++B)
+		{
+			EXPECT_MSG(!City.Bounds.Overlaps(Map.Cities[B].Bounds), City.Name + " overlaps " + Map.Cities[B].Name);
+		}
+	}
+	// A peninsula has sea on both sides and land only to the north -- which is what tells the two apart.
+	const Point2 Atlantic = Map.ToWorld(-79.80, 27.50);
+	const Point2 Gulf = Map.ToWorld(-84.50, 27.50);
+	const Point2 Georgia = Map.ToWorld(-83.00, 31.60);
+	EXPECT(Map.IsOcean(Atlantic[0], Atlantic[1]));
+	EXPECT(Map.IsOcean(Gulf[0], Gulf[1]));
+	EXPECT(!Map.IsOcean(Georgia[0], Georgia[1]) && !Map.InsideState(Georgia[0], Georgia[1]));
+	// Florida is flat: nowhere in it is a mountain.
+	for (const StateCity& City : Map.Cities)
+	{
+		EXPECT_MSG(City.LevelM < 30.0, City.Name + " is improbably high for Florida");
+	}
+	// And you can still drive everywhere.
+	const CityInfo* Start = Sunshine.City.FindCity("Jacksonville");
+	EXPECT(Start != nullptr);
+	if (!Start)
+	{
+		return;
+	}
+	const std::set<int> Reached = Reachable(Sunshine.City, Sunshine.City.NearestIntersection(Start->Bounds.CenterX(), Start->Bounds.CenterY()));
+	for (const CityInfo& City : Sunshine.City.Cities)
+	{
+		EXPECT_MSG(Reached.count(Sunshine.City.NearestIntersection(City.Bounds.CenterX(), City.Bounds.CenterY())) == 1,
+			"can't drive from Jacksonville to " + City.Name);
+	}
+	// US-1 to Key West really does run over open water, so it has to be a causeway rather than a road
+	// that disappears into the Atlantic.
+	int Causeway = 0;
+	for (const HighwayPlan& Road : Map.Highways)
+	{
+		EXPECT(!Road.DeckM.empty());
+		const double Length = Road.LengthM();
+		for (double Along = 5.0; Along <= Length; Along += 20.0)
+		{
+			const std::array<double, 3> Here = Road.At(Along);
+			const SurfaceInfo Info = Map.SurfaceAt(Here[0], Here[1]);
+			if (Info.bWater)
+			{
+				Causeway += Info.bOcean ? 1 : 0;
+				EXPECT_MSG(Here[2] >= Info.WaterM + 2.5, Road.Name + " dips into the water");
+			}
+			else
+			{
+				EXPECT_MSG(Here[2] >= Info.GroundM - 0.01, Road.Name + " is buried");
+			}
+		}
+	}
+	EXPECT(Causeway > 0);
 }

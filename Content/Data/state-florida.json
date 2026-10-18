@@ -1,0 +1,100 @@
+// Florida: the second playable state. Same schema as state.json (see that file's notes).
+// The coast runs almost the whole way round, so "coast" covers the long stretch from the Atlantic side,
+// down around the Keys and back up the Gulf; the land border with Georgia and Alabama is the short top edge.
+// Florida is flat -- its high point is about 105 m -- so the "mountains" polygon is really the panhandle's
+// low rolling hills, which at this scale is all it should be.
+// Places are real; every business, school, team and person in them is fictional.
+{
+  "name": "Florida",
+  "abbreviation": "FL",
+  "scale": 25.0,
+  "verticalScale": 3.0,
+  "origin": [-81.655, 30.332],
+  "outline": [
+    [-87.600, 31.000], [-86.400, 30.995], [-85.000, 31.000], [-84.000, 30.675], [-82.700, 30.600],
+    [-82.200, 30.570], [-81.650, 30.750], [-81.440, 30.710],
+    [-81.300, 29.900], [-80.900, 29.000], [-80.520, 28.470], [-80.080, 27.850], [-80.100, 27.000],
+    [-80.330, 26.100], [-80.700, 25.500], [-81.150, 25.150], [-81.400, 25.600], [-81.800, 26.000],
+    [-82.100, 26.650], [-82.500, 27.300], [-82.700, 27.900], [-82.650, 28.600], [-83.000, 29.100],
+    [-83.600, 29.700], [-84.300, 30.000], [-85.100, 29.750], [-85.800, 30.200], [-86.500, 30.400],
+    [-87.200, 30.350], [-87.520, 30.650]
+  ],
+  "coast": [7, 28],
+  "cities": [
+    { "name": "Jacksonville", "lon": -81.655, "lat": 30.332, "style": "Hub", "grid": 7, "start": true,
+      "landmarks": [["Hospital", "Riverbend Medical Center"], ["University", "First Coast University"], ["Museum", "Northeast Florida Museum"]] },
+    { "name": "Jacksonville Beach", "lon": -81.394, "lat": 30.279, "style": "Beach", "grid": 3 },
+    { "name": "St. Augustine", "lon": -81.315, "lat": 29.902, "style": "Town", "grid": 3,
+      "landmarks": [["Museum", "Old Quarter Museum"], ["Hotel", "Matanzas Inn"]] },
+    { "name": "Daytona Beach", "lon": -81.023, "lat": 29.211, "style": "Beach", "grid": 4,
+      "landmarks": [["ModShop", "Speedway Fabrication"]] },
+    { "name": "Orlando", "lon": -81.379, "lat": 28.538, "style": "City", "grid": 6,
+      "landmarks": [["TechCampus", "Central Florida Innovation Park"], ["Hospital", "Lake Eola Medical"], ["Studio", "Sunshine Sound Studios"]] },
+    { "name": "Kissimmee", "lon": -81.407, "lat": 28.292, "style": "Town", "grid": 3 },
+    { "name": "Lakeland", "lon": -81.949, "lat": 28.039, "style": "Town", "grid": 3 },
+    { "name": "Tampa", "lon": -82.457, "lat": 27.950, "style": "City", "grid": 6,
+      "landmarks": [["Bank", "Bayfront Savings Bank"], ["Hospital", "Hillsborough General"], ["University", "Bay Harbor University"]] },
+    { "name": "St. Petersburg", "lon": -82.640, "lat": 27.771, "style": "Beach", "grid": 4 },
+    { "name": "Sarasota", "lon": -82.531, "lat": 27.337, "style": "Town", "grid": 3 },
+    { "name": "Fort Myers", "lon": -81.872, "lat": 26.640, "style": "Town", "grid": 4 },
+    { "name": "Naples", "lon": -81.795, "lat": 26.142, "style": "Town", "grid": 3 },
+    { "name": "West Palm Beach", "lon": -80.053, "lat": 26.715, "style": "City", "grid": 5,
+      "landmarks": [["Courthouse", "Palm County Courthouse"], ["Jail", "Palm County Detention Center"]] },
+    { "name": "Fort Lauderdale", "lon": -80.144, "lat": 26.122, "style": "Beach", "grid": 5 },
+    { "name": "Miami", "lon": -80.192, "lat": 25.774, "style": "City", "grid": 6,
+      "landmarks": [["Bank", "Biscayne Trust Bank"], ["Hospital", "Flagler Street Medical"], ["Studio", "Little River Records"]] },
+    { "name": "Key West", "lon": -81.780, "lat": 24.555, "style": "Beach", "grid": 3 },
+    { "name": "Port St. Lucie", "lon": -80.353, "lat": 27.273, "style": "Town", "grid": 3 },
+    { "name": "Melbourne", "lon": -80.608, "lat": 28.084, "style": "Town", "grid": 3 },
+    { "name": "Ocala", "lon": -82.140, "lat": 29.187, "style": "Town", "grid": 3 },
+    { "name": "Gainesville", "lon": -82.325, "lat": 29.652, "style": "Town", "grid": 4,
+      "landmarks": [["University", "North Central Florida University"]] },
+    { "name": "Tallahassee", "lon": -84.281, "lat": 30.438, "style": "City", "grid": 5,
+      "landmarks": [["Courthouse", "State Capitol"], ["University", "Capital State University"]] },
+    { "name": "Panama City", "lon": -85.660, "lat": 30.159, "style": "Town", "grid": 3 },
+    { "name": "Pensacola", "lon": -87.217, "lat": 30.421, "style": "Town", "grid": 4,
+      "landmarks": [["Hospital", "Escambia Bay Medical"]] }
+  ],
+  "highways": [
+    { "name": "I-95", "interstate": true, "route": ["Jacksonville", "St. Augustine", "Daytona Beach", "Melbourne", "Port St. Lucie", "West Palm Beach", "Fort Lauderdale", "Miami"] },
+    { "name": "I-75", "interstate": true, "route": [[-83.200, 30.400], "Gainesville", "Ocala", [-82.300, 28.600], "Tampa", "Sarasota", "Fort Myers", "Naples", [-80.900, 26.100], "Fort Lauderdale"] },
+    { "name": "I-4", "interstate": true, "route": ["Tampa", "Lakeland", "Kissimmee", "Orlando", "Daytona Beach"] },
+    { "name": "I-10", "interstate": true, "route": ["Pensacola", [-86.500, 30.600], "Panama City", "Tallahassee", [-83.200, 30.400], "Jacksonville"] },
+    { "name": "I-275", "interstate": true, "route": ["St. Petersburg", "Tampa"] },
+    { "name": "Florida's Turnpike", "route": ["Ocala", [-81.700, 28.700], "Orlando", "Kissimmee", [-80.700, 27.300], "West Palm Beach", "Fort Lauderdale", "Miami"] },
+    { "name": "US-1", "route": ["Jacksonville", "St. Augustine", [-80.950, 29.000], "Melbourne", "Port St. Lucie", "West Palm Beach", "Fort Lauderdale", "Miami", [-80.900, 25.200], "Key West"] },
+    { "name": "US-41", "route": ["Tampa", "Sarasota", "Fort Myers", "Naples", [-81.000, 25.900], "Miami"] },
+    { "name": "US-27", "route": ["Tallahassee", [-83.300, 29.900], "Gainesville", "Ocala", "Lakeland", [-81.100, 26.700], "Fort Lauderdale"] },
+    { "name": "US-301", "route": ["Jacksonville", [-82.100, 29.950], "Gainesville", "Ocala", [-82.200, 28.300], "Tampa"] },
+    { "name": "US-98", "route": ["Pensacola", "Panama City", [-84.300, 30.000], "Tallahassee"] },
+    { "name": "US-192", "route": ["Kissimmee", "Melbourne"] },
+    { "name": "FL-A1A", "route": ["Jacksonville Beach", "St. Augustine", "Daytona Beach"] }
+  ],
+  "rivers": [
+    { "name": "St. Johns River", "width": 12, "points": [[-80.900, 27.900], [-81.100, 28.400], [-81.300, 28.900], [-81.500, 29.400], [-81.600, 29.900], [-81.650, 30.330], [-81.450, 30.400]] },
+    { "name": "Suwannee River", "width": 9, "points": [[-82.900, 30.600], [-82.950, 30.200], [-83.150, 29.900], [-83.150, 29.600]] },
+    { "name": "Apalachicola River", "width": 10, "points": [[-85.000, 30.700], [-85.000, 30.200], [-85.020, 29.750]] },
+    { "name": "Caloosahatchee River", "width": 9, "points": [[-80.900, 26.750], [-81.400, 26.720], [-81.870, 26.640], [-82.050, 26.530]] },
+    { "name": "Peace River", "width": 7, "points": [[-81.800, 27.650], [-81.950, 27.200], [-82.050, 26.930]] },
+    { "name": "Kissimmee River", "width": 8, "points": [[-81.300, 28.100], [-81.100, 27.600], [-80.950, 27.150]] },
+    { "name": "Escambia River", "width": 7, "points": [[-87.200, 30.900], [-87.200, 30.550], [-87.250, 30.400]] },
+    { "name": "Withlacoochee River", "width": 6, "points": [[-82.100, 28.700], [-82.300, 28.900], [-82.650, 28.950]] }
+  ],
+  "lakes": [
+    { "name": "Lake Okeechobee", "lon": -80.830, "lat": 26.930, "radiusKm": 25.0 },
+    { "name": "Lake George", "lon": -81.600, "lat": 29.280, "radiusKm": 7.0 },
+    { "name": "Lake Kissimmee", "lon": -81.270, "lat": 27.940, "radiusKm": 6.0 },
+    { "name": "Lake Apopka", "lon": -81.620, "lat": 28.620, "radiusKm": 6.0 },
+    { "name": "Lake Istokpoga", "lon": -81.270, "lat": 27.370, "radiusKm": 5.0 },
+    { "name": "Lake Tohopekaliga", "lon": -81.370, "lat": 28.200, "radiusKm": 4.0 },
+    { "name": "Crescent Lake", "lon": -81.510, "lat": 29.450, "radiusKm": 3.0 },
+    { "name": "Lake Seminole", "lon": -84.870, "lat": 30.800, "radiusKm": 5.0 }
+  ],
+  "mountains": { "outline": [[-87.400, 31.000], [-85.800, 31.000], [-85.600, 30.700], [-86.400, 30.600], [-87.300, 30.650]], "peakMeters": 105 },
+  "venues": [
+    { "kind": "DragRace", "name": "River City Dragway", "lon": -81.900, "lat": 30.200 },
+    { "kind": "DemolitionDerby", "name": "Suwannee Fairgrounds Arena", "lon": -82.600, "lat": 29.950 },
+    { "kind": "MonsterJam", "name": "Gulf Coast Stadium", "lon": -82.200, "lat": 28.300 },
+    { "kind": "Formula", "name": "Atlantic Grand Prix Circuit", "lon": -80.800, "lat": 28.700 }
+  ]
+}

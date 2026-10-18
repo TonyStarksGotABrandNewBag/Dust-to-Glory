@@ -38,10 +38,13 @@ struct FDTGInteraction
 	/** Private-car id when the player is looking at someone's parked car. */
 	FString CarId;
 
+	/** NPC mind id when the player is looking at a person. */
+	FString MindId;
+
 	UPROPERTY()
 	TObjectPtr<AActor> Actor = nullptr;
 
-	bool IsValid() const { return BuildingId >= 0 || !CarId.IsEmpty() || Actor != nullptr; }
+	bool IsValid() const { return BuildingId >= 0 || !CarId.IsEmpty() || !MindId.IsEmpty() || Actor != nullptr; }
 };
 
 UCLASS()

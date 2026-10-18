@@ -55,6 +55,13 @@ costs more than turning yourself in.
 **Powers.** Three at a time, chosen at the start, levelling and mutating unpredictably with use. People
 who see you use them remember it, and enough of that wakes them up.
 
+**Florida too.** A second playable state, picked from the front end: the panhandle, the peninsula, the Gulf
+and the Atlantic, and US-1 out to Key West over the water. The map generator takes a state file, so a third
+is data, not code.
+
+**Mods are just the data files.** Drop a folder in `Mods/` with any of them in it and the game uses yours
+instead — including a whole new state.
+
 ## Repository layout
 
 | Path | What it is |
@@ -63,6 +70,7 @@ who see you use them remember it, and enough of that wakes them up.
 | `Source/DustToGlory/Game/` | The Unreal layer: pawns, world building, input, HUD, audio, AI. |
 | `Content/Data/` | Every bit of game content, as JSON you can edit without a compiler. |
 | `Tests/` | The core's test suite (CMake + CTest), and the content checker. |
+| `Mods/` | Drop-in replacements for any data file, including whole new states. |
 | `docs/` | Architecture, roadmap, content guide and audio notes. |
 
 The split is the point: `Sim/` holds the rules and `Game/` only draws them, so the game is testable
@@ -71,8 +79,9 @@ without an engine and the handling is identical on every machine.
 ## Hardware
 
 Built to run on an HP Omen with an RTX 5080 at full detail (hardware ray-traced Lumen, Nanite, virtual
-shadow maps) and to scale down to a Mac on software Lumen. The world is generated at runtime from the
-data files rather than streamed from a baked map, so the download stays small.
+shadow maps) and to scale down to a Mac on software Lumen. The world — terrain, roads, buildings, cars,
+people — is generated at runtime from the data files rather than streamed from a baked map, so the
+download stays small and there is no art pipeline to run.
 
 ## Content
 
