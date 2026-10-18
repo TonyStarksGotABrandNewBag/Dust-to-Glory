@@ -158,6 +158,15 @@ void ADTGHud::DrawStatusBar()
 		Panel(16.0f, 42.0f, BarW * Fraction, 14.0f,
 			Fraction > 0.5f ? FLinearColor(0.3f, 0.7f, 0.3f) : FLinearColor(0.85f, 0.35f, 0.2f));
 	}
+	// Weather, and what it is doing to the road, once it is doing anything.
+	const Weather Sky = Sim.Weather.Current();
+	if (Sky != Weather::Clear)
+	{
+		const double Grip = WeatherGrip(Sky);
+		Text(FString::Printf(TEXT("%s%s"), UTF8_TO_TCHAR(WeatherName(Sky)),
+				Grip < 0.95 ? *FString::Printf(TEXT("  --  %.0f%% grip"), Grip * 100.0) : TEXT("")),
+			470.0f, 8.0f, Grip < 0.8 ? FLinearColor(0.9f, 0.7f, 0.3f) : Dim);
+	}
 	const int Unread = Sim.Phone.Unread();
 	if (Unread > 0)
 	{

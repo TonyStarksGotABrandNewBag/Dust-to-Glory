@@ -23,7 +23,10 @@ namespace
 	class FWorldGround : public GroundQuery
 	{
 	public:
-		FWorldGround(const UWorld* InWorld, const AActor* InIgnore) : World(InWorld), Ignore(InIgnore) {}
+		FWorldGround(const UWorld* InWorld, const AActor* InIgnore, double InGrip)
+			: World(InWorld), Ignore(InIgnore), Grip(InGrip)
+		{
+		}
 
 		GroundHit Cast(const Vec3& Origin, const Vec3& Direction, double MaxDistance) const override
 		{
@@ -44,14 +47,15 @@ namespace
 			Out.Distance = Hit.Distance / DTGMetresToUnreal;
 			Out.Point = Vec3(Hit.ImpactPoint.X / DTGMetresToUnreal, Hit.ImpactPoint.Y / DTGMetresToUnreal, Hit.ImpactPoint.Z / DTGMetresToUnreal);
 			Out.Normal = Vec3(Hit.ImpactNormal.X, Hit.ImpactNormal.Y, Hit.ImpactNormal.Z);
-			// Surface grip would come from a physical material; tarmac until those exist.
-			Out.Grip = 1.0;
+			// Tarmac, wetted by whatever the weather is doing. A per-surface material would refine this.
+			Out.Grip = Grip;
 			return Out;
 		}
 
 	private:
 		const UWorld* World = nullptr;
 		const AActor* Ignore = nullptr;
+		double Grip = 1.0;
 	};
 
 	FQuat ToUnrealQuat(const Quat& Value)
@@ -316,7 +320,9 @@ void ADTGVehicle::StepPhysics(double Dt)
 		Input.Brake = FMath::Max(Input.Brake, 0.35);
 	}
 
-	const FWorldGround Ground(GetWorld(), this);
+	// Rain and standing water are felt through the tires, not just seen.
+	const double Grip = Game && Game->IsContentLoaded() ? WeatherGrip(Game->Sim().Weather.Current()) : 1.0;
+	const FWorldGround Ground(GetWorld(), this, Grip);
 	Sim.Step(Dt, Input, Ground);
 }
 

@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
 
+#include "Game/DTGBody.h"
+
 using namespace dtg::sim;
 
 // ============================================================================================ FDTGMesh
@@ -574,42 +576,16 @@ namespace DTGMeshBuilder
 
 namespace DTGMeshBuilder
 {
-	void DressPerson(AActor* Person, int32 Seed)
+	UDTGBody* DressPerson(AActor* Person, int32 Seed)
 	{
-		if (!Person)
+		if (!Person || !Person->GetRootComponent())
 		{
-			return;
+			return nullptr;
 		}
-		// A palette of ordinary clothes, plus two that are anything but.
-		static const FLinearColor Wardrobe[] = {
-			FLinearColor(0.16f, 0.2f, 0.3f), FLinearColor(0.3f, 0.12f, 0.12f), FLinearColor(0.15f, 0.26f, 0.18f),
-			FLinearColor(0.35f, 0.33f, 0.28f), FLinearColor(0.1f, 0.1f, 0.12f), FLinearColor(0.42f, 0.38f, 0.2f),
-		};
-		static const FLinearColor Skins[] = {
-			FLinearColor(0.72f, 0.56f, 0.44f), FLinearColor(0.5f, 0.36f, 0.26f), FLinearColor(0.32f, 0.22f, 0.16f),
-			FLinearColor(0.85f, 0.7f, 0.58f),
-		};
-		FLinearColor Clothes = Wardrobe[FMath::Abs(Seed) % UE_ARRAY_COUNT(Wardrobe)];
-		if (Seed == 1)
-		{
-			Clothes = FLinearColor(0.05f, 0.25f, 0.6f);   // a hero
-		}
-		else if (Seed == 2)
-		{
-			Clothes = FLinearColor(0.32f, 0.04f, 0.3f);   // a villain
-		}
-		FDTGMesh Mesh;
-		BuildPerson(Clothes, Skins[FMath::Abs(Seed / 7) % UE_ARRAY_COUNT(Skins)], Mesh);
-
-		UProceduralMeshComponent* Component = NewObject<UProceduralMeshComponent>(Person);
-		Component->SetupAttachment(Person->GetRootComponent());
-		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Component->RegisterComponent();
-		Component->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
-		if (UMaterialInterface* Painted = Cast<UMaterialInterface>(StaticLoadObject(
-				UMaterialInterface::StaticClass(), nullptr, TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial"))))
-		{
-			Component->SetMaterial(0, Painted);
-		}
+		UDTGBody* Body = NewObject<UDTGBody>(Person, TEXT("Body"));
+		Body->SetupAttachment(Person->GetRootComponent());
+		Body->RegisterComponent();
+		Body->Build(Seed);
+		return Body;
 	}
 }

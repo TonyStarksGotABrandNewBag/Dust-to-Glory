@@ -12,6 +12,8 @@
 #include "TimerManager.h"
 
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGMeshBuilder.h"
+#include "Game/DTGBody.h"
 #include "Game/DTGInterior.h"
 #include "Game/DTGVehicle.h"
 
@@ -46,6 +48,8 @@ void ADTGCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
+	// The player is a person like any other, and walks like one.
+	Body = DTGMeshBuilder::DressPerson(this, 0);
 }
 
 void ADTGCharacter::Tick(float DeltaSeconds)
@@ -286,6 +290,10 @@ void ADTGCharacter::Punch()
 		return;
 	}
 	NextSwing = Now + 0.55;
+	if (Body)
+	{
+		Body->Swing();
+	}
 	const FString Target = EngageNearest();
 	if (Target.IsEmpty())
 	{

@@ -71,7 +71,10 @@ namespace DTGMeshBuilder
 	/** One wheel, sized from the tire. */
 	void BuildWheel(double RadiusM, double WidthM, const FLinearColor& Rim, FDTGMesh& Out);
 
-	/** A person: not animated, but the right size and shape to read as one at a glance. */
+	/**
+	 * A person as one static mesh: the shape without the walk. DressPerson builds the jointed version;
+	 * this is for anything that just needs a body-shaped thing (and for checking the proportions offline).
+	 */
 	void BuildPerson(const FLinearColor& Clothes, const FLinearColor& Skin, FDTGMesh& Out);
 
 	/**
@@ -84,8 +87,8 @@ namespace DTGMeshBuilder
 	void BuildFurniture(const FString& Category, const FVector& At, double YawDegrees, const FLinearColor& Colour, FDTGMesh& Out);
 
 	/**
-	 * Gives an actor a generated body. Seed picks their clothes, so the same person looks the same each
-	 * time; 1 and 2 are reserved for a hero and a villain, who are supposed to stand out.
+	 * Gives an actor a body that walks (see DTGBody). Seed picks their clothes, so the same person looks
+	 * the same each time; 1 and 2 are reserved for a hero and a villain, who are supposed to stand out.
 	 */
-	void DressPerson(class AActor* Person, int32 Seed);
+	class UDTGBody* DressPerson(class AActor* Person, int32 Seed);
 }

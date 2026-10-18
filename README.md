@@ -52,8 +52,13 @@ tunnel, a bribed guard, a crew outside, a medical transfer or your own powers. E
 fugitive: no job will touch you, the manhunt cools only while you keep your head down, and getting caught
 costs more than turning yourself in.
 
-**Powers.** Three at a time, chosen at the start, levelling and mutating unpredictably with use. People
-who see you use them remember it, and enough of that wakes them up.
+**Powers and fights.** Three powers at a time, chosen at the start, levelling and mutating unpredictably
+with use. People who see you use them remember it, and enough of that wakes them up. Everyone has health:
+hit a bystander and it's assault, put a wanted villain down and you're paid for it, lose and you wake up
+at the hospital with a bill.
+
+**Weather you feel.** The sun follows the clock and sets where it should; rain takes grip away from the
+tires and a storm takes more; headlights come on at dusk.
 
 **Florida too.** A second playable state, picked from the front end: the panhandle, the peninsula, the Gulf
 and the Atlantic, and US-1 out to Key West over the water. The map generator takes a state file, so a third

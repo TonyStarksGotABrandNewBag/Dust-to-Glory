@@ -44,6 +44,38 @@ namespace dtg::sim
 		return Buffer;
 	}
 
+	double WeatherGrip(Weather Value)
+	{
+		// What the tires actually find under them. Rain is the big one; fog is a visibility problem rather
+		// than a grip one, and storms add standing water on top of the rain.
+		switch (Value)
+		{
+		case Weather::Clear: return 1.0;
+		case Weather::PartlyCloudy: return 1.0;
+		case Weather::Overcast: return 0.98;
+		case Weather::Rain: return 0.72;
+		case Weather::Storm: return 0.6;
+		case Weather::Fog: return 0.93;
+		case Weather::Count: break;
+		}
+		return 1.0;
+	}
+
+	double WeatherVisibilityM(Weather Value)
+	{
+		switch (Value)
+		{
+		case Weather::Clear: return 6000.0;
+		case Weather::PartlyCloudy: return 5000.0;
+		case Weather::Overcast: return 3000.0;
+		case Weather::Rain: return 1400.0;
+		case Weather::Storm: return 700.0;
+		case Weather::Fog: return 220.0;
+		case Weather::Count: break;
+		}
+		return 6000.0;
+	}
+
 	const char* WeatherName(Weather Value)
 	{
 		switch (Value)

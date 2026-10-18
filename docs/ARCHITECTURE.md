@@ -36,7 +36,7 @@ RTTI, warnings as errors.
 | People | `NpcMinds`, `PrivateSales`, `Messages` | Minds that remember and can wake up; cars parked at houses; calls, texts and email. |
 | Making a living | `Careers`, `Market`, `Hacking`, `Furniture` | Jobs and shifts, businesses, stocks, reputation, IP and royalties, hacking contracts, homes and furniture. |
 | Belief and power | `Ministry`, `Politics`, `Powers` | Tithes, sermons, integrity and scandal; campaigns, offices and laws; three mutating powers. |
-| Trouble | `Wanted`, `Justice`, `Conspiracy`, `Outbreak` | Police heat; courts, jail and the ways out; the engineered-outbreak scheme; illness as an SIR model. |
+| Trouble | `Wanted`, `Justice`, `Conspiracy`, `Outbreak`, `Combat` | Police heat; courts, jail and the ways out; the engineered-outbreak scheme; illness as an SIR model; fights, health and bounties. |
 | Game theory | `GameTheory` | Nash bargaining, Rubinstein offers, prisoner's dilemma, Cournot, Bertrand, the inspection game. |
 | It all together | `GameState`, `GameStateSave` | The one object that owns everything, every action the player can take, and the save file. |
 
@@ -68,6 +68,8 @@ John Nash's work isn't decoration here; it decides numbers the player feels:
 | `DTGHud` | Instruments, minimap, notifications, and every menu — all drawn in code, no UMG assets. |
 | `DTGMeshBuilder` | Every shape in the game, generated: buildings, cars, people, rooms, furniture. |
 | `DTGInterior` | The room you are standing in when you walk through a door. |
+| `DTGBody` | A jointed body with a walk: legs and arms swung at the pace the actor is really moving. |
+| `DTGSky` | Sun, sky, fog and headlights, following the simulation's clock and weather. |
 | `DTGTrafficDirector` | Traffic on the road graph, police who come looking, pedestrians carrying NPC minds, and cars parked outside houses. |
 | `DTGEventDirector` | Drag races, derbies, monster jam and circuit races at the venues; heroes and villains roaming. |
 

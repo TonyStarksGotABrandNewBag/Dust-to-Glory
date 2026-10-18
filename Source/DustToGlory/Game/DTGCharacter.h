@@ -15,6 +15,7 @@
 #include "DTGCharacter.generated.h"
 
 class ADTGInterior;
+class UDTGBody;
 class ADTGVehicle;
 class UCameraComponent;
 class UDTGGameSubsystem;
@@ -99,6 +100,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<ADTGInterior> Interior;
+
+	UPROPERTY()
+	TObjectPtr<UDTGBody> Body;
 
 	FDTGInteraction Current;
 	int32 InsideBuildingId = -1;

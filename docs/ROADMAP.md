@@ -36,6 +36,15 @@ bought. All generated in code and drawn with vertex colours, so the game ships n
 
 **Mods** — any data file can be replaced from a `Mods/` folder, including a whole new state.
 
+**Day, night and weather** — the sun follows the game clock, the weather the simulation already generated
+now darkens the road, closes in the fog and takes grip away from the tires, and headlights come on at dusk.
+
+**Fights** — health for the player and whoever they are up against, fists, powers and cars all hitting
+differently, assault charges for hitting a bystander, bounties for putting a villain down, and a hospital
+bill rather than a game over.
+
+**Walking** — people are jointed and swing their legs and arms at the pace they are actually travelling.
+
 ## Next
 
 In the order it's worth doing:
@@ -43,17 +52,16 @@ In the order it's worth doing:
 1. **Art.** The generated shapes are a floor, not a ceiling: they are the right size, in the right place,
    with the right silhouette, which is exactly what makes them straightforward to replace with modelled
    meshes and proper materials. Vehicle models would change the look of the game on their own.
-2. **Animation.** Characters slide rather than walk, and vehicles have no doors that open.
-3. **Deeper conversation.** The minds remember and wake up; what they can say back is still short.
-4. **Combat.** Powers push cars and people around; there is no fighting system behind it yet.
-5. **Weather and night.** The clock and the weather exist in the simulation but the sky doesn't change.
-6. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
-7. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
+2. **Deeper conversation.** The minds remember and wake up; what they can say back is still short.
+3. **Rain you can see.** Weather already darkens the sky and takes grip away; there are no particles.
+4. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
+5. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
    supports it yet either.
 
 ## Thin on purpose
 
 - **Interiors are one room.** Walking in works everywhere and the fixtures suit the role, but a shop is
   not yet a shop with a back office.
-- **No skeletal animation.** Everything moves rigidly, which is the single most noticeable gap.
+- **Animation is procedural.** Limbs swing at the right cadence; there is no skeletal animation, because
+  there are no animation assets to play.
 - **Two states.** South Carolina and Florida.

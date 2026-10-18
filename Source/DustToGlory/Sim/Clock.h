@@ -54,6 +54,10 @@ namespace dtg::sim
 	};
 
 	const char* WeatherName(Weather Value);
+	/** Tire grip multiplier for a surface in this weather: dry 1, standing water much less. */
+	double WeatherGrip(Weather Value);
+	/** How much of a wet road is still wet: rain that has just stopped is the worst of it. */
+	double WeatherVisibilityM(Weather Value);
 
 	/** Markov-chain weather that changes every few game hours. */
 	class WeatherSystem
