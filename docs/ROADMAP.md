@@ -5,7 +5,7 @@ most of it is deeper than "basic", and what's thin is thin on purpose.
 
 ## Done
 
-**The simulation core** — 79 tests, builds in seconds without an engine, CI on Linux, macOS and Windows.
+**The simulation core** — 81 tests, builds in seconds without an engine, CI on Linux, macOS and Windows.
 
 - Driving: Pacejka tires, 500 Hz drivetrain, 240 Hz chassis with suspension, aero, collisions, launch
   control, traction control and ABS; manual or automatic.

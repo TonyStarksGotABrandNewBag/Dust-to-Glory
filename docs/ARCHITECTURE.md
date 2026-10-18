@@ -15,7 +15,7 @@ Content/Data/*.json ──► Sim (rules, state, maths) ◄── Tests (CMake, 
 
 Three things fall out of the split, and they're the reason for it:
 
-- **The game is testable without an engine.** 79 tests build in seconds with CMake and run anywhere,
+- **The game is testable without an engine.** 81 tests build in seconds with CMake and run anywhere,
   including CI on Linux, macOS and Windows. A physics change is a test, not a play session.
 - **The handling is identical everywhere.** The chassis integrates at a fixed 240 Hz with its own rigid
   body; Unreal's physics never touches a car. The same inputs give the same lap on every machine.
@@ -107,8 +107,13 @@ any point, built from the coast, the rivers, the lakes, the mountains and the le
 
 ## Testing
 
-`Tests/` builds the core with the same flags Unreal uses and runs 79 tests: physics plausibility (a car
-accelerates, stops, corners, lands and rolls the way one should), the car economy, the state map's
-geography and road network, private sales and messaging, careers, business, politics, courts and jail,
-outbreaks and treatments, and a full save round trip. `Tests/check_content.py` parses every data file and
+`Tests/` builds the core with the same flags Unreal uses and runs 81 tests: physics plausibility (a car
+accelerates, stops, corners, lands and rolls the way one should), the car economy, both state maps'
+geography and road networks, private sales and messaging, careers, business, politics, courts and jail,
+the ways out of jail and life as a fugitive, the outbreak scheme and the investigation that unpicks it,
+fights and bounties, and a full save round trip. `Tests/check_content.py` parses every data file and
 fails on a real brand name slipping in.
+
+The geometry has its own check outside the engine: `DTGMeshBuilder` compiles against a small stand-in for
+Unreal's types and renders to an image, which is how the triangle winding was settled against Unreal's
+face-normal convention and how the car silhouettes were judged.
