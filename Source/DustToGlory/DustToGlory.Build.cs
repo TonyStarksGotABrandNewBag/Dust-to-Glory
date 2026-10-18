@@ -17,7 +17,16 @@ public class DustToGlory : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",
-			"PhysicsCore"
+			"PhysicsCore",
+			// Terrain, roads and water are generated at runtime from the simulation's state plan.
+			"ProceduralMeshComponent",
+			// The engine note is synthesised per sample (see Game/DTGEngineAudio).
+			"AudioMixer",
+			"SignalProcessing",
+			// The HUD and menus are drawn in code; no UMG assets to maintain.
+			"UMG",
+			"Slate",
+			"SlateCore"
 		});
 	}
 }

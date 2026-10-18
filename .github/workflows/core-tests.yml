@@ -1,0 +1,28 @@
+# The simulation core is engine-independent C++20, so it builds and runs here without Unreal.
+# Every push and pull request compiles it with the same warnings Unreal uses and runs the test suite.
+name: Core tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S Tests -B Tests/build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        run: cmake --build Tests/build --config RelWithDebInfo --parallel
+
+      - name: Test
+        run: ctest --test-dir Tests/build --build-config RelWithDebInfo --output-on-failure

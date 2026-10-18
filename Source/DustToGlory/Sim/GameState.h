@@ -232,6 +232,21 @@ namespace dtg::sim
 
 		// ---------------------------------------------------------------- Powers
 		ActionResult ChoosePowers(const std::vector<std::string>& Ids);
+		/** What happened when a power was used: its numbers now, plus any level-up or mutation. */
+		struct PowerUse
+		{
+			bool bOk = false;
+			std::string Message;
+			EffectivePower Power;
+			bool bLeveledUp = false;
+			bool bMutated = false;
+			MutationEvent Mutation;
+		};
+		/**
+		 * Uses power slot 0..2. Anyone in Witnesses sees it, which is how background NPCs start waking up,
+		 * and using powers in public is how the city learns there's a superhuman in town.
+		 */
+		PowerUse UsePower(int Slot, const std::vector<std::string>& Witnesses = std::vector<std::string>(), bool bInPublic = true);
 
 		// ---------------------------------------------------------------- Homes and furniture
 		ActionResult BuyHome(int BuildingId);

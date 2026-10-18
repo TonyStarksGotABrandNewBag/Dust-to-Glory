@@ -1727,6 +1727,68 @@ namespace dtg::sim
 		return ActionResult::Success("Your powers awaken. Use them wisely: they will change as you do.");
 	}
 
+	GameState::PowerUse GameState::UsePower(int Slot, const std::vector<std::string>& Witnesses, bool bInPublic)
+	{
+		PowerUse Result;
+		const PowerInstance* Instance = PlayerPowers.Slot(Slot);
+		if (!Instance)
+		{
+			Result.Message = "You haven't awakened that power.";
+			return Result;
+		}
+		Result.Power = Powers.Evaluate(*Instance);
+		Result.bOk = Result.Power.Def != nullptr;
+		if (!Result.bOk)
+		{
+			Result.Message = "That power won't answer.";
+			return Result;
+		}
+		bool bLevelUp = false;
+		MutationEvent Event;
+		Result.bMutated = PlayerPowers.RecordUse(Slot, Powers, Random, Event, bLevelUp);
+		Result.bLeveledUp = bLevelUp;
+		Result.Mutation = Event;
+		Result.Message = Result.Power.Def->Name;
+		if (bLevelUp)
+		{
+			const PowerInstance* Now = PlayerPowers.Slot(Slot);
+			Notify(std::string(Result.Power.Def->Name) + " is getting stronger (level " +
+				std::to_string(Now ? Now->Level : 0) + ").");
+		}
+		if (Result.bMutated)
+		{
+			if (Event.bEvolved)
+			{
+				const PowerDef* After = Powers.FindPower(Event.PowerAfter);
+				Notify("Something changed. " + std::string(Result.Power.Def->Name) + " became " +
+					(After ? After->Name : Event.PowerAfter) + ".");
+			}
+			else if (const MutationDef* Mutation = Powers.FindMutation(Event.MutationId))
+			{
+				Notify(std::string(Result.Power.Def->Name) + " mutated: " + Mutation->Name + ".");
+			}
+		}
+		// People who see it remember it, and that is what starts waking them up.
+		const bool bGlitch = Result.Power.Def->Effect == PowerEffect::Teleport || Result.Power.Def->Effect == PowerEffect::Phasing ||
+			Result.Power.Def->Effect == PowerEffect::TimeSlow;
+		for (const std::string& WitnessId : Witnesses)
+		{
+			NpcMind& Mind = Npcs.GetOrCreate(WitnessId);
+			Npcs.Observe(Mind, bGlitch ? Stimulus::SawGlitch : Stimulus::SawPower, 0.6, Clock.TotalMinutes(), Random,
+				Result.Power.Def->Name, &Powers);
+		}
+		if (bInPublic && !Witnesses.empty())
+		{
+			// A public display gets talked about: followers first, then the authorities' interest.
+			Markets.PlayerReputation().Followers += static_cast<int>(Witnesses.size()) * 5;
+			if (Justice.IsFugitive())
+			{
+				Wanted.AddStars(1); // using powers while wanted tells everyone exactly where you are
+			}
+		}
+		return Result;
+	}
+
 	// ==================================================================================== Homes
 
 	ActionResult GameState::BuyHome(int BuildingId)

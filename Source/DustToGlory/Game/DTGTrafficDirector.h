@@ -1,0 +1,100 @@
+// Everyone else on the road and the sidewalk.
+//
+// Traffic and pedestrians are spawned around the player and recycled when they fall behind, so a whole state
+// can be populated without a whole state's worth of actors. Traffic cars are the same ADTGVehicle the player
+// drives, steered by a simple follow-the-road-graph driver, so a cab corners on the same tires the player's
+// car does. Pedestrians carry the simulation's NpcMinds: what they have seen of the player is remembered, and
+// enough of it wakes them up. Police are traffic that comes looking when the player is wanted.
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+
+#include "DTGTrafficDirector.generated.h"
+
+class ADTGVehicle;
+class UDTGGameSubsystem;
+
+/** One AI car and where it is going. */
+USTRUCT()
+struct FDTGDriver
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<ADTGVehicle> Car = nullptr;
+
+	int32 FromNode = 0;
+	int32 ToNode = 0;
+	bool bPolice = false;
+	double Patience = 1.0;
+};
+
+/** A walking NPC tied to a mind in the simulation. */
+USTRUCT()
+struct FDTGWalker
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<AActor> Actor = nullptr;
+
+	FString MindId;
+	FVector Target = FVector::ZeroVector;
+	double NextThink = 0.0;
+};
+
+UCLASS()
+class DUSTTOGLORY_API ADTGTrafficDirector : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ADTGTrafficDirector();
+
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+
+	/** Cars kept alive around the player. */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
+	int32 TrafficCars = 24;
+
+	/** Pedestrians kept alive around the player (scaled down while an outbreak keeps people home). */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
+	int32 Pedestrians = 40;
+
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
+	float SpawnRadiusM = 220.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
+	float DespawnRadiusM = 420.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
+	int32 MaxParkedCars = 14;
+
+private:
+	void UpdateTraffic(const FVector& Around, float DeltaSeconds);
+	void UpdatePolice(const FVector& Around);
+	void UpdatePedestrians(const FVector& Around, float DeltaSeconds);
+	void UpdateParkedCars(const FVector& Around);
+	void DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds);
+	ADTGVehicle* SpawnCar(const FVector& At, double YawDegrees, bool bPolice);
+	/** A node on the road graph near a point, preferring one the player can't already see. */
+	int32 PickNode(const FVector& Around, bool bFar) const;
+	FVector NodeLocation(int32 NodeId) const;
+
+	UPROPERTY()
+	TArray<FDTGDriver> Drivers;
+
+	UPROPERTY()
+	TArray<FDTGWalker> Walkers;
+
+	/** Cars sitting outside houses, each one an offer waiting to be made. */
+	UPROPERTY()
+	TArray<TObjectPtr<ADTGVehicle>> Parked;
+
+	UPROPERTY()
+	TObjectPtr<UDTGGameSubsystem> Game;
+
+	double NextSpawn = 0.0;
+};

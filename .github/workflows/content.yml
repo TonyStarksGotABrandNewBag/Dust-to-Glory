@@ -1,0 +1,16 @@
+# The game's content is plain JSON loaded at runtime, so a typo in it is a broken build to us.
+# This checks every data file parses before the core tests get a chance to load them.
+name: Content
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every data file
+        run: python3 Tests/check_content.py
