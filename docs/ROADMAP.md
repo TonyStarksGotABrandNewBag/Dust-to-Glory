@@ -93,4 +93,9 @@ In the order it's worth doing:
   not yet a shop with a back office.
 - **Animation is procedural.** Limbs swing at the right cadence; there is no skeletal animation, because
   there are no animation assets to play.
-- **Three states.** South Carolina, Florida and North Carolina.
+- **Three states.** South Carolina, Florida and North Carolina. A fourth is a day with an atlas.
+- **The engine layer has never been compiled.** It was written somewhere without Unreal installed. It
+  has been read closely six times and that found real things -- a player spawning at the world origin, a
+  camera inside the car, pedestrians that could not move, a car that could not be driven because its own
+  driver was blocking it, four compile errors -- but reading is not building. Expect to fix a few things
+  the first time it goes through a compiler. `Tests/check_headers.py` catches the one class a script can.
