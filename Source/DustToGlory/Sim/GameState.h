@@ -21,6 +21,7 @@
 #include "Sim/Politics.h"
 #include "Sim/Powers.h"
 #include "Sim/PrivateSales.h"
+#include "Sim/StatePlan.h"
 #include "Sim/Tuning.h"
 #include "Sim/Vehicles.h"
 #include "Sim/Wanted.h"
@@ -41,6 +42,8 @@ namespace dtg::sim
 		std::string Furniture;
 		std::string Companies;
 		std::string Laws;
+		/** The playable state (state.json). Empty: a single generated city. */
+		std::string State;
 	};
 
 	struct ContentReport
@@ -110,6 +113,9 @@ namespace dtg::sim
 		CareerBook Careers;
 		PowerRoster Powers;
 		CityPlan City;
+		/** Geography and terrain of the playable state (empty when the world is a single city). */
+		StatePlan Map;
+		bool bStateMap = false;
 		std::vector<LawDef> LawBook;
 		std::uint64_t WorldSeed = 1977;
 

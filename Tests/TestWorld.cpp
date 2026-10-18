@@ -151,7 +151,7 @@ DTG_TEST(MinistryIntegrityMatters)
 DTG_TEST(MinistryCanBeBroughtDown)
 {
 	GameState State = dtg_test::FreshGame(5);
-	EXPECT(State.FoundMinistry("Dust Valley Community Church").bOk);
+	EXPECT(State.FoundMinistry("Waccamaw Neck Fellowship").bOk);
 	for (int Index = 0; Index < 6; ++Index)
 	{
 		State.Telethon(); // shortcuts erode doctrine and integrity
@@ -510,7 +510,7 @@ DTG_TEST(GameStateSavesAndLoads)
 	}
 }
 
-DTG_TEST(AWeekInDustValley)
+DTG_TEST(AWeekInLongs)
 {
 	GameState State = dtg_test::FreshGame(31);
 	EXPECT(State.ActiveVehicle() != nullptr);

@@ -1,5 +1,8 @@
 #include "Sim/CityLayout.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace dtg::sim
 {
 	namespace detail_city
@@ -42,6 +45,9 @@ namespace dtg::sim
 			{LotRole::Hotel, "Hotel", 0xA59A8D},
 			{LotRole::Museum, "Museum", 0xE2DCCF},
 			{LotRole::Studio, "Studio", 0x5E5866},
+			{LotRole::ClassicDealer, "ClassicDealer", 0x8D6E63},
+			{LotRole::UsedCarLot, "UsedCarLot", 0xB0A47F},
+			{LotRole::Jail, "Jail", 0x8A8D91},
 		};
 
 		const RoleInfo& Info(LotRole Role)
@@ -75,7 +81,7 @@ namespace dtg::sim
 		const std::vector<std::string>& Companies()
 		{
 			static const std::vector<std::string> Names = {
-				"Brightwater Logistics", "Halcyon Health", "Northgate Transit", "Sable Media", "Keystone Utilities",
+				"Brightwater Logistics", "Tidewell Health", "Northgate Transit", "Sable Media", "Keystone Utilities",
 				"Summit Insurance", "Cardinal Freight", "Lakeside Partners", "Atlas Engineering", "Beacon Legal",
 				"Pioneer Analytics", "Harborview Capital", "Copperline Telecom", "Evergreen Architects"};
 			return Names;
@@ -120,6 +126,33 @@ namespace dtg::sim
 	const char* LotRoleName(LotRole Role)
 	{
 		return detail_city::Info(Role).Name;
+	}
+
+	const char* CityStyleName(CityStyle Style)
+	{
+		switch (Style)
+		{
+		case CityStyle::Hub: return "Hub";
+		case CityStyle::City: return "City";
+		case CityStyle::Town: return "Town";
+		case CityStyle::Rural: return "Rural";
+		case CityStyle::Beach: return "Beach";
+		case CityStyle::Count: break;
+		}
+		return "Town";
+	}
+
+	bool ParseCityStyle(const std::string& Text, CityStyle& Out)
+	{
+		for (int Index = 0; Index < static_cast<int>(CityStyle::Count); ++Index)
+		{
+			if (ToLowerAscii(CityStyleName(static_cast<CityStyle>(Index))) == ToLowerAscii(Text))
+			{
+				Out = static_cast<CityStyle>(Index);
+				return true;
+			}
+		}
+		return false;
 	}
 
 	bool ParseLotRole(const std::string& Text, LotRole& Out)
@@ -174,6 +207,9 @@ namespace dtg::sim
 		case LotRole::Hotel: return {"Rent a room", "Work a shift"};
 		case LotRole::Museum: return {"Explore exhibits"};
 		case LotRole::Studio: return {"Create IP", "Work a shift"};
+		case LotRole::ClassicDealer: return {"Browse classics", "Restoration shop", "Sell a car"};
+		case LotRole::UsedCarLot: return {"Browse used cars", "Sell a car"};
+		case LotRole::Jail: return {"Visit", "Court and records"};
 		case LotRole::Count: break;
 		}
 		return {"Visit"};
@@ -246,6 +282,107 @@ namespace dtg::sim
 		return Best;
 	}
 
+	const Intersection* CityPlan::FindIntersection(int Id) const
+	{
+		for (const Intersection& Node : Intersections)
+		{
+			if (Node.Id == Id)
+			{
+				return &Node;
+			}
+		}
+		return nullptr;
+	}
+
+	const CityInfo* CityPlan::CityAt(double X, double Y) const
+	{
+		for (const CityInfo& Info : Cities)
+		{
+			if (Info.Bounds.Contains(X, Y))
+			{
+				return &Info;
+			}
+		}
+		return nullptr;
+	}
+
+	const CityInfo* CityPlan::FindCity(const std::string& Name) const
+	{
+		for (const CityInfo& Info : Cities)
+		{
+			if (Info.Name == Name)
+			{
+				return &Info;
+			}
+		}
+		return nullptr;
+	}
+
+	void CityPlan::Merge(const CityPlan& Other)
+	{
+		const bool bEmpty = Buildings.empty() && Roads.empty();
+		Roads.insert(Roads.end(), Other.Roads.begin(), Other.Roads.end());
+		Intersections.insert(Intersections.end(), Other.Intersections.begin(), Other.Intersections.end());
+		Buildings.insert(Buildings.end(), Other.Buildings.begin(), Other.Buildings.end());
+		Blocks.insert(Blocks.end(), Other.Blocks.begin(), Other.Blocks.end());
+		Parks.insert(Parks.end(), Other.Parks.begin(), Other.Parks.end());
+		Venues.insert(Venues.end(), Other.Venues.begin(), Other.Venues.end());
+		Highways.insert(Highways.end(), Other.Highways.begin(), Other.Highways.end());
+		Cities.insert(Cities.end(), Other.Cities.begin(), Other.Cities.end());
+		if (bEmpty)
+		{
+			Bounds = Other.Bounds;
+		}
+		else
+		{
+			Bounds.MinX = std::min(Bounds.MinX, Other.Bounds.MinX);
+			Bounds.MinY = std::min(Bounds.MinY, Other.Bounds.MinY);
+			Bounds.MaxX = std::max(Bounds.MaxX, Other.Bounds.MaxX);
+			Bounds.MaxY = std::max(Bounds.MaxY, Other.Bounds.MaxY);
+		}
+	}
+
+	double HighwayPlan::LengthM() const
+	{
+		double Total = 0.0;
+		for (std::size_t Index = 0; Index + 1 < Points.size(); ++Index)
+		{
+			Total += std::hypot(Points[Index + 1][0] - Points[Index][0], Points[Index + 1][1] - Points[Index][1]);
+		}
+		return Total;
+	}
+
+	std::array<double, 3> HighwayPlan::At(double Distance) const
+	{
+		std::array<double, 3> Out{0.0, 0.0, 0.0};
+		if (Points.empty())
+		{
+			return Out;
+		}
+		Out = {Points.front()[0], Points.front()[1], 0.0};
+		double Walked = 0.0;
+		for (std::size_t Index = 0; Index + 1 < Points.size(); ++Index)
+		{
+			const double Length = std::hypot(Points[Index + 1][0] - Points[Index][0], Points[Index + 1][1] - Points[Index][1]);
+			const double T = Length > 1e-9 ? Clamp((Distance - Walked) / Length, 0.0, 1.0) : 1.0;
+			Out[0] = Points[Index][0] + (Points[Index + 1][0] - Points[Index][0]) * T;
+			Out[1] = Points[Index][1] + (Points[Index + 1][1] - Points[Index][1]) * T;
+			Walked += Length;
+			if (Walked >= Distance)
+			{
+				break;
+			}
+		}
+		if (!DeckM.empty())
+		{
+			const double Slot = Clamp(Distance / DeckStepM, 0.0, static_cast<double>(DeckM.size() - 1));
+			const std::size_t Low = static_cast<std::size_t>(Slot);
+			const std::size_t High = std::min(Low + 1, DeckM.size() - 1);
+			Out[2] = DeckM[Low] + (DeckM[High] - DeckM[Low]) * (Slot - static_cast<double>(Low));
+		}
+		return Out;
+	}
+
 	CityPlan GenerateCity(const CityConfig& InConfig)
 	{
 		using namespace detail_city;
@@ -254,25 +391,27 @@ namespace dtg::sim
 		const CityConfig& Config = Plan.Config;
 		Rng Random(Config.Seed);
 
-		const int Grid = std::max(3, Config.GridSize);
+		const int Grid = std::max(2, Config.GridSize);
 		const double Road = Config.RoadWidth;
 		const double Block = Config.BlockSize;
 		const double Pitch = Block + Road;
 		const double Span = Grid * Pitch + Road;
-		const double Origin = -0.5 * Span;
-		Plan.Bounds = Rect{Origin, Origin, Origin + Span, Origin + Span};
+		const double OriginX = Config.OriginX - 0.5 * Span;
+		const double OriginY = Config.OriginY - 0.5 * Span;
+		Plan.Bounds = Rect{OriginX, OriginY, OriginX + Span, OriginY + Span};
 
 		// Roads and intersections.
 		for (int K = 0; K <= Grid; ++K)
 		{
-			const double Line = Origin + K * Pitch;
+			const double LineX = OriginX + K * Pitch;
+			const double LineY = OriginY + K * Pitch;
 			RoadPlan Vertical;
-			Vertical.Area = Rect{Line, Origin, Line + Road, Origin + Span};
+			Vertical.Area = Rect{LineX, OriginY, LineX + Road, OriginY + Span};
 			Vertical.bHorizontal = false;
 			Vertical.Name = StreetNames()[static_cast<std::size_t>(K) % StreetNames().size()];
 			Plan.Roads.push_back(Vertical);
 			RoadPlan Horizontal;
-			Horizontal.Area = Rect{Origin, Line, Origin + Span, Line + Road};
+			Horizontal.Area = Rect{OriginX, LineY, OriginX + Span, LineY + Road};
 			Horizontal.bHorizontal = true;
 			Horizontal.Name = AvenueNames()[static_cast<std::size_t>(K) % AvenueNames().size()];
 			Plan.Roads.push_back(Horizontal);
@@ -282,9 +421,9 @@ namespace dtg::sim
 			for (int K = 0; K <= Grid; ++K)
 			{
 				Intersection Node;
-				Node.Id = L * (Grid + 1) + K;
-				Node.X = Origin + K * Pitch + 0.5 * Road;
-				Node.Y = Origin + L * Pitch + 0.5 * Road;
+				Node.Id = Config.FirstIntersectionId + L * (Grid + 1) + K;
+				Node.X = OriginX + K * Pitch + 0.5 * Road;
+				Node.Y = OriginY + L * Pitch + 0.5 * Road;
 				if (K > 0) Node.Links.push_back(Node.Id - 1);
 				if (K < Grid) Node.Links.push_back(Node.Id + 1);
 				if (L > 0) Node.Links.push_back(Node.Id - (Grid + 1));
@@ -295,16 +434,33 @@ namespace dtg::sim
 
 		// Parks: a few blocks of open green space away from downtown and the motor mile.
 		const double Center = 0.5 * (Grid - 1);
-		auto ZoneOf = [Center](int I, int J)
+		const CityStyle Style = Config.Style;
+		auto ZoneOf = [Center, Style](int I, int J)
 		{
 			const double Distance = std::max(std::fabs(I - Center), std::fabs(J - Center));
+			switch (Style)
+			{
+			case CityStyle::Rural: return Zone::Outer;
+			case CityStyle::Town: return Distance <= 0.7 ? Zone::Mid : Zone::Outer;
+			case CityStyle::City: return Distance <= 0.5 ? Zone::Downtown : (Distance <= 1.5 ? Zone::Mid : Zone::Outer);
+			default: break;
+			}
 			if (Distance <= 1.0) return Zone::Downtown;
 			if (Distance <= 2.5) return Zone::Mid;
 			return Zone::Outer;
 		};
 		std::vector<std::pair<int, int>> ParkBlocks;
 		int ParkAttempts = 0;
-		while (ParkBlocks.size() < 3 && ParkAttempts < 200)
+		std::size_t ParkTarget = 3;
+		switch (Style)
+		{
+		case CityStyle::City: ParkTarget = 2; break;
+		case CityStyle::Town:
+		case CityStyle::Beach: ParkTarget = 1; break;
+		case CityStyle::Rural: ParkTarget = 0; break;
+		default: break;
+		}
+		while (ParkBlocks.size() < ParkTarget && ParkAttempts < 200)
 		{
 			++ParkAttempts;
 			const int I = Random.RangeInt(0, Grid - 1);
@@ -333,8 +489,8 @@ namespace dtg::sim
 		{
 			for (int I = 0; I < Grid; ++I)
 			{
-				const double BlockMinX = Origin + I * Pitch + Road;
-				const double BlockMinY = Origin + J * Pitch + Road;
+				const double BlockMinX = OriginX + I * Pitch + Road;
+				const double BlockMinY = OriginY + J * Pitch + Road;
 				Plan.Blocks.push_back(Rect{BlockMinX, BlockMinY, BlockMinX + Block, BlockMinY + Block});
 				bool bPark = false;
 				for (const auto& Park : ParkBlocks)
@@ -359,14 +515,14 @@ namespace dtg::sim
 						Entry.BlockJ = J;
 						Entry.SubA = A;
 						Entry.SubB = B;
-						Entry.bMotorMile = J == 0 && I >= 1 && I <= Grid - 2;
+						Entry.bMotorMile = Config.bHub && J == 0 && I >= 1 && I <= Grid - 2;
 						Lots.push_back(Entry);
 					}
 				}
 			}
 		}
 
-		int NextId = 1;
+		int NextId = Config.FirstBuildingId;
 		auto MakeBuilding = [&](Lot& Where, LotRole Role, const std::string& Name, const std::string& Param)
 		{
 			Where.bTaken = true;
@@ -424,6 +580,10 @@ namespace dtg::sim
 			const int AvenueIndex = Where.SubB == 0 ? Where.BlockJ : Where.BlockJ + 1;
 			const int Number = 100 * (Where.BlockI + 1) + 20 * Where.SubA + 2 * (Where.SubB + 1);
 			Building.Address = std::to_string(Number) + " " + AvenueNames()[static_cast<std::size_t>(AvenueIndex) % AvenueNames().size()];
+			if (!Config.Name.empty())
+			{
+				Building.Address += ", " + Config.Name;
+			}
 
 			if (IsResidential(Role))
 			{
@@ -469,6 +629,7 @@ namespace dtg::sim
 		};
 
 		// 1. Motor Mile: a showroom for every brand along the south avenue.
+		if (Config.bHub)
 		{
 			std::vector<Lot*> Mile;
 			for (Lot& Entry : Lots)
@@ -497,12 +658,12 @@ namespace dtg::sim
 		// 2. Civic and commercial landmarks.
 		const Required Landmarks[] = {
 			{LotRole::CareerCenter, Zone::Downtown, "City Career Center"},
-			{LotRole::Bank, Zone::Downtown, "Meridian Savings Bank"},
+			{LotRole::Bank, Zone::Downtown, "Coastline Savings Bank"},
 			{LotRole::Courthouse, Zone::Downtown, "County Courthouse"},
-			{LotRole::Hotel, Zone::Downtown, "Grand Meridian Hotel"},
+			{LotRole::Hotel, Zone::Downtown, "Ocean Crest Hotel"},
 			{LotRole::TechCampus, Zone::Mid, "Orchard Robotics Campus"},
 			{LotRole::Hospital, Zone::Mid, "Mercy General Hospital"},
-			{LotRole::University, Zone::Mid, "Dust Valley University"},
+			{LotRole::University, Zone::Mid, "Palmetto Coast University"},
 			{LotRole::Library, Zone::Mid, "City Library"},
 			{LotRole::PoliceStation, Zone::Mid, "Central Police Precinct"},
 			{LotRole::FireStation, Zone::Mid, "Fire Station 7"},
@@ -520,17 +681,29 @@ namespace dtg::sim
 			{LotRole::GardenCenter, Zone::Outer, "Greenleaf Garden Center"},
 			{LotRole::Museum, Zone::Downtown, "City Museum of Science"},
 			{LotRole::Studio, Zone::Mid, "Soundwave Studios"},
+			{LotRole::ClassicDealer, Zone::Mid, "Heritage Motor Classics"},
+			{LotRole::UsedCarLot, Zone::Outer, "Second Wind Used Cars"},
 		};
-		for (const Required& Entry : Landmarks)
+		if (Config.bHub)
 		{
-			if (Lot* Where = FindLot(Entry.Preferred, false))
+			for (const Required& Entry : Landmarks)
 			{
-				MakeBuilding(*Where, Entry.Role, Entry.Name, std::string());
+				if (Lot* Where = FindLot(Entry.Preferred, false))
+				{
+					MakeBuilding(*Where, Entry.Role, Entry.Name, std::string());
+				}
+			}
+		}
+		for (const auto& Entry : Config.Landmarks)
+		{
+			if (Lot* Where = FindLot(Zone::Mid, false))
+			{
+				MakeBuilding(*Where, Entry.first, Entry.second, std::string());
 			}
 		}
 
 		// 3. Any workplace the career data needs that is still missing.
-		for (const std::string& RoleName : Config.RequiredWorkplaces)
+		for (const std::string& RoleName : Config.bHub ? Config.RequiredWorkplaces : std::vector<std::string>())
 		{
 			LotRole Role = LotRole::Office;
 			if (ParseLotRole(RoleName, Role) && !Plan.FirstWithRole(Role))
@@ -543,7 +716,7 @@ namespace dtg::sim
 		}
 
 		// 4. Furniture stores.
-		for (const std::string& Store : Config.FurnitureStores)
+		for (const std::string& Store : Config.bHub ? Config.FurnitureStores : std::vector<std::string>())
 		{
 			if (Lot* Where = FindLot(Zone::Mid, false))
 			{
@@ -562,7 +735,19 @@ namespace dtg::sim
 			}
 			const double Roll = Random.NextDouble();
 			LotRole Role = LotRole::Home;
-			if (Entry.bMotorMile)
+			if (Style == CityStyle::Rural)
+			{
+				Role = Roll < 0.75 ? LotRole::Home : (Roll < 0.87 ? LotRole::Shop : (Roll < 0.93 ? LotRole::Diner : LotRole::Church));
+			}
+			else if (Style == CityStyle::Beach && Entry.Where != Zone::Outer)
+			{
+				Role = Roll < 0.3 ? LotRole::Hotel : (Roll < 0.5 ? LotRole::Shop : (Roll < 0.65 ? LotRole::Diner : (Roll < 0.9 ? LotRole::Apartment : LotRole::Home)));
+			}
+			else if (Style == CityStyle::Town && Entry.Where == Zone::Outer)
+			{
+				Role = Roll < 0.6 ? LotRole::Home : (Roll < 0.7 ? LotRole::Apartment : (Roll < 0.85 ? LotRole::Shop : (Roll < 0.93 ? LotRole::Diner : LotRole::Church)));
+			}
+			else if (Entry.bMotorMile)
 			{
 				Role = Roll < 0.5 ? LotRole::Shop : LotRole::Office;
 			}
@@ -583,7 +768,14 @@ namespace dtg::sim
 			{
 			case LotRole::Office: Name = Companies()[CompanyIndex++ % Companies().size()] + (Entry.Where == Zone::Downtown ? " Tower" : " Offices"); break;
 			case LotRole::Shop: Name = ShopNames()[ShopIndex++ % ShopNames().size()]; break;
-			case LotRole::Hotel: Name = "Harborlight Inn"; break;
+			case LotRole::Hotel:
+			{
+				static const char* const Inns[] = {"Harborlight Inn", "Sea Breeze Resort", "Sandpiper Suites", "Driftwood Motel", "Palm Court Resort",
+					"Tidewater Inn", "Seaspray Tower", "Dune Crest Hotel"};
+				Name = Inns[Random.Index(8)];
+				break;
+			}
+			case LotRole::Church: Name = (Config.Name.empty() ? std::string("Community") : Config.Name) + " Community Church"; break;
 			case LotRole::Diner: Name = "Neighborhood Diner"; break;
 			case LotRole::Apartment: Name = std::string("The ") + AvenueNames()[Random.Index(AvenueNames().size())] + " Residences"; break;
 			default: break;
@@ -591,13 +783,20 @@ namespace dtg::sim
 			MakeBuilding(Entry, Role, Name, std::string());
 		}
 
-		// Starter apartment: the mid-zone apartment nearest the city centre.
+		// Starter home: the apartment nearest the city centre (a small house in towns without apartments).
 		double BestDistance = 1e18;
+		bool bAnyApartment = false;
 		for (const BuildingPlan& Building : Plan.Buildings)
 		{
-			if (Building.Role == LotRole::Apartment)
+			bAnyApartment = bAnyApartment || Building.Role == LotRole::Apartment;
+		}
+		for (const BuildingPlan& Building : Plan.Buildings)
+		{
+			if (Building.Role == (bAnyApartment ? LotRole::Apartment : LotRole::Home))
 			{
-				const double Distance = Building.DoorX * Building.DoorX + Building.DoorY * Building.DoorY;
+				const double Dx = Building.DoorX - Config.OriginX;
+				const double Dy = Building.DoorY - Config.OriginY;
+				const double Distance = Dx * Dx + Dy * Dy;
 				if (Distance < BestDistance)
 				{
 					BestDistance = Distance;
@@ -611,12 +810,16 @@ namespace dtg::sim
 			Plan.SpawnY = Starter->DoorY + (Starter->DoorSide == 0 ? -3.0 : 3.0);
 		}
 
+		if (!Config.bVenues)
+		{
+			return Plan;
+		}
 		// Venues outside the grid, each with a connector road.
-		const double MidRoadY = Origin + (Grid / 2) * Pitch;
+		const double MidRoadY = OriginY + (Grid / 2) * Pitch;
 		{
 			VenuePlan Drag;
 			Drag.Kind = EventKind::DragRace;
-			Drag.Name = "Dust Valley Dragway";
+			Drag.Name = "County Line Dragway";
 			const double X0 = Plan.Bounds.MaxX + 120.0;
 			Drag.Area = Rect{X0, MidRoadY - 20.0, X0 + 720.0, MidRoadY + Road + 20.0};
 			const double LaneY = MidRoadY + 0.5 * Road;
@@ -700,5 +903,74 @@ namespace dtg::sim
 			Plan.Roads.push_back(Connector);
 		}
 		return Plan;
+	}
+
+	VenuePlan MakeVenue(EventKind Kind, const std::string& Name, double Cx, double Cy)
+	{
+		VenuePlan Venue;
+		Venue.Kind = Kind;
+		Venue.Name = Name;
+		switch (Kind)
+		{
+		case EventKind::DragRace:
+		{
+			const double X0 = Cx - 360.0;
+			Venue.Area = Rect{X0, Cy - 29.0, X0 + 720.0, Cy + 29.0};
+			Venue.Path = {{X0 + 60.0, Cy}, {X0 + 60.0 + 402.336, Cy}, {X0 + 700.0, Cy}};
+			Venue.TrackWidthM = 24.0;
+			break;
+		}
+		case EventKind::DemolitionDerby:
+			Venue.Area = Rect{Cx - 55.0, Cy - 38.0, Cx + 55.0, Cy + 38.0};
+			Venue.Path = {{Cx, Cy}};
+			break;
+		case EventKind::MonsterJam:
+			Venue.Area = Rect{Cx - 75.0, Cy - 48.0, Cx + 75.0, Cy + 48.0};
+			Venue.Path = {{Cx - 50.0, Cy}, {Cx, Cy}, {Cx + 50.0, Cy}};
+			break;
+		case EventKind::Formula:
+		{
+			const double HalfW = 340.0;
+			const double HalfH = 200.0;
+			const double Radius = 70.0;
+			Venue.Area = Rect{Cx - HalfW - 30.0, Cy - HalfH - 30.0, Cx + HalfW + 30.0, Cy + HalfH + 30.0};
+			const double Corners[4][3] = {
+				{Cx + HalfW - Radius, Cy - HalfH + Radius, -90.0},
+				{Cx + HalfW - Radius, Cy + HalfH - Radius, 0.0},
+				{Cx - HalfW + Radius, Cy + HalfH - Radius, 90.0},
+				{Cx - HalfW + Radius, Cy - HalfH + Radius, 180.0}};
+			Venue.Path.push_back({Cx, Cy - HalfH});
+			for (int Corner = 0; Corner < 4; ++Corner)
+			{
+				for (int Step = 0; Step <= 4; ++Step)
+				{
+					const double Angle = (Corners[Corner][2] + 22.5 * Step) * 3.14159265358979 / 180.0;
+					Venue.Path.push_back({Corners[Corner][0] + Radius * std::cos(Angle), Corners[Corner][1] + Radius * std::sin(Angle)});
+				}
+				if (Corner == 1)
+				{
+					Venue.Path.push_back({Cx + 60.0, Cy + HalfH});
+					Venue.Path.push_back({Cx + 20.0, Cy + HalfH - 25.0});
+					Venue.Path.push_back({Cx - 20.0, Cy + HalfH - 25.0});
+					Venue.Path.push_back({Cx - 60.0, Cy + HalfH});
+				}
+			}
+			Venue.TrackWidthM = 14.0;
+			break;
+		}
+		case EventKind::Count:
+			break;
+		}
+		return Venue;
+	}
+
+	std::array<double, 2> VenueEntrance(const VenuePlan& Venue)
+	{
+		switch (Venue.Kind)
+		{
+		case EventKind::DragRace: return {Venue.Area.MinX, Venue.Area.CenterY()};
+		case EventKind::Formula: return Venue.Path.empty() ? std::array<double, 2>{Venue.Area.CenterX(), Venue.Area.MinY} : Venue.Path.front();
+		default: return {Venue.Area.CenterX(), Venue.Area.MinY};
+		}
 	}
 }

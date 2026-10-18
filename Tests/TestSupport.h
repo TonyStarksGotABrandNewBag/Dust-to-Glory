@@ -31,6 +31,7 @@ namespace dtg_test
 		Files.Furniture = ReadDataFile("furniture.json");
 		Files.Companies = ReadDataFile("companies.json");
 		Files.Laws = ReadDataFile("laws.json");
+		Files.State = ReadDataFile("state.json");
 		return Files;
 	}
 

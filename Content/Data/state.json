@@ -1,0 +1,97 @@
+// The playable state. Real geography, compressed: "scale" real metres per game metre between places, while
+// buildings and streets stay full size (as open-world games do). Coordinates are real longitude/latitude.
+// "verticalScale" exaggerates terrain height so the upstate still feels like mountains at this scale.
+// Cities: style Hub | City | Town | Rural | Beach; grid = blocks per side. The hub hosts every brand showroom
+// and the main landmarks; "start": true is where a new game begins.
+// Highways list cities and/or [lon, lat] waypoints in order. Lakes: radiusKm is real kilometres.
+// Venue kinds: DragRace, DemolitionDerby, MonsterJam, Formula.
+// Places are real; every business, school, team and person in them is fictional.
+{
+  "name": "South Carolina",
+  "abbreviation": "SC",
+  "scale": 25.0,
+  "verticalScale": 3.0,
+  "origin": [-78.725, 33.937],
+  "outline": [
+    [-83.108, 35.000], [-82.780, 35.085], [-82.390, 35.210], [-81.970, 35.190], [-81.040, 35.150], [-80.930, 35.100],
+    [-80.780, 34.820], [-80.320, 34.814], [-79.680, 34.805], [-78.540, 33.851],
+    [-78.780, 33.750], [-78.890, 33.680], [-79.100, 33.470], [-79.200, 33.250], [-79.380, 33.000], [-79.730, 32.820],
+    [-79.950, 32.700], [-80.200, 32.550], [-80.470, 32.350], [-80.680, 32.200], [-80.870, 32.030],
+    [-81.150, 32.250], [-81.420, 32.700], [-81.600, 33.100], [-81.910, 33.450], [-82.230, 33.700], [-82.600, 34.000],
+    [-82.850, 34.400], [-83.100, 34.650], [-83.350, 34.720]
+  ],
+  "coast": [9, 20],
+  "cities": [
+    { "name": "Longs", "lon": -78.725, "lat": 33.937, "style": "Rural", "grid": 2, "start": true,
+      "landmarks": [["Church", "Longs Community Church"], ["Shop", "Longs Crossroads Grocery"], ["Diner", "SC-9 Diner"]] },
+    { "name": "Little River", "lon": -78.614, "lat": 33.873, "style": "Rural", "grid": 2,
+      "landmarks": [["Diner", "Harbor Seafood Shack"]] },
+    { "name": "North Myrtle Beach", "lon": -78.680, "lat": 33.816, "style": "Beach", "grid": 3 },
+    { "name": "Myrtle Beach", "lon": -78.887, "lat": 33.689, "style": "Hub", "grid": 7 },
+    { "name": "Conway", "lon": -79.048, "lat": 33.836, "style": "Town", "grid": 3,
+      "landmarks": [["Jail", "County Detention Center"], ["Courthouse", "Conway Courthouse"], ["UsedCarLot", "Riverside Auto Sales"]] },
+    { "name": "Loris", "lon": -78.890, "lat": 34.056, "style": "Rural", "grid": 2 },
+    { "name": "Georgetown", "lon": -79.295, "lat": 33.377, "style": "Town", "grid": 3 },
+    { "name": "Charleston", "lon": -79.931, "lat": 32.776, "style": "City", "grid": 6,
+      "landmarks": [["Hospital", "Harborview Medical Center"], ["Museum", "Lowcountry History Museum"], ["University", "Battery Point College"]] },
+    { "name": "Summerville", "lon": -80.176, "lat": 33.018, "style": "Town", "grid": 3 },
+    { "name": "Columbia", "lon": -81.034, "lat": 34.000, "style": "City", "grid": 6,
+      "landmarks": [["Courthouse", "State House"], ["University", "Midlands State University"], ["Hospital", "Capital City Hospital"]] },
+    { "name": "Greenville", "lon": -82.394, "lat": 34.853, "style": "City", "grid": 5,
+      "landmarks": [["TechCampus", "Upstate Innovation Park"], ["Hospital", "Reedy River Medical"]] },
+    { "name": "Spartanburg", "lon": -81.932, "lat": 34.950, "style": "Town", "grid": 4 },
+    { "name": "Rock Hill", "lon": -81.025, "lat": 34.925, "style": "Town", "grid": 4 },
+    { "name": "Florence", "lon": -79.763, "lat": 34.195, "style": "Town", "grid": 4 },
+    { "name": "Sumter", "lon": -80.341, "lat": 33.920, "style": "Town", "grid": 3 },
+    { "name": "Orangeburg", "lon": -80.856, "lat": 33.492, "style": "Town", "grid": 3 },
+    { "name": "Aiken", "lon": -81.720, "lat": 33.561, "style": "Town", "grid": 3 },
+    { "name": "Anderson", "lon": -82.650, "lat": 34.503, "style": "Town", "grid": 3 },
+    { "name": "Clemson", "lon": -82.837, "lat": 34.683, "style": "Town", "grid": 3,
+      "landmarks": [["University", "Foothills University"]] },
+    { "name": "Beaufort", "lon": -80.670, "lat": 32.432, "style": "Town", "grid": 3 },
+    { "name": "Hilton Head Island", "lon": -80.752, "lat": 32.216, "style": "Beach", "grid": 4 }
+  ],
+  "highways": [
+    { "name": "I-95", "interstate": true, "route": [[-81.100, 32.300], [-80.850, 32.550], [-80.650, 32.900], [-80.480, 33.380], [-80.200, 33.700], "Florence", [-79.400, 34.420]] },
+    { "name": "I-26", "interstate": true, "route": ["Charleston", "Summerville", [-80.550, 33.300], "Orangeburg", "Columbia", [-81.550, 34.350], "Spartanburg", [-82.200, 35.180]] },
+    { "name": "I-20", "interstate": true, "route": [[-81.960, 33.480], "Aiken", "Columbia", [-80.600, 34.250], "Florence"] },
+    { "name": "I-85", "interstate": true, "route": [[-83.050, 34.480], "Anderson", "Greenville", "Spartanburg", [-81.400, 35.080], [-81.150, 35.170]] },
+    { "name": "I-77", "interstate": true, "route": ["Columbia", [-80.950, 34.450], "Rock Hill", [-80.950, 35.150]] },
+    { "name": "US-17", "route": ["Hilton Head Island", [-80.850, 32.320], "Beaufort", [-80.600, 32.620], [-80.400, 32.750], "Charleston", [-79.550, 33.050], "Georgetown", [-79.100, 33.480], "Myrtle Beach", "North Myrtle Beach", "Little River", [-78.540, 33.860]] },
+    { "name": "US-501", "route": ["Myrtle Beach", "Conway", [-79.360, 34.180], "Florence"] },
+    { "name": "SC-9", "route": ["North Myrtle Beach", "Longs", "Loris", [-79.200, 34.350], [-79.400, 34.420]] },
+    { "name": "SC-31", "route": ["Myrtle Beach", [-78.820, 33.800], "Longs"] },
+    { "name": "SC-905", "route": ["Longs", "Conway"] },
+    { "name": "SC-22", "route": ["Conway", [-78.850, 33.800]] },
+    { "name": "US-378", "route": ["Columbia", "Sumter", [-80.200, 33.700]] },
+    { "name": "US-123", "route": ["Clemson", [-82.650, 34.750], "Greenville"] }
+  ],
+  "rivers": [
+    { "name": "Waccamaw River", "width": 8, "points": [[-78.800, 34.200], [-78.780, 34.050], [-78.810, 33.960], [-78.950, 33.860], [-79.060, 33.820], [-79.100, 33.700], [-79.150, 33.500], [-79.230, 33.370]] },
+    { "name": "Great Pee Dee River", "width": 10, "points": [[-79.800, 34.800], [-79.700, 34.450], [-79.550, 34.100], [-79.350, 33.750], [-79.250, 33.400]] },
+    { "name": "Santee River", "width": 10, "points": [[-80.400, 33.520], [-79.850, 33.250], [-79.450, 33.100]] },
+    { "name": "Congaree River", "width": 9, "points": [[-81.050, 33.980], [-80.650, 33.750], [-80.450, 33.550]] },
+    { "name": "Broad River", "width": 8, "points": [[-81.700, 35.150], [-81.450, 34.700], [-81.100, 34.200], [-81.050, 33.990]] },
+    { "name": "Saluda River", "width": 8, "points": [[-82.450, 34.950], [-82.000, 34.400], [-81.400, 34.080], [-81.070, 34.000]] },
+    { "name": "Cooper River", "width": 9, "points": [[-80.050, 33.250], [-79.930, 32.850]] },
+    { "name": "Ashley River", "width": 7, "points": [[-80.250, 33.050], [-79.970, 32.790]] },
+    { "name": "Edisto River", "width": 7, "points": [[-81.100, 33.450], [-80.750, 33.050], [-80.400, 32.550]] }
+  ],
+  "lakes": [
+    { "name": "Lake Murray", "lon": -81.350, "lat": 34.070, "radiusKm": 6.0 },
+    { "name": "Lake Marion", "lon": -80.350, "lat": 33.500, "radiusKm": 8.0 },
+    { "name": "Lake Moultrie", "lon": -80.050, "lat": 33.280, "radiusKm": 6.0 },
+    { "name": "Lake Hartwell", "lon": -82.850, "lat": 34.450, "radiusKm": 7.0 },
+    { "name": "Lake Keowee", "lon": -82.920, "lat": 34.800, "radiusKm": 4.0 },
+    { "name": "Lake Greenwood", "lon": -82.080, "lat": 34.200, "radiusKm": 4.0 },
+    { "name": "Lake Wylie", "lon": -81.050, "lat": 35.060, "radiusKm": 3.0 },
+    { "name": "Lake Jocassee", "lon": -82.950, "lat": 34.980, "radiusKm": 3.0 }
+  ],
+  "mountains": { "outline": [[-83.108, 35.000], [-82.390, 35.210], [-82.200, 35.000], [-82.550, 34.850], [-83.000, 34.780], [-83.350, 34.720]], "peakMeters": 1085 },
+  "venues": [
+    { "kind": "DragRace", "name": "Strand Raceway Dragstrip", "lon": -79.000, "lat": 33.760 },
+    { "kind": "DemolitionDerby", "name": "Coastal Fairgrounds Arena", "lon": -78.960, "lat": 33.990 },
+    { "kind": "MonsterJam", "name": "Riverfront Stadium", "lon": -79.120, "lat": 33.900 },
+    { "kind": "Formula", "name": "Lowcountry Grand Prix Circuit", "lon": -79.420, "lat": 34.020 }
+  ]
+}

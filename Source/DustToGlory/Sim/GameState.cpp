@@ -610,9 +610,14 @@ namespace dtg::sim
 			{&Files.Furniture, "furniture.json", {}},
 			{&Files.Companies, "companies.json", {}},
 			{&Files.Laws, "laws.json", {}},
+			{&Files.State, "state.json", {}},
 		};
 		for (Source& Entry : Sources)
 		{
+			if (Entry.Text == &Files.State && Files.State.empty())
+			{
+				continue; // optional: no state map means a single city
+			}
 			JsonParseResult Result = ParseJson(*Entry.Text);
 			if (!Result.bOk)
 			{
@@ -675,7 +680,22 @@ namespace dtg::sim
 		{
 			Config.RequiredWorkplaces.push_back(Def.Workplace);
 		}
-		City = GenerateCity(Config);
+		Map = StatePlan();
+		bStateMap = !Files.State.empty();
+		if (bStateMap)
+		{
+			std::vector<std::string> MapErrors;
+			Map.Load(Sources[8].Parsed, MapErrors);
+			for (const std::string& Error : MapErrors)
+			{
+				Report.Errors.push_back(Error);
+			}
+			City = Map.BuildWorld(Config);
+		}
+		else
+		{
+			City = GenerateCity(Config);
+		}
 		for (const BuildingPlan& Building : City.Buildings)
 		{
 			if (IsResidential(Building.Role))
@@ -870,7 +890,9 @@ namespace dtg::sim
 		}
 		RefreshUsedCars();
 		RefreshDealerStock();
-		Notify("Welcome to Dust Valley, " + PlayerName + ". Choose your powers, find a job, and make something of yourself.");
+		const CityInfo* Home = City.CityAt(City.SpawnX, City.SpawnY);
+		const std::string Town = Home ? Home->Name + (bStateMap && !Map.Abbreviation.empty() ? ", " + Map.Abbreviation : std::string()) : std::string("town");
+		Notify("Welcome to " + Town + ", " + PlayerName + ". Choose your powers, find a job, and make something of yourself.");
 	}
 
 	// ==================================================================================== Offers on parked cars

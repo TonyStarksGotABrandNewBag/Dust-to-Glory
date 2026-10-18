@@ -45,6 +45,9 @@ namespace dtg::sim
 		Hotel,
 		Museum,
 		Studio,
+		ClassicDealer,
+		UsedCarLot,
+		Jail,
 		Count
 	};
 
@@ -72,6 +75,19 @@ namespace dtg::sim
 		}
 		bool Contains(double X, double Y) const { return X >= MinX && X <= MaxX && Y >= MinY && Y <= MaxY; }
 	};
+
+	/** How a city is laid out and what fills its lots. */
+	enum class CityStyle : int
+	{
+		Hub,     // the big regional city: towers, every landmark, the motor mile
+		City,
+		Town,
+		Rural,   // a crossroads community: homes, a store, a church
+		Beach,   // resort strip: hotels, shops, diners
+		Count
+	};
+	const char* CityStyleName(CityStyle Style);
+	bool ParseCityStyle(const std::string& Text, CityStyle& Out);
 
 	struct BuildingPlan
 	{
@@ -115,8 +131,43 @@ namespace dtg::sim
 		std::string Name;
 	};
 
+	/** A road between cities: a polyline (interstates, US and state routes, venue connectors). */
+	struct HighwayPlan
+	{
+		std::string Name;
+		std::vector<std::array<double, 2>> Points;
+		double WidthM = 16.0;
+		bool bInterstate = false;
+		/** Road surface height every DeckStepM metres along the polyline (bridges and their ramps included). */
+		std::vector<double> DeckM;
+		double DeckStepM = 5.0;
+		double LengthM() const;
+		/** Point and deck height at a distance along the road. */
+		std::array<double, 3> At(double Distance) const;
+	};
+
+	/** A settlement in a multi-city world. */
+	struct CityInfo
+	{
+		std::string Name;
+		CityStyle Style = CityStyle::Town;
+		Rect Bounds;
+		int FirstBuildingId = 0;
+		int LastBuildingId = 0;
+		bool bStart = false;
+	};
+
 	struct CityConfig
 	{
+		std::string Name;
+		double OriginX = 0.0;        // centre of the city in world metres
+		double OriginY = 0.0;
+		CityStyle Style = CityStyle::Hub;
+		bool bHub = true;            // motor mile, all landmarks, required workplaces, furniture stores
+		bool bVenues = true;         // event venues around the edge (single-city worlds)
+		std::vector<std::pair<LotRole, std::string>> Landmarks; // extra landmarks for this city
+		int FirstBuildingId = 1;
+		int FirstIntersectionId = 0;
 		int GridSize = 8;
 		double BlockSize = 110.0;
 		double RoadWidth = 18.0;
@@ -134,6 +185,8 @@ namespace dtg::sim
 		std::vector<RoadPlan> Roads;
 		std::vector<Intersection> Intersections;
 		std::vector<BuildingPlan> Buildings;
+		std::vector<HighwayPlan> Highways;
+		std::vector<CityInfo> Cities;  // empty for a single-city world
 		std::vector<Rect> Blocks;      // every city block between the roads (sidewalk slabs), parks included
 		std::vector<Rect> Parks;
 		std::vector<VenuePlan> Venues;
@@ -148,7 +201,17 @@ namespace dtg::sim
 		const VenuePlan* FindVenue(EventKind Kind) const;
 		/** Nearest intersection to a point (for traffic and pedestrians). */
 		int NearestIntersection(double X, double Y) const;
+		const Intersection* FindIntersection(int Id) const;
+		/** City containing a point ("" outside every city). */
+		const CityInfo* CityAt(double X, double Y) const;
+		const CityInfo* FindCity(const std::string& Name) const;
+		/** Appends another city's plan (ids must already be unique). */
+		void Merge(const CityPlan& Other);
 	};
 
 	CityPlan GenerateCity(const CityConfig& Config);
+	/** An event venue laid out around a centre point (drag strip, derby arena, monster stadium, road course). */
+	VenuePlan MakeVenue(EventKind Kind, const std::string& Name, double CenterX, double CenterY);
+	/** Where cars drive in from (the end a connector road joins). */
+	std::array<double, 2> VenueEntrance(const VenuePlan& Venue);
 }

@@ -1,0 +1,280 @@
+// The South Carolina state map: real places in the right order, a road network that reaches every town,
+// and terrain that behaves (sea offshore, mountains upstate, level towns, dry and drivable highways).
+#include "TestFramework.h"
+#include "TestSupport.h"
+
+#include <algorithm>
+#include <cmath>
+#include <set>
+
+using namespace dtg::sim;
+
+namespace
+{
+	const StatePlan& Map()
+	{
+		return dtg_test::LoadedState().Map;
+	}
+
+	double Distance(const StateCity& A, const StateCity& B)
+	{
+		return std::hypot(A.X - B.X, A.Y - B.Y);
+	}
+
+	/** Every intersection reachable from a starting one through the road graph. */
+	std::set<int> Reachable(const CityPlan& World, int From)
+	{
+		std::set<int> Seen;
+		std::vector<int> Stack{From};
+		while (!Stack.empty())
+		{
+			const int Id = Stack.back();
+			Stack.pop_back();
+			if (!Seen.insert(Id).second)
+			{
+				continue;
+			}
+			if (const Intersection* Node = World.FindIntersection(Id))
+			{
+				Stack.insert(Stack.end(), Node->Links.begin(), Node->Links.end());
+			}
+		}
+		return Seen;
+	}
+}
+
+DTG_TEST(StateMapIsSouthCarolinaStartingInLongs)
+{
+	const GameState& State = dtg_test::LoadedState();
+	EXPECT(State.bStateMap);
+	EXPECT(Map().Name == "South Carolina");
+	EXPECT(Map().Cities.size() >= 20);
+	EXPECT(Map().StartCity() && Map().StartCity()->Name == "Longs");
+	// A new game wakes up in Longs, in a home that's actually in Longs.
+	const CityInfo* Spawn = State.City.CityAt(State.City.SpawnX, State.City.SpawnY);
+	EXPECT(Spawn && Spawn->Name == "Longs");
+	const BuildingPlan* Home = State.City.FindBuilding(State.City.StarterHomeId);
+	EXPECT(Home != nullptr);
+	if (Home)
+	{
+		const CityInfo* HomeTown = State.City.CityAt(Home->DoorX, Home->DoorY);
+		EXPECT(HomeTown && HomeTown->Name == "Longs");
+		EXPECT(Home->Address.find("Longs") != std::string::npos);
+	}
+	// Real towns, each built at its own size, with the landmarks the state file gives them.
+	for (const char* Name : {"Myrtle Beach", "North Myrtle Beach", "Little River", "Conway", "Loris", "Charleston", "Columbia", "Greenville",
+			 "Hilton Head Island"})
+	{
+		EXPECT_MSG(State.City.FindCity(Name) != nullptr, Name);
+	}
+	const CityInfo* Hub = State.City.FindCity("Myrtle Beach");
+	EXPECT(Hub && Hub->Style == CityStyle::Hub);
+	int HubDealers = 0;
+	for (const BuildingPlan* Dealer : State.City.WithRole(LotRole::Dealership))
+	{
+		HubDealers += (Hub && State.City.CityAt(Dealer->DoorX, Dealer->DoorY) == Hub) ? 1 : 0;
+	}
+	// The motor mile: every new-car showroom (one per dealer group) is in the hub.
+	EXPECT(HubDealers >= 30 && HubDealers == static_cast<int>(State.City.WithRole(LotRole::Dealership).size()));
+	bool bConwayJail = false;
+	for (const BuildingPlan* Jail : State.City.WithRole(LotRole::Jail))
+	{
+		const CityInfo* Town = State.City.CityAt(Jail->DoorX, Jail->DoorY);
+		bConwayJail = bConwayJail || (Town && Town->Name == "Conway");
+	}
+	EXPECT(bConwayJail);
+	// A fresh game greets the player in Longs.
+	GameState Fresh;
+	ContentReport Report;
+	Fresh.LoadContent(dtg_test::LoadAllFiles(), Report);
+	Fresh.NewGame(11, "Tester");
+	bool bGreeted = false;
+	for (const std::string& Note : Fresh.TakeNotifications())
+	{
+		bGreeted = bGreeted || Note.find("Welcome to Longs, SC") != std::string::npos;
+	}
+	EXPECT(bGreeted);
+}
+
+DTG_TEST(CitiesKeepTheirPlaceWithoutOverlapping)
+{
+	const StatePlan& State = Map();
+	for (std::size_t A = 0; A < State.Cities.size(); ++A)
+	{
+		const StateCity& City = State.Cities[A];
+		EXPECT_MSG(State.InsideState(City.Bounds.MinX, City.Bounds.MinY) && State.InsideState(City.Bounds.MaxX, City.Bounds.MinY) &&
+				State.InsideState(City.Bounds.MinX, City.Bounds.MaxY) && State.InsideState(City.Bounds.MaxX, City.Bounds.MaxY),
+			City.Name + " pokes outside the state");
+		for (std::size_t B = A + 1; B < State.Cities.size(); ++B)
+		{
+			EXPECT_MSG(!City.Bounds.Overlaps(State.Cities[B].Bounds), City.Name + " overlaps " + State.Cities[B].Name);
+		}
+	}
+	const StateCity* Longs = State.FindCity("Longs");
+	const StateCity* MyrtleBeach = State.FindCity("Myrtle Beach");
+	const StateCity* Charleston = State.FindCity("Charleston");
+	const StateCity* Columbia = State.FindCity("Columbia");
+	const StateCity* Greenville = State.FindCity("Greenville");
+	EXPECT(Longs && MyrtleBeach && Charleston && Columbia && Greenville);
+	if (!(Longs && MyrtleBeach && Charleston && Columbia && Greenville))
+	{
+		return;
+	}
+	// Longs stays where it really is; the world's origin.
+	EXPECT(std::hypot(Longs->X, Longs->Y) < 100.0);
+	// Compass directions survive (X east, Y south): Charleston is south-west of Myrtle Beach, Greenville north-west of Columbia.
+	EXPECT(Charleston->X < MyrtleBeach->X && Charleston->Y > MyrtleBeach->Y);
+	EXPECT(Greenville->X < Columbia->X && Greenville->Y < Columbia->Y);
+	EXPECT(MyrtleBeach->Y > Longs->Y);
+	// Distances are the real ones divided by the map scale (Columbia to Charleston is about 160 km).
+	EXPECT_NEAR(Distance(*Columbia, *Charleston) * State.Scale / 1000.0, 160.0, 25.0);
+	EXPECT_NEAR(Distance(*Columbia, *Greenville) * State.Scale / 1000.0, 155.0, 25.0);
+	// Venues sit clear of every town.
+	for (const VenuePlan& Venue : State.VenueLayouts)
+	{
+		for (const StateCity& City : State.Cities)
+		{
+			EXPECT_MSG(!Venue.Area.Overlaps(City.Bounds), Venue.Name + " overlaps " + City.Name);
+		}
+	}
+	EXPECT(State.VenueLayouts.size() == 4);
+}
+
+DTG_TEST(HighwaysJoinEveryTown)
+{
+	const GameState& Game = dtg_test::LoadedState();
+	const CityPlan& World = Game.City;
+	std::set<std::string> Names;
+	for (const HighwayPlan& Road : World.Highways)
+	{
+		Names.insert(Road.Name);
+		EXPECT(Road.Points.size() >= 2);
+	}
+	for (const char* Name : {"I-95", "I-26", "I-20", "I-85", "I-77", "US-17", "US-501", "SC-9", "SC-31"})
+	{
+		EXPECT_MSG(Names.count(Name) == 1, Name);
+	}
+	const CityInfo* Longs = World.FindCity("Longs");
+	EXPECT(Longs != nullptr);
+	if (!Longs)
+	{
+		return;
+	}
+	const std::set<int> FromLongs = Reachable(World, World.NearestIntersection(Longs->Bounds.CenterX(), Longs->Bounds.CenterY()));
+	for (const CityInfo& City : World.Cities)
+	{
+		EXPECT_MSG(FromLongs.count(World.NearestIntersection(City.Bounds.CenterX(), City.Bounds.CenterY())) == 1, "can't drive from Longs to " + City.Name);
+	}
+	for (const VenuePlan& Venue : World.Venues)
+	{
+		const std::array<double, 2> Gate = VenueEntrance(Venue);
+		EXPECT_MSG(FromLongs.count(World.NearestIntersection(Gate[0], Gate[1])) == 1, "can't drive to " + Venue.Name);
+	}
+	// Highways don't plough through towns they don't serve.
+	const StatePlan& State = Game.Map;
+	for (const HighwayPlan& Road : State.Highways)
+	{
+		for (std::size_t Index = 0; Index + 1 < Road.Points.size(); ++Index)
+		{
+			for (int Step = 1; Step < 20; ++Step)
+			{
+				const double T = Step / 20.0;
+				const double X = Road.Points[Index][0] + (Road.Points[Index + 1][0] - Road.Points[Index][0]) * T;
+				const double Y = Road.Points[Index][1] + (Road.Points[Index + 1][1] - Road.Points[Index][1]) * T;
+				for (const StateCity& City : State.Cities)
+				{
+					const Rect Inner{City.Bounds.MinX + 20.0, City.Bounds.MinY + 20.0, City.Bounds.MaxX - 20.0, City.Bounds.MaxY - 20.0};
+					EXPECT_MSG(!Inner.Contains(X, Y), Road.Name + " runs through " + City.Name);
+				}
+			}
+		}
+	}
+}
+
+DTG_TEST(TerrainFollowsTheGeography)
+{
+	const StatePlan& State = Map();
+	// Offshore from Myrtle Beach is the Atlantic: below sea level, and water.
+	const Point2 Offshore = State.ToWorld(-78.75, 33.60);
+	EXPECT(State.IsOcean(Offshore[0], Offshore[1]));
+	const SurfaceInfo Sea = State.SurfaceAt(Offshore[0], Offshore[1]);
+	EXPECT(Sea.bWater && Sea.bOcean && Sea.GroundM < 0.0);
+	// Across the borders is land (North Carolina, Georgia), not sea.
+	const Point2 NorthCarolina = State.ToWorld(-80.0, 35.3);
+	const Point2 Georgia = State.ToWorld(-82.0, 33.0);
+	EXPECT(!State.InsideState(NorthCarolina[0], NorthCarolina[1]) && !State.IsOcean(NorthCarolina[0], NorthCarolina[1]));
+	EXPECT(!State.InsideState(Georgia[0], Georgia[1]) && !State.IsOcean(Georgia[0], Georgia[1]));
+	// The upstate mountains rise well above the coastal plain.
+	double Peak = 0.0;
+	for (double Lon = -83.0; Lon < -82.3; Lon += 0.02)
+	{
+		for (double Lat = 34.85; Lat < 35.15; Lat += 0.02)
+		{
+			const Point2 Where = State.ToWorld(Lon, Lat);
+			if (State.InsideState(Where[0], Where[1]))
+			{
+				Peak = std::max(Peak, State.NaturalHeight(Where[0], Where[1]));
+			}
+		}
+	}
+	EXPECT(Peak > 80.0);
+	EXPECT(State.FindCity("Greenville")->LevelM > State.FindCity("Columbia")->LevelM);
+	EXPECT(State.FindCity("Columbia")->LevelM > State.FindCity("Charleston")->LevelM);
+	EXPECT(State.FindCity("Charleston")->LevelM < 5.0);
+	// Every town is built on perfectly level ground.
+	for (const StateCity& City : State.Cities)
+	{
+		double Low = 1e9;
+		double High = -1e9;
+		for (int I = 0; I <= 12; ++I)
+		{
+			for (int J = 0; J <= 12; ++J)
+			{
+				const double Height = State.HeightAt(City.Bounds.MinX + City.Bounds.Width() * I / 12.0, City.Bounds.MinY + City.Bounds.Depth() * J / 12.0);
+				Low = std::min(Low, Height);
+				High = std::max(High, Height);
+				EXPECT(!State.SurfaceAt(City.Bounds.MinX + City.Bounds.Width() * I / 12.0, City.Bounds.MinY + City.Bounds.Depth() * J / 12.0).bWater);
+			}
+		}
+		EXPECT_MSG(High - Low < 0.001, City.Name + " isn't level");
+		EXPECT_NEAR(Low, City.LevelM, 0.001);
+	}
+	// Lakes hold water above their beds.
+	for (const StateLake& Lake : State.Lakes)
+	{
+		const SurfaceInfo Info = State.SurfaceAt(Lake.X, Lake.Y);
+		EXPECT_MSG(Info.bWater && !Info.bOcean && Info.WaterM > Info.GroundM + 1.0, Lake.Name);
+	}
+}
+
+DTG_TEST(RoadsStayDryAndDrivable)
+{
+	const StatePlan& State = Map();
+	int Bridged = 0;
+	for (const HighwayPlan& Road : State.Highways)
+	{
+		EXPECT(!Road.DeckM.empty());
+		const double Length = Road.LengthM();
+		double Previous = Road.At(0.0)[2];
+		for (double Along = 5.0; Along <= Length; Along += 5.0)
+		{
+			const std::array<double, 3> Here = Road.At(Along);
+			const SurfaceInfo Info = State.SurfaceAt(Here[0], Here[1]);
+			EXPECT_MSG(!Info.bOcean, Road.Name + " runs out to sea");
+			if (Info.bWater)
+			{
+				++Bridged;
+				EXPECT_MSG(Here[2] >= Info.WaterM + 2.5, Road.Name + " dips into the water");
+			}
+			else
+			{
+				EXPECT_MSG(Here[2] >= Info.GroundM - 0.01, Road.Name + " is buried");
+			}
+			// No steps or walls: under a 10% grade everywhere, bridge ramps included.
+			EXPECT_MSG(std::fabs(Here[2] - Previous) / 5.0 < 0.10, Road.Name + " is too steep");
+			EXPECT_NEAR(State.RoadHeightAt(Here[0], Here[1]), Here[2], 0.25);
+			Previous = Here[2];
+		}
+	}
+	EXPECT(Bridged > 0); // rivers and lakes are crossed on bridges
+}
