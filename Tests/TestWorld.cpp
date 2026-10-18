@@ -795,3 +795,130 @@ DTG_TEST(CoDefendantsPlayThePrisonersDilemma)
 	const Verdict Payback = State.CoDefendantChoice(false);
 	EXPECT(Payback.SentenceDays >= 30); // they testified against you
 }
+
+DTG_TEST(OutbreaksRiseAndFall)
+{
+	Rng RandomA(5);
+	Rng RandomB(5);
+	OutbreakSystem Untreated;
+	OutbreakSystem Treated;
+	Untreated.Begin(RandomA);
+	Treated.Begin(RandomB);
+	int UntreatedDays = 0;
+	int TreatedDays = 0;
+	bool bSawDrag = false;
+	for (int Day = 0; Day < 300 && Untreated.IsActive(); ++Day)
+	{
+		Untreated.DailyUpdate(RandomA, 0.0);
+		bSawDrag = bSawDrag || (Untreated.EconomicDrag() > 0.01 && Untreated.StreetLife() < 1.0);
+		++UntreatedDays;
+	}
+	for (int Day = 0; Day < 300 && Treated.IsActive(); ++Day)
+	{
+		if (Day == 15)
+		{
+			Treated.DeployTreatment(0.6);
+		}
+		Treated.DailyUpdate(RandomB, 0.0);
+		++TreatedDays;
+	}
+	EXPECT(!Untreated.IsActive() && UntreatedDays < 250);
+	EXPECT(Untreated.PeakInfected() > 0.01);
+	EXPECT(bSawDrag);
+	EXPECT(TreatedDays < UntreatedDays);
+	EXPECT(Treated.PeakInfected() < Untreated.PeakInfected());
+}
+
+DTG_TEST(MedicinesTrialsAndTreatmentContracts)
+{
+	GameState State = dtg_test::FreshGame(81);
+	State.Funds.Deposit(Dollars(2000000), MoneyCategory::Other, "test", 0);
+	EXPECT(!State.DevelopMedicine("Calmex", 40, 1.0, false).bOk); // no science background
+	State.Player.AddSkillXp(Skill::Science, 4000);
+	State.Player.AddSkillXp(Skill::Medicine, 4000);
+
+	// An everyday medicine goes through three trial phases before it sells.
+	EXPECT(State.DevelopMedicine("Calmex", 60, 1.0, false).bOk);
+	const std::string Everyday = State.Ip.Works().back().Id;
+	EXPECT(State.Ip.Works().back().Kind == WorkKind::Medicine);
+	EXPECT(State.RunTrial(Everyday).bStarted);
+	EXPECT(!State.RunTrial(Everyday).bFinished); // still running
+	int Guard = 0;
+	while (!State.Ip.Find(Everyday)->bApproved && !State.Ip.Find(Everyday)->bShelved && Guard++ < 10)
+	{
+		State.Skip(15 * 24 * 60);
+		const TrialResult Step = State.RunTrial(Everyday);
+		if (Step.bFinished && Step.bPassed && !Step.bApproved)
+		{
+			State.RunTrial(Everyday); // start the next phase
+		}
+	}
+	const CreativeWork* Pill = State.Ip.Find(Everyday);
+	EXPECT(Pill->bApproved || Pill->bShelved);
+
+	// During an outbreak, a targeted treatment is fast-tracked and sold to the state at a negotiated price.
+	State.Outbreak.Begin(State.Random);
+	for (int Day = 0; Day < 10; ++Day) State.Outbreak.DailyUpdate(State.Random, 0.0);
+	std::string CureId;
+	for (int Attempt = 0; Attempt < 6 && CureId.empty(); ++Attempt)
+	{
+		EXPECT(State.DevelopMedicine("Fevergone", 20, 1.0, true).bOk);
+		CreativeWork* Cure = State.Ip.Find(State.Ip.Works().back().Id);
+		EXPECT(Cure->Treats == State.Outbreak.Strain().Id);
+		Cure->Quality = 1.0; // a strong candidate
+		const std::string Candidate = Cure->Id;
+		Guard = 0;
+		while (!State.Ip.Find(Candidate)->bApproved && !State.Ip.Find(Candidate)->bShelved && Guard++ < 12)
+		{
+			const TrialResult Step = State.RunTrial(Candidate);
+			if (Step.bStarted)
+			{
+				EXPECT(State.Ip.Find(Candidate)->TrialReadyMinute - State.Clock.TotalMinutes() <= 3 * 24 * 60); // fast track
+				State.Skip(3 * 24 * 60 + 60);
+			}
+		}
+		if (State.Ip.Find(Candidate)->bApproved)
+		{
+			CureId = Candidate;
+		}
+	}
+	EXPECT(!CureId.empty());
+	EXPECT(State.Outbreak.IsActive());
+	if (CureId.empty() || !State.Outbreak.IsActive())
+	{
+		return;
+	}
+	const TreatmentQuote Quote = State.QuoteTreatment(CureId);
+	EXPECT(Quote.bValid && Quote.Doses > 0);
+	const auto Price = [&](TreatmentPricing Pricing) { return Quote.Prices[static_cast<int>(Pricing)]; };
+	EXPECT(Price(TreatmentPricing::AtCost) < Price(TreatmentPricing::Fair));
+	EXPECT(Price(TreatmentPricing::Fair) < Price(TreatmentPricing::Gouge));
+	EXPECT(Price(TreatmentPricing::Market) < Price(TreatmentPricing::Gouge));
+	const double TrustBefore = State.Markets.PlayerReputation().Trust;
+	EXPECT(State.SellTreatment(CureId, TreatmentPricing::AtCost).bOk);
+	EXPECT(State.Markets.PlayerReputation().Trust > TrustBefore);
+	EXPECT(State.Outbreak.TreatmentDeployed());
+	EXPECT(!State.SellTreatment(CureId, TreatmentPricing::Gouge).bOk); // one contract per outbreak
+
+	GameState Restored = dtg_test::LoadedState();
+	EXPECT(Restored.LoadFromJson(State.SaveToJson(), nullptr));
+	EXPECT(Restored.Outbreak.IsActive() == State.Outbreak.IsActive());
+	EXPECT(Restored.Ip.Find(CureId) && Restored.Ip.Find(CureId)->bApproved);
+}
+
+DTG_TEST(PriceGougingHasAPublicCost)
+{
+	GameState State = dtg_test::FreshGame(82);
+	State.Player.AddSkillXp(Skill::Science, 4000);
+	State.Outbreak.Begin(State.Random);
+	for (int Day = 0; Day < 10; ++Day) State.Outbreak.DailyUpdate(State.Random, 0.0);
+	EXPECT(State.DevelopMedicine("Quickrelief", 40, 1.0, true).bOk);
+	CreativeWork* Cure = State.Ip.Find(State.Ip.Works().back().Id);
+	Cure->bApproved = true;
+	Cure->TrialPhase = 3;
+	const double TrustBefore = State.Markets.PlayerReputation().Trust;
+	const Money CashBefore = State.Funds.Balance();
+	EXPECT(State.SellTreatment(Cure->Id, TreatmentPricing::Gouge).bOk);
+	EXPECT(State.Funds.Balance() > CashBefore);
+	EXPECT(State.Markets.PlayerReputation().Trust < TrustBefore - 0.2);
+}

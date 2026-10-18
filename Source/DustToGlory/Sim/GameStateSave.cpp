@@ -419,6 +419,12 @@ namespace dtg::sim
 			Item.Set("protected", Bool(Work.bProtected));
 			Item.Set("licensee", Str(Work.Licensee));
 			Item.Set("licenseeShare", Num(Work.LicenseeShare));
+			Item.Set("trialPhase", Num(Work.TrialPhase));
+			Item.Set("approved", Bool(Work.bApproved));
+			Item.Set("shelved", Bool(Work.bShelved));
+			Item.Set("treats", Str(Work.Treats));
+			Item.Set("trialReady", Num(static_cast<double>(Work.TrialReadyMinute)));
+			Item.Set("inTrial", Bool(Work.bInTrial));
 			WorksJson.Push(Item);
 		}
 		Root.Set("works", WorksJson);
@@ -522,6 +528,25 @@ namespace dtg::sim
 			}
 			JusticeJson.Set("openCharges", OpenJson);
 			Root.Set("justice", JusticeJson);
+		}
+		{
+			const OutbreakSystem::Snapshot Data = Outbreak.Save();
+			JsonValue OutbreakJson = JsonValue::MakeObject();
+			OutbreakJson.Set("active", Bool(Data.bActive));
+			OutbreakJson.Set("id", Str(Data.Strain.Id));
+			OutbreakJson.Set("name", Str(Data.Strain.Name));
+			OutbreakJson.Set("spread", Num(Data.Strain.Spread));
+			OutbreakJson.Set("recovery", Num(Data.Strain.Recovery));
+			OutbreakJson.Set("severity", Num(Data.Strain.Severity));
+			OutbreakJson.Set("s", Num(Data.S));
+			OutbreakJson.Set("i", Num(Data.I));
+			OutbreakJson.Set("r", Num(Data.R));
+			OutbreakJson.Set("days", Num(Data.Days));
+			OutbreakJson.Set("since", Num(Data.DaysSinceLast));
+			OutbreakJson.Set("peak", Num(Data.Peak));
+			OutbreakJson.Set("treated", Bool(Data.bTreated));
+			OutbreakJson.Set("boost", Num(Data.TreatmentBoost));
+			Root.Set("outbreak", OutbreakJson);
 		}
 		Root.Set("phoneNumber", Str(PhoneNumber));
 		JsonValue CarsJson = JsonValue::MakeArray();
@@ -852,6 +877,12 @@ namespace dtg::sim
 			Work.bProtected = Item.GetBool("protected");
 			Work.Licensee = Item.GetString("licensee");
 			Work.LicenseeShare = Item.GetNumber("licenseeShare");
+			Work.TrialPhase = Item.GetInt("trialPhase");
+			Work.bApproved = Item.GetBool("approved");
+			Work.bShelved = Item.GetBool("shelved");
+			Work.Treats = Item.GetString("treats");
+			Work.TrialReadyMinute = Item.GetInt64("trialReady");
+			Work.bInTrial = Item.GetBool("inTrial");
 			Works.push_back(Work);
 		}
 		Ip.Restore(Works);
@@ -943,6 +974,25 @@ namespace dtg::sim
 			{
 				OpenCharges.push_back(ReadCrime(Item));
 			}
+		}
+		{
+			const JsonValue& OutbreakJson = Root.Get("outbreak");
+			OutbreakSystem::Snapshot Data;
+			Data.bActive = OutbreakJson.GetBool("active");
+			Data.Strain.Id = OutbreakJson.GetString("id");
+			Data.Strain.Name = OutbreakJson.GetString("name");
+			Data.Strain.Spread = OutbreakJson.GetNumber("spread", 0.3);
+			Data.Strain.Recovery = OutbreakJson.GetNumber("recovery", 0.1);
+			Data.Strain.Severity = OutbreakJson.GetNumber("severity", 0.5);
+			Data.S = OutbreakJson.GetNumber("s", 1.0);
+			Data.I = OutbreakJson.GetNumber("i", 0.0);
+			Data.R = OutbreakJson.GetNumber("r", 0.0);
+			Data.Days = OutbreakJson.GetInt("days");
+			Data.DaysSinceLast = OutbreakJson.GetInt("since", 365);
+			Data.Peak = OutbreakJson.GetNumber("peak", 0.0);
+			Data.bTreated = OutbreakJson.GetBool("treated");
+			Data.TreatmentBoost = OutbreakJson.GetNumber("boost", 0.0);
+			Outbreak.Load(Data);
 		}
 		PhoneNumber = Root.GetString("phoneNumber", "(843) 555-0100");
 		PrivateCars.clear();

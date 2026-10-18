@@ -23,6 +23,7 @@ namespace dtg::sim
 		Tools,
 		Reward,
 		Other,
+		Business,   // research, trials, contracts
 		Count
 	};
 

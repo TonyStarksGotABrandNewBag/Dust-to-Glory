@@ -17,6 +17,7 @@
 #include "Sim/Market.h"
 #include "Sim/Ministry.h"
 #include "Sim/NpcMinds.h"
+#include "Sim/Outbreak.h"
 #include "Sim/Politics.h"
 #include "Sim/Powers.h"
 #include "Sim/PrivateSales.h"
@@ -137,6 +138,7 @@ namespace dtg::sim
 		int EventsWon = 0;
 		bool bManualTransmission = false;
 		JusticeSystem Justice;
+		OutbreakSystem Outbreak;
 		std::vector<Crime> OpenCharges;          // crimes reported during the current police chase
 		std::string PhoneNumber;                 // written on notes left for car owners
 		std::vector<PrivateCar> PrivateCars;     // parked cars the player has dealt with (others are regenerated)
@@ -249,6 +251,11 @@ namespace dtg::sim
 		/** Reputation attacks and press; the player's own ministry is affected through ApplyScandal. */
 		AttackResult Attack(const std::string& BusinessId, AttackKind Kind);
 		CreativeWork& CreateWork(WorkKind Kind, const std::string& Title, int Hours, double Performance);
+		/** Medicines need a scientific background; during an outbreak they can target it and get fast-tracked. */
+		ActionResult DevelopMedicine(const std::string& Title, int Hours, double Performance, bool bTargetOutbreak);
+		TrialResult RunTrial(const std::string& WorkId);
+		TreatmentQuote QuoteTreatment(const std::string& WorkId) const;
+		ActionResult SellTreatment(const std::string& WorkId, TreatmentPricing Pricing);
 
 		// ---------------------------------------------------------------- Politics and law
 		const LawDef* FindLaw(const std::string& Id) const;

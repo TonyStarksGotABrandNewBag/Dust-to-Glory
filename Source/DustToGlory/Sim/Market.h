@@ -222,6 +222,8 @@ namespace dtg::sim
 		AttackResult LaunchAttack(const std::string& BusinessId, AttackKind Kind, bool bByPlayer, std::int64_t Minute, Rng& Random);
 		/** Pro-business laws nudge every company's health target. */
 		double PolicyHealthBonus = 0.0;
+		/** Customers staying home during an outbreak (health-care businesses get busier instead). */
+		double DemandDrag = 0.0;
 
 		/** Player-side reputation (fame), which hype, deals and backfires all touch. */
 		Reputation& PlayerReputation() { return PlayerRep; }
@@ -254,6 +256,7 @@ namespace dtg::sim
 		Invention,
 		Film,
 		VideoGame,
+		Medicine,   // pharmaceuticals: discovery, three trial phases, approval, then patent-protected sales
 		Count
 	};
 
@@ -271,6 +274,22 @@ namespace dtg::sim
 		bool bProtected = false;   // copyright registered / patent granted
 		std::string Licensee;      // business id that licensed it, empty when none
 		double LicenseeShare = 0.0;
+		// Medicines only
+		int TrialPhase = 0;        // clinical trial phases passed (3 = ready for approval)
+		bool bApproved = false;
+		bool bShelved = false;     // failed a trial
+		std::string Treats;        // outbreak strain id it was developed against, empty for everyday medicines
+		std::int64_t TrialReadyMinute = 0; // the current phase finishes then
+		bool bInTrial = false;
+	};
+
+	struct TrialResult
+	{
+		bool bStarted = false;
+		bool bFinished = false;
+		bool bPassed = false;
+		bool bApproved = false;
+		std::string Message;
 	};
 
 	struct WeeklyRoyalty
@@ -291,8 +310,13 @@ namespace dtg::sim
 		/** Licensing: an upfront payment now in exchange for a share of future royalties. */
 		Money LicenseOffer(const std::string& WorkId) const;
 		bool License(const std::string& WorkId, const std::string& BusinessId, Wallet& Funds, std::int64_t Minute);
-		/** Weekly royalties (already split with any licensee). */
+		/** Weekly royalties (already split with any licensee). Medicines pay only once approved. */
 		std::vector<WeeklyRoyalty> WeeklyRoyalties(Rng& Random);
+		/** Cost of the next clinical trial phase (fast-tracked trials during an outbreak cost less and run faster). */
+		static Money TrialCost(int Phase, bool bFastTrack);
+		static int TrialDays(bool bFastTrack);
+		/** Starts the next trial phase (pays now) or, once it has run its course, reports the result. */
+		TrialResult AdvanceTrial(const std::string& WorkId, bool bFastTrack, Wallet& Funds, std::int64_t Minute, Rng& Random);
 
 		const std::vector<CreativeWork>& Works() const { return WorkList; }
 		CreativeWork* Find(const std::string& Id);

@@ -838,6 +838,7 @@ namespace dtg::sim
 		PendingOffers.clear();
 		Justice = JusticeSystem();
 		OpenCharges.clear();
+		Outbreak = OutbreakSystem();
 		Phone = Inbox();
 		NextOfferId = 1;
 		bManualTransmission = false;
@@ -1232,6 +1233,20 @@ namespace dtg::sim
 	void GameState::RunDay(std::int64_t Minute, TickReport& Report)
 	{
 		SyncMinistryBusiness();
+		const int OutbreakChange = Outbreak.DailyUpdate(Random);
+		if (OutbreakChange > 0)
+		{
+			const std::string Name = Outbreak.Strain().Name;
+			Markets.PostNews("Health officials confirm an outbreak of " + Name, "", -0.2, Minute);
+			SendEmail(MessageTopic::General, "State Health Department", "alerts@health.example", "Health alert: " + Name,
+				"Cases of " + Name + " are rising across the state. Wash your hands and stay home if you feel sick. Researchers with a "
+				"promising treatment can apply for fast-track trials.");
+		}
+		else if (OutbreakChange < 0)
+		{
+			Markets.PostNews("The " + Outbreak.Strain().Name + " outbreak is over", "", 0.2, Minute);
+		}
+		Markets.DemandDrag = Outbreak.EconomicDrag();
 		Markets.PolicyHealthBonus = ActiveLaws().BusinessHealthBonus;
 		const Money Income = Markets.DailyUpdate(Minute, Random);
 		if (Income > 0)
@@ -1581,7 +1596,8 @@ namespace dtg::sim
 			return Result;
 		}
 		Result = Careers.ResolveShift(*Def, *Job, Player, Performance);
-		Result.Pay = static_cast<Money>(std::llround(static_cast<double>(Result.Pay) * Economy.Wages * ActiveLaws().WageMul));
+		const double SurgePay = Def->Workplace == "Hospital" ? Outbreak.ClinicianPayMul() : 1.0;
+		Result.Pay = static_cast<Money>(std::llround(static_cast<double>(Result.Pay) * Economy.Wages * ActiveLaws().WageMul * SurgePay));
 		Funds.Deposit(Result.Pay, MoneyCategory::Job, Def->Name + " shift", Clock.TotalMinutes());
 		TickReport Tick = Skip(static_cast<std::int64_t>(Result.HoursWorked) * 60);
 		if (OutTick)
@@ -1872,6 +1888,110 @@ namespace dtg::sim
 		CreativeWork& Work = Ip.Create(Kind, Title, Player, Hours, Performance, Markets.PlayerReputation().Score(), Random);
 		Skip(static_cast<std::int64_t>(std::max(1, Hours)) * 60);
 		return Work;
+	}
+
+	ActionResult GameState::DevelopMedicine(const std::string& Title, int Hours, double Performance, bool bTargetOutbreak)
+	{
+		if (Player.SkillLevel(Skill::Science) < 2 && Player.SkillLevel(Skill::Medicine) < 2)
+		{
+			return ActionResult::Failure("You need a background in science or medicine to run a research program.");
+		}
+		CreativeWork& Work = Ip.Create(WorkKind::Medicine, Title, Player, Hours, Performance, Markets.PlayerReputation().Score(), Random);
+		if (bTargetOutbreak && Outbreak.IsActive())
+		{
+			Work.Treats = Outbreak.Strain().Id;
+		}
+		const std::string Name = Work.Title;
+		const double Quality = Work.Quality;
+		Skip(static_cast<std::int64_t>(std::max(1, Hours)) * 60);
+		return ActionResult::Success("Discovery complete: " + Name + " (promise " + std::to_string(static_cast<int>(Quality * 100.0)) +
+			"%). Next, clinical trials.");
+	}
+
+	TrialResult GameState::RunTrial(const std::string& WorkId)
+	{
+		const CreativeWork* Work = Ip.Find(WorkId);
+		const bool bFastTrack = Work && !Work->Treats.empty() && Outbreak.IsActive() && Work->Treats == Outbreak.Strain().Id;
+		const TrialResult Result = Ip.AdvanceTrial(WorkId, bFastTrack, Funds, Clock.TotalMinutes(), Random);
+		if (!Result.Message.empty())
+		{
+			Notify(Result.Message);
+		}
+		return Result;
+	}
+
+	TreatmentQuote GameState::QuoteTreatment(const std::string& WorkId) const
+	{
+		const CreativeWork* Work = nullptr;
+		for (const CreativeWork& Entry : Ip.Works())
+		{
+			if (Entry.Id == WorkId)
+			{
+				Work = &Entry;
+			}
+		}
+		TreatmentQuote Quote;
+		if (!Work || Work->Kind != WorkKind::Medicine || !Work->bApproved)
+		{
+			Quote.Reason = "You need an approved medicine.";
+			return Quote;
+		}
+		if (!Outbreak.IsActive() || Work->Treats != Outbreak.Strain().Id)
+		{
+			Quote.Reason = "This medicine doesn't treat the current outbreak.";
+			return Quote;
+		}
+		return QuoteTreatmentContract(Outbreak, Work->Quality, Player.SkillLevel(Skill::Business), Markets.PlayerReputation().Trust);
+	}
+
+	ActionResult GameState::SellTreatment(const std::string& WorkId, TreatmentPricing Pricing)
+	{
+		const TreatmentQuote Quote = QuoteTreatment(WorkId);
+		if (!Quote.bValid)
+		{
+			return ActionResult::Failure(Quote.Reason);
+		}
+		const Money Price = Quote.Prices[static_cast<int>(Pricing)];
+		const Money Revenue = Price * static_cast<Money>(Quote.Doses);
+		const Money Production = Quote.CostPerDose * static_cast<Money>(Quote.Doses);
+		Funds.Deposit(Revenue - Production, MoneyCategory::Business, "Treatment contract", Clock.TotalMinutes());
+		Outbreak.DeployTreatment(0.6);
+		Reputation& Rep = Markets.PlayerReputation();
+		const std::int64_t Minute = Clock.TotalMinutes();
+		const std::string Count = std::to_string(Quote.Doses);
+		switch (Pricing)
+		{
+		case TreatmentPricing::AtCost:
+			Rep.Trust = Clamp(Rep.Trust + 0.15, 0.0, 1.0);
+			Rep.Sentiment = Clamp(Rep.Sentiment + 0.5, -1.0, 1.0);
+			Rep.Followers += 3000;
+			Markets.PostNews(PlayerName + " supplies " + Count + " doses at cost: \"People first.\"", "", 0.5, Minute);
+			break;
+		case TreatmentPricing::Fair:
+			Rep.Trust = Clamp(Rep.Trust + 0.05, 0.0, 1.0);
+			Rep.Followers += 1000;
+			Markets.PostNews("State signs a fair deal for " + Count + " doses of " + PlayerName + "'s treatment", "", 0.2, Minute);
+			break;
+		case TreatmentPricing::Market:
+			Markets.PostNews("State buys " + Count + " doses of a new treatment", "", 0.0, Minute);
+			break;
+		case TreatmentPricing::Gouge:
+			Rep.Trust = Clamp(Rep.Trust - 0.3, 0.0, 1.0);
+			Rep.Sentiment = Clamp(Rep.Sentiment - 0.6, -1.0, 1.0);
+			Markets.PostNews("Outrage as " + PlayerName + " charges the state top dollar for outbreak treatment", "", -0.6, Minute);
+			if (Politics.Current() != Office::None)
+			{
+				Politics.Scandal(0.5);
+			}
+			if (PlayerMinistry.IsFounded())
+			{
+				PlayerMinistry.ApplyScandal(0.15);
+			}
+			break;
+		case TreatmentPricing::Count:
+			break;
+		}
+		return ActionResult::Success("Contract signed: " + Count + " doses at " + FormatMoney(Price) + " each. Clinics start treating patients today.");
 	}
 
 	// ==================================================================================== Events

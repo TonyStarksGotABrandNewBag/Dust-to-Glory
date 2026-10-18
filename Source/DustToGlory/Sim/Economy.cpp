@@ -19,6 +19,7 @@ namespace dtg::sim
 		case MoneyCategory::Tools: return "Tools";
 		case MoneyCategory::Reward: return "Reward";
 		case MoneyCategory::Other: return "Other";
+		case MoneyCategory::Business: return "Business";
 		case MoneyCategory::Count: break;
 		}
 		return "Other";

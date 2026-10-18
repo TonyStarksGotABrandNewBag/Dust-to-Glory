@@ -149,8 +149,8 @@ namespace dtg::sim
 		case LotRole::Apartment: return {"Visit a neighbor", "Buy or enter apartment", "Arrange furniture"};
 		case LotRole::Dealership: return {"Browse every model", "Test drive", "Used car lot", "Sell a car"};
 		case LotRole::Church: return {"Ministry office", "Attend service", "Volunteer"};
-		case LotRole::Hospital: return {"Work a shift", "Get treated"};
-		case LotRole::University: return {"Enroll", "Attend class", "Work a shift"};
+		case LotRole::Hospital: return {"Work a shift", "Get treated", "Research a medicine"};
+		case LotRole::University: return {"Enroll", "Attend class", "Work a shift", "Research a medicine"};
 		case LotRole::CareerCenter: return {"Job board", "Career advice"};
 		case LotRole::Office: return {"Work a shift", "Hacking contracts", "Business consulting"};
 		case LotRole::TechCampus: return {"Work a shift", "Hacking contracts", "Create IP"};

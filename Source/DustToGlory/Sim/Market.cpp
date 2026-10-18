@@ -54,6 +54,7 @@ namespace dtg::sim
 			case WorkKind::Invention: return 900.0;
 			case WorkKind::Film: return 2000.0;
 			case WorkKind::VideoGame: return 1200.0;
+			case WorkKind::Medicine: return 2500.0;
 			case WorkKind::Count: break;
 			}
 			return 300.0;
@@ -69,6 +70,7 @@ namespace dtg::sim
 			case WorkKind::Invention: return bProtected ? 0.995 : 0.95;
 			case WorkKind::Film: return 0.90;
 			case WorkKind::VideoGame: return 0.93;
+			case WorkKind::Medicine: return bProtected ? 0.997 : 0.95; // generics arrive without a patent
 			case WorkKind::Count: break;
 			}
 			return 0.95;
@@ -156,6 +158,7 @@ namespace dtg::sim
 		case WorkKind::Invention: return "Invention";
 		case WorkKind::Film: return "Film";
 		case WorkKind::VideoGame: return "Video game";
+		case WorkKind::Medicine: return "Medicine";
 		case WorkKind::Count: break;
 		}
 		return "Work";
@@ -354,6 +357,7 @@ namespace dtg::sim
 			Value.Cash += Profit / 30;
 			const double Margin = Revenue > 0 ? static_cast<double>(Profit) / static_cast<double>(Revenue) : -1.0;
 			double Target = 0.55 + 2.0 * Margin - 0.08 * static_cast<double>(Value.Problems.size()) + PolicyHealthBonus;
+			Target += Value.Sector == "Health" ? 0.5 * DemandDrag : -DemandDrag;
 			if (Value.Cash < 0)
 			{
 				Target -= 0.2;
@@ -874,6 +878,7 @@ namespace dtg::sim
 		case WorkKind::Invention: Mix = {Skill::Science, 0.5, Skill::Trades, 0.5}; break;
 		case WorkKind::Film: Mix = {Skill::Creativity, 0.6, Skill::People, 0.4}; break;
 		case WorkKind::VideoGame: Mix = {Skill::Tech, 0.5, Skill::Creativity, 0.5}; break;
+		case WorkKind::Medicine: Mix = {Skill::Science, 0.6, Skill::Medicine, 0.4}; break;
 		case WorkKind::Count: break;
 		}
 		const double SkillScore = (Mix.WeightA * Player.SkillLevel(Mix.A) + Mix.WeightB * Player.SkillLevel(Mix.B)) / 10.0;
@@ -894,6 +899,7 @@ namespace dtg::sim
 
 	Money IpPortfolio::ProtectionCost(WorkKind Kind)
 	{
+		if (Kind == WorkKind::Medicine) return Dollars(6000);
 		return Kind == WorkKind::Invention ? Dollars(4500) : Dollars(35);
 	}
 
@@ -956,6 +962,10 @@ namespace dtg::sim
 		std::vector<WeeklyRoyalty> Payments;
 		for (CreativeWork& Work : WorkList)
 		{
+			if (Work.Kind == WorkKind::Medicine && !Work.bApproved)
+			{
+				continue; // no sales until it's approved
+			}
 			const double Decay = std::max(0.05, std::pow(detail_market::KindDecay(Work.Kind, Work.bProtected), Work.WeeksOut));
 			double Amount = detail_market::KindBaseWeekly(Work.Kind) * Work.Quality * Work.Quality * 4.0 * Work.Hype * Decay;
 			Amount *= Work.bProtected ? 1.0 : 0.6; // unprotected works lose sales to knock-offs
@@ -974,5 +984,76 @@ namespace dtg::sim
 			}
 		}
 		return Payments;
+	}
+
+	Money IpPortfolio::TrialCost(int Phase, bool bFastTrack)
+	{
+		const Money Costs[] = {Dollars(15000), Dollars(45000), Dollars(120000)};
+		const Money Cost = Costs[Clamp(Phase, 0, 2)];
+		return bFastTrack ? Cost / 2 : Cost;
+	}
+
+	int IpPortfolio::TrialDays(bool bFastTrack)
+	{
+		return bFastTrack ? 3 : 14;
+	}
+
+	TrialResult IpPortfolio::AdvanceTrial(const std::string& WorkId, bool bFastTrack, Wallet& Funds, std::int64_t Minute, Rng& Random)
+	{
+		TrialResult Result;
+		CreativeWork* Work = Find(WorkId);
+		if (!Work || Work->Kind != WorkKind::Medicine)
+		{
+			Result.Message = "That isn't a medicine.";
+			return Result;
+		}
+		if (Work->bApproved || Work->bShelved)
+		{
+			Result.Message = Work->bApproved ? "Already approved." : "That program was shelved after a failed trial.";
+			return Result;
+		}
+		if (Work->bInTrial)
+		{
+			if (Minute < Work->TrialReadyMinute)
+			{
+				Result.Message = "The trial is still running.";
+				return Result;
+			}
+			// Results are in. Better science passes more often; later phases are harder.
+			Work->bInTrial = false;
+			Result.bFinished = true;
+			const double PassChance = Clamp(0.45 + 0.5 * Work->Quality - 0.08 * Work->TrialPhase, 0.1, 0.95);
+			if (!Random.Chance(PassChance))
+			{
+				Work->bShelved = true;
+				Result.Message = "Phase " + std::to_string(Work->TrialPhase + 1) + " missed its goals. The program is shelved.";
+				return Result;
+			}
+			Work->TrialPhase += 1;
+			Result.bPassed = true;
+			if (Work->TrialPhase >= 3)
+			{
+				Work->bApproved = true;
+				Work->WeeksOut = 0;
+				Result.bApproved = true;
+				Result.Message = Work->Title + " is approved! It goes on sale this week.";
+			}
+			else
+			{
+				Result.Message = "Phase " + std::to_string(Work->TrialPhase) + " succeeded.";
+			}
+			return Result;
+		}
+		const Money Cost = TrialCost(Work->TrialPhase, bFastTrack);
+		if (!Funds.TrySpend(Cost, MoneyCategory::Business, "Clinical trial: " + Work->Title, Minute))
+		{
+			Result.Message = "The next trial phase costs " + FormatMoney(Cost) + ".";
+			return Result;
+		}
+		Work->bInTrial = true;
+		Work->TrialReadyMinute = Minute + static_cast<std::int64_t>(TrialDays(bFastTrack)) * 24 * 60;
+		Result.bStarted = true;
+		Result.Message = "Phase " + std::to_string(Work->TrialPhase + 1) + " is underway. Results in " + std::to_string(TrialDays(bFastTrack)) + " days.";
+		return Result;
 	}
 }
