@@ -43,7 +43,7 @@ ADTGWorldBuilder::ADTGWorldBuilder()
 void ADTGWorldBuilder::BeginPlay()
 {
 	Super::BeginPlay();
-	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
+	EnsureGame();
 	if (!Game || !Game->IsContentLoaded())
 	{
 		UE_LOG(LogDTG, Error, TEXT("World builder has no loaded content; the world will be empty."));
@@ -152,7 +152,7 @@ void ADTGWorldBuilder::BuildHighways()
 		// Walk the road at the spacing its deck heights were sampled at, so bridges and their ramps come
 		// through exactly as the simulation graded them.
 		const double Step = FMath::Max(2.0, Road.DeckStepM);
-		const int32 Steps = FMath::Max(1, FMath::CeilToInt(Length / Step));
+		const int32 Steps = FMath::Max(1, FMath::CeilToInt32(Length / Step));
 		const double Half = 0.5 * Road.WidthM;
 		FVector PrevLeft = FVector::ZeroVector;
 		FVector PrevRight = FVector::ZeroVector;
@@ -248,6 +248,7 @@ void ADTGWorldBuilder::BuildBuildings()
 
 void ADTGWorldBuilder::BuildVenues()
 {
+	FDTGMesh Stands;
 	const CityPlan& City = Game->Sim().City;
 	const StatePlan& Map = Game->Sim().Map;
 	const FLinearColor Apron(0.21f, 0.2f, 0.19f);
@@ -275,12 +276,14 @@ void ADTGWorldBuilder::BuildVenues()
 				FVector((B[0] + Nx) * S, (B[1] + Ny) * S, (Z + 0.06) * S),
 				FVector((B[0] - Nx) * S, (B[1] - Ny) * S, (Z + 0.06) * S), FVector::UpVector, Track);
 		}
-		// Grandstands down the long side, so an event has somewhere for a crowd to be.
+		// Grandstands down the long side, so an event has somewhere for a crowd to be. They go in with
+		// the buildings rather than the surfaces: a car's body sweep ignores surfaces, because a car is
+		// meant to drive on a road, and a grandstand is the one thing in here it should hit.
 		const double StandDepth = FMath::Min(14.0, Venue.Area.Depth() * 0.12);
 		for (int32 Tier = 0; Tier < 4; ++Tier)
 		{
 			const double Inset = Tier * StandDepth * 0.25;
-			Mesh.AddBox(FVector(Venue.Area.MinX * S, (Venue.Area.MinY - StandDepth + Inset) * S, (Z + Tier * 0.9) * S),
+			Stands.AddBox(FVector(Venue.Area.MinX * S, (Venue.Area.MinY - StandDepth + Inset) * S, (Z + Tier * 0.9) * S),
 				FVector(Venue.Area.MaxX * S, (Venue.Area.MinY - StandDepth + Inset + StandDepth * 0.25) * S, (Z + (Tier + 1) * 0.9) * S),
 				Stand);
 		}
@@ -289,6 +292,14 @@ void ADTGWorldBuilder::BuildVenues()
 	{
 		Surfaces->CreateMeshSection_LinearColor(2, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
 		Surfaces->SetMaterial(2, SurfaceMaterial());
+	}
+	if (!Stands.IsEmpty())
+	{
+		// A section number past the towns, which claim one each.
+		const int32 Section = Buildings->GetNumSections();
+		Buildings->CreateMeshSection_LinearColor(Section, Stands.Verts, Stands.Tris, Stands.Normals, Stands.Uvs,
+			Stands.Colors, Stands.Tangents, true);
+		Buildings->SetMaterial(Section, SurfaceMaterial());
 	}
 }
 
@@ -372,8 +383,8 @@ void ADTGWorldBuilder::UpdateChunks(const FVector& Around)
 {
 	const double ChunkUu = ChunkSizeM * DTGMetresToUnreal;
 	const int32 Radius = FMath::Max(1, FMath::CeilToInt(ViewDistanceM / ChunkSizeM));
-	const int32 CentreX = FMath::FloorToInt(Around.X / ChunkUu);
-	const int32 CentreY = FMath::FloorToInt(Around.Y / ChunkUu);
+	const int32 CentreX = FMath::FloorToInt32(Around.X / ChunkUu);
+	const int32 CentreY = FMath::FloorToInt32(Around.Y / ChunkUu);
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 
 	// Note which chunks should exist, nearest first so the ground under the player is never the last to arrive.
@@ -522,12 +533,26 @@ bool ADTGWorldBuilder::HasChunk(int32 ChunkX, int32 ChunkY) const
 	return ChunkAt.Contains(FIntPoint(ChunkX, ChunkY));
 }
 
+bool ADTGWorldBuilder::EnsureGame()
+{
+	if (!Game)
+	{
+		Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
+	}
+	return Game != nullptr && Game->IsContentLoaded();
+}
+
 UProceduralMeshComponent* ADTGWorldBuilder::TakeTerrainPart(int32& OutIndex)
 {
-	if (FreeParts.Num() > 0)
+	while (FreeParts.Num() > 0)
 	{
-		OutIndex = FreeParts.Pop();
-		return TerrainParts.IsValidIndex(OutIndex) ? TerrainParts[OutIndex].Get() : nullptr;
+		const int32 Spare = FreeParts.Pop();
+		if (TerrainParts.IsValidIndex(Spare) && TerrainParts[Spare])
+		{
+			OutIndex = Spare;
+			return TerrainParts[Spare].Get();
+		}
+		// A pool slot whose component has gone: dropped rather than handed out, and not leaked back.
 	}
 	UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this);
 	if (!Mesh)
@@ -536,12 +561,15 @@ UProceduralMeshComponent* ADTGWorldBuilder::TakeTerrainPart(int32& OutIndex)
 	}
 	Mesh->SetupAttachment(GetRootComponent());
 	Mesh->RegisterComponent();
-	Mesh->SetMobility(EComponentMobility::Movable);
 	// Cooked on the spot. A chunk is a few thousand triangles of its own now rather than a slice of the
 	// whole world, so this is cheap -- and async cooking would serve the *old* body setup for several
 	// frames, which means driving onto ground that is drawn but cannot be stood on.
 	Mesh->bUseAsyncCooking = false;
+	// Queries only. Nothing is simulated against the ground -- wheels ride on it by ray cast and
+	// characters sweep against it -- so cooking a physics body as well doubles the one cost that
+	// actually bites while streaming.
 	Mesh->SetCollisionProfileName(TEXT("BlockAll"));
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	// Wheels ride on the ground; car bodies are not supposed to crash into it. The body sweep uses its
 	// own channel so it can pass through terrain while still hitting walls, people and other cars.
 	Mesh->SetCollisionResponseToChannel(DTGBodySweepChannel, ECR_Ignore);
@@ -552,13 +580,16 @@ UProceduralMeshComponent* ADTGWorldBuilder::TakeTerrainPart(int32& OutIndex)
 
 void ADTGWorldBuilder::EnsureGroundAt(const FVector& Where)
 {
-	if (!Game || !Game->IsContentLoaded())
+	// Looked up rather than assumed: this is called from InitGame, which runs before BeginPlay, so a
+	// pointer cached there would still be null and the whole call would quietly do nothing -- leaving
+	// the player to fall through the world it was added to prevent.
+	if (!EnsureGame())
 	{
 		return;
 	}
 	const double ChunkUu = ChunkSizeM * DTGMetresToUnreal;
-	const int32 CentreX = FMath::FloorToInt(Where.X / ChunkUu);
-	const int32 CentreY = FMath::FloorToInt(Where.Y / ChunkUu);
+	const int32 CentreX = FMath::FloorToInt32(Where.X / ChunkUu);
+	const int32 CentreY = FMath::FloorToInt32(Where.Y / ChunkUu);
 	// The chunk under the point and the eight around it, so walking a few paces in the first second
 	// does not walk off the edge of the only piece of ground that exists.
 	for (int32 Y = CentreY - 1; Y <= CentreY + 1; ++Y)

@@ -36,7 +36,7 @@ ADTGCharacter::ADTGCharacter()
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 320.0f;
+	CameraBoom->TargetArmLength = WalkingBoomLength;
 	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->SocketOffset = FVector(0.0f, 40.0f, 60.0f);
 
@@ -55,6 +55,20 @@ void ADTGCharacter::BeginPlay()
 void ADTGCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// A car can be taken out from under the player -- a state switch, a new game, a showroom clearing
+	// away its demonstrator. Driving is a UPROPERTY, so a destroyed car stays a live-looking pointer
+	// and the player would be left hidden, unable to move, driving something that no longer exists.
+	if (Driving && (!IsValid(Driving) || Driving->IsActorBeingDestroyed()))
+	{
+		Driving = nullptr;
+		SetActorHiddenInGame(false);
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+		CameraBoom->TargetArmLength = WalkingBoomLength;
+		CameraBoom->SocketOffset = FVector(0.0f, 40.0f, 60.0f);
+		CameraBoom->bEnableCameraLag = false;
+		CameraBoom->bEnableCameraRotationLag = false;
+	}
 	UpdateFocus();
 }
 
@@ -164,8 +178,20 @@ void ADTGCharacter::UpdateFocus()
 		Current.CarId = NearestCar->ParkedCarId();
 		const VehicleModel* Model = Game->Sim().Vehicles.FindModel(TCHAR_TO_UTF8(*NearestCar->ModelId()));
 		Current.Title = Model ? UTF8_TO_TCHAR(Model->DisplayName.c_str()) : NearestCar->ModelId();
-		Current.Prompt = NearestCar->bDemonstrator ? TEXT("Take it for a lap")
-			: (NearestCar->OwnedUid().IsEmpty() ? TEXT("Make an offer") : TEXT("Get in"));
+		// Traffic and police carry neither a garage uid nor a parked-car id, and there is nothing to
+		// do with them -- offering to buy one would be a prompt that does nothing when pressed.
+		if (!NearestCar->OwnedUid().IsEmpty() || NearestCar->bDemonstrator)
+		{
+			Current.Prompt = NearestCar->bDemonstrator ? TEXT("Take it for a lap") : TEXT("Get in");
+		}
+		else if (!Current.CarId.IsEmpty())
+		{
+			Current.Prompt = TEXT("Make an offer");
+		}
+		else
+		{
+			Current = FDTGInteraction(); // somebody else's car, going somewhere
+		}
 	}
 }
 
@@ -192,6 +218,7 @@ ADTGVehicle* ADTGCharacter::ToggleVehicle()
 		const FVector Side = Driving->GetActorRightVector() * -140.0f;
 		SetActorLocation(Driving->GetActorLocation() + Side + FVector(0.0f, 0.0f, 100.0f));
 		SetActorHiddenInGame(false);
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 		// Back to a walking camera: close in, over the shoulder.
 		CameraBoom->TargetArmLength = WalkingBoomLength;
@@ -212,6 +239,10 @@ ADTGVehicle* ADTGCharacter::ToggleVehicle()
 	Driving = Target;
 	Driving->bPlayerDriven = true;
 	SetActorHiddenInGame(true);
+	// Hidden is not the same as absent. The driver rides along on the car's own origin, and the Pawn
+	// profile blocks the channel a car body sweeps on -- so without this the player's own capsule sits
+	// inside their car reporting a blocking hit every frame, and the car cannot be driven at all.
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GetCharacterMovement()->SetMovementMode(MOVE_None);
 	// The hidden driver rides along inside the car and stays the view target, so the boom it already
 	// carries becomes the chase camera: pulled back behind the car, raised, and lagging a little so
@@ -417,8 +448,7 @@ void ADTGCharacter::UsePower(int32 Slot)
 		// leaves them flying, or sprinting, for the rest of the game.
 		GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 		GetCharacterMovement()->MaxFlySpeed = static_cast<float>(600.0 * Effect.Potency);
-		FTimerHandle Landing;
-		GetWorldTimerManager().SetTimer(Landing, FTimerDelegate::CreateWeakLambda(this, [this]()
+		GetWorldTimerManager().SetTimer(FlightTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
 			// Unless they are in a car by then, in which case the movement mode is not theirs to set.
 			if (!DrivingNow() && GetCharacterMovement()->MovementMode == MOVE_Flying)
@@ -431,8 +461,7 @@ void ADTGCharacter::UsePower(int32 Slot)
 	case PowerEffect::SuperSpeed:
 	{
 		GetCharacterMovement()->MaxWalkSpeed = WalkSpeed * static_cast<float>(1.0 + Effect.Potency);
-		FTimerHandle SlowDown;
-		GetWorldTimerManager().SetTimer(SlowDown, FTimerDelegate::CreateWeakLambda(this, [this]()
+		GetWorldTimerManager().SetTimer(SpeedTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
 			GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 		}), static_cast<float>(FMath::Max(1.0, Effect.DurationS)), false);
@@ -487,8 +516,14 @@ void ADTGCharacter::UsePower(int32 Slot)
 	{
 		SetActorHiddenInGame(true);
 		// Visible again when the effect runs out.
-		FTimerHandle Handle;
-		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]() { SetActorHiddenInGame(false); }),
+		// Not while driving: the same flag hides the driver inside the car.
+		GetWorldTimerManager().SetTimer(InvisibilityTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (!DrivingNow())
+				{
+					SetActorHiddenInGame(false);
+				}
+			}),
 			static_cast<float>(FMath::Max(0.5, Effect.DurationS)), false);
 		break;
 	}

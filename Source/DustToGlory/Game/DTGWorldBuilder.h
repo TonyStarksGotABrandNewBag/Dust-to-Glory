@@ -91,6 +91,8 @@ private:
 	void ReleaseChunk(int32 Index);
 	/** True when that square of ground is already built. */
 	bool HasChunk(int32 ChunkX, int32 ChunkY) const;
+	/** Finds the simulation subsystem if it has not been found yet. True when there is content to build. */
+	bool EnsureGame();
 	/** A spare terrain component from the pool, or a new one. */
 	UProceduralMeshComponent* TakeTerrainPart(int32& OutIndex);
 	/** A flat, axis-aligned slab (streets, parking, venue aprons). */

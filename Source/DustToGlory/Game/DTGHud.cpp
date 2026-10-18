@@ -695,7 +695,9 @@ void ADTGHud::Choose(int32 Index)
 				{
 					Player->ToggleVehicle(); // you cannot be sitting in the one being replaced
 				}
-				Mode->PlaceOwnedCar(Uid, Player->GetActorLocation());
+				// The street outside, not the interior pocket: the garage menu is reached from indoors,
+				// where the player's own location is half a million units below the map.
+				Mode->PlaceOwnedCar(Uid, Player->InterestPoint());
 				OnNotice(TEXT("It's outside."));
 			}
 			else

@@ -2,7 +2,6 @@
 
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
-#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -167,7 +166,13 @@ void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSecond
 	const double Life = Game->Sim().Outbreak.StreetLife();
 	const int32 Want = FMath::RoundToInt32(TrafficCars * Life);
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (Drivers.Num() < Want && Now > NextSpawn)
+	int32 Civilians = 0;
+	for (const FDTGDriver& Driver : Drivers)
+	{
+		Civilians += Driver.bPolice ? 0 : 1;
+	}
+	// Counted without the police, or a five-star response empties the streets it is chasing you through.
+	if (Civilians < Want && Now > NextSpawn)
 	{
 		NextSpawn = Now + 0.25;
 		const int32 Node = PickNode(Around, /*bFar*/ true);
@@ -211,19 +216,20 @@ void ADTGTrafficDirector::UpdatePolice(const FVector& Around)
 		}
 		return;
 	}
-	const int32 Node = PickNode(Around, /*bFar*/ true);
-	const FVector At = NodeLocation(Node);
-	if (At.IsNearlyZero())
-	{
-		return;
-	}
 	// One unit at a time, like ordinary traffic. Without this the whole response arrives inside a few
 	// frames -- each one picking a model, building a chassis and generating a mesh -- which is both a
-	// visible hitch and a police force that teleports in rather than converging.
+	// visible hitch and a police force that teleports in rather than converging. Checked before the
+	// node is picked, because picking one is the expensive part and most frames do not get to spawn.
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	if (Now < NextPoliceSpawn)
 	{
 		return;
+	}
+	const int32 Node = PickNode(Around, /*bFar*/ true);
+	const FVector At = NodeLocation(Node);
+	if (At.IsNearlyZero() || FVector::Dist(At, Around) > DespawnRadiusM * DTGMetresToUnreal)
+	{
+		return; // nowhere to come from that is not already out of sight
 	}
 	NextPoliceSpawn = Now + 0.7;
 	if (ADTGVehicle* Car = SpawnCar(At + FVector(0.0f, 0.0f, 60.0f), 0.0, /*bPolice*/ true))
@@ -326,7 +332,11 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSe
 		if (ACharacter* Person = Cast<ACharacter>(Walker.Actor))
 		{
 			const FVector Direction = (Walker.Target - Person->GetActorLocation()).GetSafeNormal2D();
-			Person->AddMovementInput(Direction, 1.0f);
+			// Forced, because a pawn with no local controller ignores movement input outright. Letting the
+		// movement component run (bRunPhysicsWithNoController, where they are spawned) only gets them
+		// gravity; without this they stand on the pavement for ever, turning to face where they meant
+		// to walk.
+		Person->AddMovementInput(Direction, 1.0f, /*bForce*/ true);
 			if (!Direction.IsNearlyZero())
 			{
 				Person->SetActorRotation(FRotator(0.0, Direction.Rotation().Yaw, 0.0));

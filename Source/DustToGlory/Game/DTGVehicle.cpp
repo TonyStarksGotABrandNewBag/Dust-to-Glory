@@ -7,6 +7,7 @@
 #include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
 #include "Materials/MaterialInterface.h"
 
 #include "Game/DTGEngineAudio.h"
@@ -371,8 +372,10 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 	const double Closing = Sim.ResolveContact(Point, Normal, /*Restitution*/ 0.15, /*Friction*/ 0.6, OtherVelocity);
 	if (Closing > 4.0 && Game && bPlayerDriven)
 	{
-		// A real hit is property damage the police may hear about, and wear on the car.
-		Game->Sim().ReportCrime(Crime::PropertyDamage, false, true);
+		// A real hit is property damage -- reported as seen only if somebody was there to see it, which
+		// is what decides whether the police ever hear about it.
+		const bool bSeen = Hit.GetActor() != nullptr && Hit.GetActor()->IsA(ACharacter::StaticClass());
+		Game->Sim().ReportCrime(Crime::PropertyDamage, false, bSeen);
 	}
 	// Stop where the sweep stopped. PenetrationDepth is zero for an ordinary blocking hit, so backing
 	// out by it left the car at the far end of the sweep -- inside the wall by however far it was

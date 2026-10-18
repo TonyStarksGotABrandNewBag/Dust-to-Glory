@@ -9,7 +9,6 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 
-#include "Sim/CityLayout.h"
 #include "Sim/Powers.h"
 
 #include "DTGCharacter.generated.h"
@@ -113,6 +112,11 @@ private:
 	TObjectPtr<UCameraComponent> Camera;
 
 	void UpdateFocus();
+
+	/** One per power effect that wears off, so using it again restarts the clock rather than racing it. */
+	FTimerHandle FlightTimer;
+	FTimerHandle SpeedTimer;
+	FTimerHandle InvisibilityTimer;
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
