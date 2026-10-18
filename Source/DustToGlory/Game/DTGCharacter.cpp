@@ -231,6 +231,73 @@ bool ADTGCharacter::LeaveBuilding()
 	return true;
 }
 
+FString ADTGCharacter::EngageNearest()
+{
+	if (!Game || !Game->IsContentLoaded())
+	{
+		return FString();
+	}
+	// Whoever is closest and in front: the simulation is told about them so they can be hit and hit back.
+	ACharacter* Target = nullptr;
+	FString MindId;
+	double Best = FMath::Square(350.0);
+	const FVector Facing = GetActorForwardVector();
+	for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+	{
+		if (*It == this || It->IsPlayerControlled())
+		{
+			continue;
+		}
+		const FVector Toward = It->GetActorLocation() - GetActorLocation();
+		if (FVector::DotProduct(Toward.GetSafeNormal2D(), Facing) < 0.3)
+		{
+			continue; // behind you
+		}
+		const double Distance = Toward.SizeSquared();
+		if (Distance >= Best)
+		{
+			continue;
+		}
+		for (const FName& Tag : It->Tags)
+		{
+			const FString Name = Tag.ToString();
+			if (Name.StartsWith(TEXT("mind:")) || Name.StartsWith(TEXT("super:")))
+			{
+				Best = Distance;
+				Target = *It;
+				MindId = Name.RightChop(Name.StartsWith(TEXT("mind:")) ? 5 : 6);
+			}
+		}
+	}
+	if (!Target || MindId.IsEmpty())
+	{
+		return FString();
+	}
+	const bool bSuperhuman = Target->ActorHasTag(FName(*FString::Printf(TEXT("super:%s"), *MindId)));
+	return UTF8_TO_TCHAR(Game->Sim().EngageFighter(TCHAR_TO_UTF8(*MindId), std::string(), bSuperhuman,
+		bSuperhuman ? 3 : 0).c_str());
+}
+
+void ADTGCharacter::Punch()
+{
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now < NextSwing || !Game || !Game->IsContentLoaded())
+	{
+		return;
+	}
+	NextSwing = Now + 0.55;
+	const FString Target = EngageNearest();
+	if (Target.IsEmpty())
+	{
+		return;
+	}
+	const StrikeResult Result = Game->Sim().Strike(TCHAR_TO_UTF8(*Target), StrikeKind::Fist);
+	if (!Result.Summary.empty())
+	{
+		Game->OnNotice.Broadcast(UTF8_TO_TCHAR(Result.Summary.c_str()));
+	}
+}
+
 void ADTGCharacter::UsePower(int32 Slot)
 {
 	if (!Game || !Game->IsContentLoaded() || Slot < 0 || Slot >= PowerSet::SlotCount)
@@ -263,6 +330,16 @@ void ADTGCharacter::UsePower(int32 Slot)
 			{
 				Witnesses.push_back(TCHAR_TO_UTF8(*Name.RightChop(5)));
 			}
+		}
+	}
+	// If someone is in front of you, the power lands on them; otherwise it is just used.
+	const FString Target = EngageNearest();
+	if (!Target.IsEmpty())
+	{
+		const StrikeResult Hit = Game->Sim().Strike(TCHAR_TO_UTF8(*Target), StrikeKind::Power, Slot);
+		if (!Hit.Summary.empty())
+		{
+			Game->OnNotice.Broadcast(UTF8_TO_TCHAR(Hit.Summary.c_str()));
 		}
 	}
 	const GameState::PowerUse Used = Game->Sim().UsePower(Slot, Witnesses, /*bInPublic*/ true);

@@ -6,6 +6,7 @@
 #include "Sim/CityLayout.h"
 #include "Sim/Careers.h"
 #include "Sim/Clock.h"
+#include "Sim/Combat.h"
 #include "Sim/Conspiracy.h"
 #include "Sim/Economy.h"
 #include "Sim/Events.h"
@@ -147,6 +148,7 @@ namespace dtg::sim
 		JusticeSystem Justice;
 		OutbreakSystem Outbreak;
 		ConspiracySystem Scheme;
+		CombatSystem Fights;
 		std::vector<Crime> OpenCharges;          // crimes reported during the current police chase
 		std::string PhoneNumber;                 // written on notes left for car owners
 		std::vector<PrivateCar> PrivateCars;     // parked cars the player has dealt with (others are regenerated)
@@ -342,6 +344,20 @@ namespace dtg::sim
 		ActionResult CallOffScheme();
 		/** Knocked out (lost a fight or a crash): hospital bill. */
 		Money Hospitalized();
+
+		// ---------------------------------------------------------------- Fighting
+		/** Brings someone into a fight (a bystander, a hero, a villain). Returns their id. */
+		std::string EngageFighter(const std::string& Id, const std::string& Name, bool bSuperhuman, int Threat);
+		/** Generates a hero or villain and brings them in; returns their id. */
+		std::string EngageSuperhuman(Alignment Side, int Threat);
+		/**
+		 * Hits someone. A bystander is assault and the police may hear; a wanted villain pays their bounty.
+		 * Using a power is how a power gets used in a fight, so it levels and mutates like any other use.
+		 */
+		StrikeResult Strike(const std::string& Id, StrikeKind Kind, int PowerSlot = -1);
+		/** Everyone still standing hits back. The player waking up at the hospital is handled here. */
+		std::vector<std::string> FightBack();
+		double Health() const { return Fights.PlayerHealth(); }
 
 		Money NetWorth() const;
 		std::vector<std::string> TakeNotifications();

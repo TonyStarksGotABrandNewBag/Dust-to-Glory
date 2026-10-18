@@ -85,11 +85,18 @@ private:
 	UPROPERTY()
 	TObjectPtr<UDTGEngineAudio> Audio;
 
+	/** Headlights, switched on by the sky when it gets dark. */
+	UPROPERTY()
+	TArray<TObjectPtr<class USpotLightComponent>> Headlights;
+
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
 
 	UPROPERTY()
 	TObjectPtr<ADTGWorldBuilder> World;
+
+	UPROPERTY()
+	TObjectPtr<class ADTGSky> Sky;
 
 	dtg::sim::ChassisSim Sim;
 	dtg::sim::VehicleSetup Setup;

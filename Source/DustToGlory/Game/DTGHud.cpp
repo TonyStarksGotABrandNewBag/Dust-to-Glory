@@ -6,11 +6,16 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "EngineUtils.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGEventDirector.h"
 #include "Game/DTGInterior.h"
+#include "Game/DTGWorldBuilder.h"
 #include "Game/DTGPlayerController.h"
 #include "Game/DTGVehicle.h"
 
@@ -108,6 +113,7 @@ void ADTGHud::DrawHUD()
 		DrawOnFoot(*Player);
 	}
 	DrawMinimap();
+	DrawFight();
 	DrawNotices();
 	if (Current != EDTGScreen::None)
 	{
@@ -142,6 +148,15 @@ void ADTGHud::DrawStatusBar()
 	if (Sim.Justice.IsFugitive())
 	{
 		Text(TEXT("WANTED: ESCAPEE"), Canvas->SizeX - 420.0f, 8.0f, FLinearColor(0.95f, 0.3f, 0.25f));
+	}
+	// Health, but only once something has happened to it.
+	if (Sim.Health() < CombatSystem::PlayerMaxHealth - 0.5)
+	{
+		const float BarW = 220.0f;
+		const float Fraction = static_cast<float>(Sim.Health() / CombatSystem::PlayerMaxHealth);
+		Panel(16.0f, 42.0f, BarW, 14.0f, FLinearColor(0.1f, 0.03f, 0.03f, 0.85f));
+		Panel(16.0f, 42.0f, BarW * Fraction, 14.0f,
+			Fraction > 0.5f ? FLinearColor(0.3f, 0.7f, 0.3f) : FLinearColor(0.85f, 0.35f, 0.2f));
 	}
 	const int Unread = Sim.Phone.Unread();
 	if (Unread > 0)
@@ -244,6 +259,31 @@ void ADTGHud::DrawMinimap()
 		}
 	}
 	Panel(X + Size * 0.5f - 3.0f, Y + Size * 0.5f - 3.0f, 6.0f, 6.0f, Accent);
+}
+
+void ADTGHud::DrawFight()
+{
+	const GameState& Sim = Game->Sim();
+	if (Sim.Fights.Fighters().empty())
+	{
+		return;
+	}
+	// Who you are up against, and how they are doing.
+	float Y = Canvas->SizeY * 0.3f;
+	const float X = Canvas->SizeX - 290.0f;
+	for (const Fighter& Who : Sim.Fights.Fighters())
+	{
+		if (Who.IsDown())
+		{
+			continue;
+		}
+		Panel(X - 10.0f, Y - 4.0f, 270.0f, 36.0f, PanelColour);
+		Text(Utf8(Who.Name), X, Y, Who.bSuperhuman ? FLinearColor(0.95f, 0.55f, 0.95f) : FLinearColor::White, 0.9f);
+		const float Fraction = static_cast<float>(Who.Health / FMath::Max(1.0, Who.MaxHealth));
+		Panel(X, Y + 20.0f, 250.0f, 8.0f, FLinearColor(0.1f, 0.03f, 0.03f, 0.9f));
+		Panel(X, Y + 20.0f, 250.0f * Fraction, 8.0f, FLinearColor(0.8f, 0.3f, 0.25f));
+		Y += 42.0f;
+	}
 }
 
 void ADTGHud::DrawNotices()
@@ -379,7 +419,20 @@ TArray<FString> ADTGHud::BuildOptions() const
 		Options.Add(TEXT("Walk away"));
 		break;
 	}
+	case EDTGScreen::Events:
+		for (int32 Kind = 0; Kind < static_cast<int32>(EventKind::Count); ++Kind)
+		{
+			const VenuePlan* Venue = Sim.City.FindVenue(static_cast<EventKind>(Kind));
+			for (int32 Tier = 1; Tier <= 3; ++Tier)
+			{
+				Options.Add(FString::Printf(TEXT("%s, tier %d  --  %s at %s"), UTF8_TO_TCHAR(EventKindName(static_cast<EventKind>(Kind))),
+					Tier, *Cash(Sim.EventEntryFee(static_cast<EventKind>(Kind), Tier)),
+					Venue ? *Utf8(Venue->Name) : TEXT("no venue")));
+			}
+		}
+		break;
 	case EDTGScreen::Title:
+		Options.Add(TEXT("Enter an event"));
 		Options.Add(TEXT("Continue"));
 		Options.Add(TEXT("New game"));
 		Options.Add(TEXT("Save"));
@@ -451,6 +504,10 @@ void ADTGHud::DrawMenu()
 				*Utf8(AwarenessStageName(Mind->Stage)));
 		}
 		break;
+	case EDTGScreen::Events:
+		Title = TEXT("What's on");
+		Subtitle = TEXT("You race in whatever you drove here");
+		break;
 	case EDTGScreen::Title:
 	{
 		Title = TEXT("Dust to Glory");
@@ -506,6 +563,7 @@ void ADTGHud::Choose(int32 Index)
 	case EDTGScreen::Building: RunBuildingService(Selection); break;
 	case EDTGScreen::Talk: RunTalkOption(Selection); break;
 	case EDTGScreen::Title: RunTitleOption(Selection); break;
+	case EDTGScreen::Events: RunEventOption(Selection); break;
 	case EDTGScreen::Court: RunCourtOption(Selection); break;
 	case EDTGScreen::Jail: RunJailOption(Selection); break;
 	case EDTGScreen::Phone:
@@ -647,27 +705,74 @@ void ADTGHud::RunTitleOption(int32 Index)
 {
 	switch (Index)
 	{
-	case 0: Close(); break;
-	case 1:
+	case 0: Open(EDTGScreen::Events); break;
+	case 1: Close(); break;
+	case 2:
+	{
 		Game->StartNewGame(TEXT("Newcomer"));
-		OnNotice(TEXT("A new life in Longs."));
+		const StateCity* Start = Game->Sim().Map.StartCity();
+		OnNotice(FString::Printf(TEXT("A new life in %s."), Start ? *Utf8(Start->Name) : TEXT("town")));
 		Close();
 		break;
-	case 2: OnNotice(Game->SaveGame() ? TEXT("Saved.") : TEXT("Couldn't write the save file.")); break;
-	case 3: OnNotice(Game->LoadGame() ? TEXT("Loaded.") : TEXT("No save to load.")); break;
+	}
+	case 3: OnNotice(Game->SaveGame() ? TEXT("Saved.") : TEXT("Couldn't write the save file.")); break;
+	case 4: OnNotice(Game->LoadGame() ? TEXT("Loaded.") : TEXT("No save to load.")); break;
 	default:
 	{
 		// Switching states rebuilds the world and starts a new life in it.
-		const TArray<FString> States = Game->AvailableStates();
-		const int32 Which = Index - 4;
-		if (States.IsValidIndex(Which) && States[Which] != Game->StateFile())
+		const TArray<FString>& States = Game->AvailableStates();
+		const int32 Which = Index - 5;
+		if (!States.IsValidIndex(Which) || States[Which] == Game->StateFile())
 		{
-			OnNotice(Game->SwitchState(States[Which], TEXT("Newcomer")) ? TEXT("A new life, somewhere else entirely.")
-																		: TEXT("That state wouldn't load."));
-			Close();
+			break;
 		}
+		if (!Game->SwitchState(States[Which], TEXT("Newcomer")))
+		{
+			OnNotice(TEXT("That state wouldn't load."));
+			break;
+		}
+		// The simulation now holds a different world, so everything standing in the old one has to go.
+		if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
+		{
+			Builder->Rebuild();
+		}
+		for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+		{
+			It->Destroy();
+		}
+		for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+		{
+			if (!It->IsPlayerControlled())
+			{
+				It->Destroy();
+			}
+		}
+		if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
+		{
+			const CityPlan& World = Game->Sim().City;
+			const double GroundZ = Game->Sim().Map.HeightAt(World.SpawnX, World.SpawnY);
+			Player->LeaveBuilding();
+			Player->SetActorLocation(Game->ToUnreal(World.SpawnX, World.SpawnY, GroundZ + 1.0));
+		}
+		OnNotice(TEXT("A new life, somewhere else entirely."));
+		Close();
 		break;
 	}
+	}
+}
+
+void ADTGHud::RunEventOption(int32 Index)
+{
+	const int32 Kind = Index / 3;
+	const int32 Tier = 1 + Index % 3;
+	if (Kind < 0 || Kind >= static_cast<int32>(EventKind::Count))
+	{
+		return;
+	}
+	ADTGEventDirector* Director = Cast<ADTGEventDirector>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGEventDirector::StaticClass()));
+	if (Director && Director->StartEvent(static_cast<EventKind>(Kind), Tier))
+	{
+		Close();
 	}
 }
 

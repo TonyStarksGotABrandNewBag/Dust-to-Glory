@@ -38,6 +38,11 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** The streamed ground, which vehicles exclude from their body sweeps (their wheels ride on it). */
+	UProceduralMeshComponent* TerrainComponent() const { return Terrain; }
+	/** Throws away everything built and builds it again: the state changed under us. */
+	void Rebuild();
+
 	/** Ground height (Unreal Z) under a world point, from the simulation's terrain, roads and water. */
 	double GroundHeightAt(const FVector& World) const;
 	/** True when the point is under open water (for swimming, drowning engines and boat-less bridges). */

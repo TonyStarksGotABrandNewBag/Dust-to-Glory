@@ -66,6 +66,9 @@ public:
 	int32 FieldSize() const { return Racers.Num(); }
 	int32 LapsToRun() const { return Laps; }
 	int32 PlayerLap() const;
+	/** The last event's result, for the HUD to show after the flag. */
+	int32 LastResultPosition() const { return LastPosition; }
+	int32 LastResultField() const { return LastField; }
 
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Events")
 	int32 DefaultField = 8;
@@ -92,6 +95,8 @@ private:
 	EDTGRaceState State = EDTGRaceState::Idle;
 	int32 Tier = 1;
 	int32 Laps = 1;
+	int32 LastPosition = 0;
+	int32 LastField = 0;
 	double StateUntil = 0.0;
 	double StartedAt = 0.0;
 };

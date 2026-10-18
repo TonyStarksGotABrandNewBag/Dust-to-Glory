@@ -82,6 +82,25 @@ void ADTGWorldBuilder::AddSlab(FDTGMesh& Mesh, double MinX, double MinY, double 
 		FVector(MinX * S, MaxY * S, Z * S), FVector::UpVector, Color);
 }
 
+void ADTGWorldBuilder::Rebuild()
+{
+	// Switching states replaces the whole world, so everything standing has to go first.
+	Terrain->ClearAllMeshSections();
+	Surfaces->ClearAllMeshSections();
+	Buildings->ClearAllMeshSections();
+	Water->ClearAllMeshSections();
+	Chunks.Reset();
+	FreeSections.Reset();
+	Pending.Reset();
+	NextSection = 0;
+	bBuilt = false;
+	if (Game && Game->IsContentLoaded())
+	{
+		BuildStaticWorld();
+		bBuilt = true;
+	}
+}
+
 void ADTGWorldBuilder::BuildStaticWorld()
 {
 	BuildTownStreets();

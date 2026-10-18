@@ -11,6 +11,7 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGHud.h"
 #include "Game/DTGPlayerController.h"
+#include "Game/DTGSky.h"
 #include "Game/DTGTrafficDirector.h"
 #include "Game/DTGVehicle.h"
 #include "Game/DTGWorldBuilder.h"
@@ -81,6 +82,8 @@ void ADTGGameMode::SpawnDirectors()
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Traffic = GetWorld()->SpawnActor<ADTGTrafficDirector>(ADTGTrafficDirector::StaticClass(), FTransform::Identity, Params);
+	// The sun, sky and fog follow the simulation's clock and weather.
+	Sky = GetWorld()->SpawnActor<ADTGSky>(ADTGSky::StaticClass(), FTransform::Identity, Params);
 	Events = GetWorld()->SpawnActor<ADTGEventDirector>(ADTGEventDirector::StaticClass(), FTransform::Identity, Params);
 }
 

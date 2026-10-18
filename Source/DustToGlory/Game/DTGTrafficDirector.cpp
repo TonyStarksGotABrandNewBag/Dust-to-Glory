@@ -359,13 +359,15 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSe
 		{
 			return;
 		}
-		DressPerson(Person, FMath::Rand());
+		// Dressed after the mind id is known, so the same passer-by looks the same every time.
 		FDTGWalker Walker;
 		Walker.Actor = Person;
 		// Keyed to the block they live around, so the same passer-by remembers the player between visits.
 		Walker.MindId = FString::Printf(TEXT("ped-%d-%d"), FMath::RoundToInt32(Block.CenterX()), FMath::RoundToInt32(Block.CenterY()));
 		// Tagged so anything that needs to know whose mind this is (power witnesses, conversations) can ask.
 		Person->Tags.Add(FName(*FString::Printf(TEXT("mind:%s"), *Walker.MindId)));
+		// Seeded from the id, and kept clear of 1 and 2, which dress a hero and a villain.
+		DTGMeshBuilder::DressPerson(Person, 3 + static_cast<int32>(GetTypeHash(Walker.MindId) % 1000u));
 		Walker.Target = Person->GetActorLocation();
 		Walkers.Add(Walker);
 		return;

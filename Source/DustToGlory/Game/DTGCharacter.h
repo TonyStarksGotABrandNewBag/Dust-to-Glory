@@ -68,6 +68,11 @@ public:
 	/** Uses one of the three power slots. Mutations and level-ups are reported through the subsystem. */
 	void UsePower(int32 Slot);
 
+	/** Throws a punch at whoever is in front. Powers are used through UsePower and hit the same way. */
+	void Punch();
+	/** Anyone in reach, as a fighter the simulation knows about. Empty when there's nobody. */
+	FString EngageNearest();
+
 	/** Steps inside a building (or back out of one). Returns true if the player moved. */
 	bool EnterBuilding(int32 BuildingId);
 	bool LeaveBuilding();
@@ -93,11 +98,11 @@ private:
 	TObjectPtr<ADTGVehicle> Driving;
 
 	UPROPERTY()
-	UPROPERTY()
 	TObjectPtr<ADTGInterior> Interior;
 
 	FDTGInteraction Current;
 	int32 InsideBuildingId = -1;
+	double NextSwing = 0.0;
 	FVector OutsideLocation = FVector::ZeroVector;
 	double NextPowerTime[dtg::sim::PowerSet::SlotCount] = {};
 };

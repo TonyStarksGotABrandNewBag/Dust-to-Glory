@@ -3,6 +3,7 @@
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
 #include "Components/BoxComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -11,6 +12,7 @@
 #include "Game/DTGEngineAudio.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
+#include "Game/DTGSky.h"
 #include "Game/DTGWorldBuilder.h"
 
 using namespace dtg::sim;
@@ -95,6 +97,20 @@ ADTGVehicle::ADTGVehicle()
 		WheelMeshes.Add(Wheel);
 	}
 
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		USpotLightComponent* Lamp = CreateDefaultSubobject<USpotLightComponent>(*FString::Printf(TEXT("Headlight%d"), Index));
+		Lamp->SetupAttachment(Body);
+		Lamp->SetMobility(EComponentMobility::Movable);
+		Lamp->SetIntensity(12000.0f);
+		Lamp->SetAttenuationRadius(5500.0f);
+		Lamp->SetInnerConeAngle(18.0f);
+		Lamp->SetOuterConeAngle(38.0f);
+		Lamp->SetLightColor(FLinearColor(1.0f, 0.97f, 0.88f));
+		Lamp->SetVisibility(false);
+		Headlights.Add(Lamp);
+	}
+
 	Audio = CreateDefaultSubobject<UDTGEngineAudio>(TEXT("EngineAudio"));
 	Audio->SetupAttachment(Body);
 }
@@ -176,6 +192,14 @@ void ADTGVehicle::ApplyVisuals()
 	const double FrontRadius = FMath::Max(0.2, Setup.FrontTire.RadiusM);
 	const double RearRadius = FMath::Max(0.2, Setup.RearTire.RadiusM);
 	const double TireWidth = FMath::Clamp(0.22 * WidthM, 0.16, 0.42);
+	for (int32 Index = 0; Index < Headlights.Num(); ++Index)
+	{
+		if (Headlights[Index])
+		{
+			Headlights[Index]->SetRelativeLocation(FVector(0.48 * LengthM * S, (Index == 0 ? -1 : 1) * 0.33 * WidthM * S,
+				-0.1 * HeightM * S));
+		}
+	}
 	for (int32 Index = 0; Index < WheelMeshes.Num(); ++Index)
 	{
 		if (!WheelMeshes[Index])
@@ -237,6 +261,23 @@ void ADTGVehicle::Tick(float DeltaSeconds)
 		WheelMeshes[Index]->SetRelativeRotation(Rotation);
 	}
 
+	// Headlights come on when the sky says it is dark, and only for cars near enough to matter.
+	if (!Headlights.IsEmpty())
+	{
+		if (!Sky)
+		{
+			Sky = Cast<ADTGSky>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGSky::StaticClass()));
+		}
+		const bool bOn = Sky && Sky->IsNight();
+		for (TObjectPtr<USpotLightComponent>& Lamp : Headlights)
+		{
+			if (Lamp && Lamp->GetVisibleFlag() != bOn)
+			{
+				Lamp->SetVisibility(bOn);
+			}
+		}
+	}
+
 	if (Audio)
 	{
 		const DynamicsTelemetry& Telemetry = Sim.Dynamics().Telemetry();
@@ -294,7 +335,8 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DTGBody), /*bTraceComplex*/ false, this);
 	if (World)
 	{
-		Params.AddIgnoredActor(World);
+		// Only the ground: buildings, streets and venue slabs belong to the same actor and must be hit.
+		Params.AddIgnoredComponent(World->TerrainComponent());
 	}
 	FHitResult Hit;
 	const FQuat Rotation = ToUnrealQuat(Sim.State.Orientation);

@@ -50,6 +50,7 @@ private:
 	void OnPowerOne();
 	void OnPowerTwo();
 	void OnPowerThree();
+	void OnPunch();
 
 	// Driving
 	void OnThrottle(const struct FInputActionValue& Value);
@@ -76,6 +77,8 @@ private:
 	TObjectPtr<UInputAction> LookAction;
 	UPROPERTY()
 	TObjectPtr<UInputAction> JumpAction;
+	UPROPERTY()
+	TObjectPtr<UInputAction> PunchAction;
 	UPROPERTY()
 	TObjectPtr<UInputAction> InteractAction;
 	UPROPERTY()
@@ -112,4 +115,5 @@ private:
 	bool bDrivingContext = false;
 	bool bScrollHeld = false;
 	double NextScroll = 0.0;
+	float NextFightTurn = 1.0f;
 };

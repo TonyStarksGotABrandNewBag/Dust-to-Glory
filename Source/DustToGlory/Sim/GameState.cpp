@@ -860,6 +860,7 @@ namespace dtg::sim
 		OpenCharges.clear();
 		Outbreak = OutbreakSystem();
 		Scheme = ConspiracySystem();
+		Fights = CombatSystem();
 		Phone = Inbox();
 		NextOfferId = 1;
 		bManualTransmission = false;
@@ -1161,6 +1162,7 @@ namespace dtg::sim
 		{
 			Report.bWeatherChanged = true;
 		}
+		Fights.Recover(1, Player.SkillLevel(Skill::Fitness));
 		for (const DeliveryEvent& Event : Homes.Update(Minute))
 		{
 			Report.Deliveries.push_back(Event);
@@ -2638,6 +2640,99 @@ namespace dtg::sim
 		}
 		Funds.TrySpend(Fee, MoneyCategory::Fine, "Expungement", Clock.TotalMinutes());
 		return ActionResult::Success("The court granted your petition. Old convictions are sealed.");
+	}
+
+	// ==================================================================================== Fighting
+
+	std::string GameState::EngageFighter(const std::string& Id, const std::string& Name, bool bSuperhuman, int Threat)
+	{
+		Fighter Who;
+		Who.Id = Id;
+		Who.Name = Name.empty() ? Npcs.GetOrCreate(Id).Name : Name;
+		Who.bSuperhuman = bSuperhuman;
+		Who.Threat = Clamp(Threat, 0, 5);
+		if (bSuperhuman)
+		{
+			Who.MaxHealth = 220.0 + 90.0 * Who.Threat;
+			Who.Skill = Clamp(0.4 + 0.1 * Who.Threat, 0.0, 0.95);
+			Who.Bounty = Dollars(1500) * (Who.Threat + 1);
+		}
+		else
+		{
+			// An ordinary person fights like one, and what they can take depends on how fit they are.
+			const NpcMind& Mind = Npcs.GetOrCreate(Id);
+			Who.MaxHealth = 70.0 + 6.0 * Mind.SkillLevel(Skill::Fitness);
+			Who.Skill = Clamp(0.1 + 0.06 * Mind.SkillLevel(Skill::Fitness), 0.0, 0.8);
+		}
+		Who.Health = Who.MaxHealth;
+		return Fights.Engage(Who).Id;
+	}
+
+	std::string GameState::EngageSuperhuman(Alignment Side, int Threat)
+	{
+		const Superhuman Who = GenerateSuperhuman(Powers, Side, Threat, Random);
+		const std::string Id = EngageFighter(Who.Id, Who.Codename, true, Who.Threat);
+		Notify(Who.Codename + " is here. " + Who.Motive);
+		return Id;
+	}
+
+	StrikeResult GameState::Strike(const std::string& Id, StrikeKind Kind, int PowerSlot)
+	{
+		double Potency = 0.0;
+		if (Kind == StrikeKind::Power && PowerSlot >= 0)
+		{
+			// Fighting with a power is using it: it levels and mutates exactly as it would anywhere else.
+			const PowerUse Used = UsePower(PowerSlot, std::vector<std::string>{Id}, true);
+			if (!Used.bOk)
+			{
+				StrikeResult Blocked;
+				Blocked.Summary = Used.Message;
+				return Blocked;
+			}
+			Potency = Used.Power.Potency;
+		}
+		const StrikeResult Result = Fights.Strike(Id, Kind, Player.SkillLevel(Skill::Fitness), Potency, Random);
+		if (!Result.bLanded)
+		{
+			return Result;
+		}
+		Player.AddSkillXp(Skill::Fitness, 6);
+		if (Result.bWasInnocent)
+		{
+			// Hitting someone who isn't fighting back is assault, whoever started it.
+			ReportCrime(Crime::Assault, false, true);
+			NpcMind& Mind = Npcs.GetOrCreate(Id);
+			Mind.Affinity = Clamp(Mind.Affinity - 0.5, -1.0, 1.0);
+			Npcs.Observe(Mind, Stimulus::SawVillain, 0.7, Clock.TotalMinutes(), Random, "Attacked by " + PlayerName, &Powers);
+		}
+		if (Result.bKnockedOut)
+		{
+			Notify(Result.Summary);
+			if (Result.Bounty > 0)
+			{
+				Funds.Deposit(Result.Bounty, MoneyCategory::Reward, "Bounty", Clock.TotalMinutes());
+				Markets.PlayerReputation().Followers += 400;
+				Markets.PlayerReputation().Trust = Clamp(Markets.PlayerReputation().Trust + 0.03, 0.0, 1.0);
+				Notify("Bounty paid: " + FormatMoney(Result.Bounty) + ".");
+			}
+			Fights.Disengage(Id);
+		}
+		return Result;
+	}
+
+	std::vector<std::string> GameState::FightBack()
+	{
+		std::vector<std::string> Messages;
+		Fights.OpponentsAct(Player.SkillLevel(Skill::Fitness), Random, Messages);
+		if (Fights.PlayerIsDown())
+		{
+			// Waking up at the hospital costs money and ends the fight.
+			Hospitalized();
+			Fights.ReviveAtHospital();
+			Fights.Clear();
+			Messages.push_back("You woke up at the hospital.");
+		}
+		return Messages;
 	}
 
 	Money GameState::Hospitalized()

@@ -9,6 +9,7 @@
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
+#include "GameFramework/PlayerController.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
 
@@ -44,6 +45,14 @@ bool ADTGEventDirector::StartEvent(EventKind InKind, int32 InTier)
 	if (Venue->Path.size() < 2)
 	{
 		UE_LOG(LogDTG, Warning, TEXT("%s has no racing line; not charging an entry fee."), UTF8_TO_TCHAR(EventKindName(InKind)));
+		return false;
+	}
+	// You enter a race in a car. Checked before the fee is taken, not after.
+	const ADTGCharacter* Entrant = Cast<ADTGCharacter>(
+		GetWorld()->GetFirstPlayerController() ? GetWorld()->GetFirstPlayerController()->GetPawn() : nullptr);
+	if (!Entrant || !Entrant->DrivingNow())
+	{
+		Game->OnNotice.Broadcast(TEXT("You'll need to be in a car for that."));
 		return false;
 	}
 	// The simulation takes the entry fee and says whether the player can afford to be here.
@@ -331,8 +340,10 @@ void ADTGEventDirector::Finish()
 	Game->OnNotice.Broadcast(Prize > 0
 		? FString::Printf(TEXT("P%d of %d: %s"), Position, Field, UTF8_TO_TCHAR(FormatMoney(Prize).c_str()))
 		: FString::Printf(TEXT("P%d of %d. No money this time."), Position, Field));
+	// The field goes home and the venue is free for the next entry.
 	AbandonEvent();
-	State = EDTGRaceState::Finished; // AbandonEvent clears the field and resets to Idle; the result stands
+	LastPosition = Position;
+	LastField = Field;
 }
 
 void ADTGEventDirector::UpdateSuperhumans(const FVector& Around)
@@ -355,7 +366,13 @@ void ADTGEventDirector::UpdateSuperhumans(const FVector& Around)
 		return;
 	}
 	const Alignment Side = FMath::RandBool() ? Alignment::Hero : Alignment::Villain;
-	const Superhuman Who = GenerateSuperhuman(Game->Sim().Powers, Side, 1 + FMath::RandHelper(5), Game->Sim().Random);
+	// The simulation makes them and keeps them, so a fight uses their real codename, threat and bounty.
+	const std::string Id = Game->Sim().EngageSuperhuman(Side, 1 + FMath::RandHelper(5));
+	const Fighter* Who = Game->Sim().Fights.Find(Id);
+	if (!Who)
+	{
+		return;
+	}
 	const FVector At = Around + FVector(FMath::FRandRange(-12000.0f, 12000.0f), FMath::FRandRange(-12000.0f, 12000.0f), 200.0f);
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
@@ -364,10 +381,9 @@ void ADTGEventDirector::UpdateSuperhumans(const FVector& Around)
 	{
 		return;
 	}
-	DressPerson(Person, Who.Side == Alignment::Hero ? 1 : 2);
-#if !UE_BUILD_SHIPPING
-	UE_LOG(LogDTG, Verbose, TEXT("%s is around: threat %d, %s"), UTF8_TO_TCHAR(Who.Codename.c_str()), Who.Threat,
-		UTF8_TO_TCHAR(Who.Motive.c_str()));
-#endif
+	DTGMeshBuilder::DressPerson(Person, Side == Alignment::Hero ? 1 : 2);
+	// Tagged with the id the simulation gave them, so a punch finds the right fighter.
+	Person->Tags.Add(FName(*FString::Printf(TEXT("super:%s"), UTF8_TO_TCHAR(Id.c_str()))));
+	UE_LOG(LogDTG, Verbose, TEXT("%s is around: threat %d"), UTF8_TO_TCHAR(Who->Name.c_str()), Who->Threat);
 	Superhumans.Add(Person);
 }

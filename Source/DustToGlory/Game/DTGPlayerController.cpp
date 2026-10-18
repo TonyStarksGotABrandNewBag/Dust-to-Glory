@@ -64,6 +64,7 @@ void ADTGPlayerController::BuildInput()
 	LookAction = MakeAction(this, TEXT("IA_Look"), EInputActionValueType::Axis2D);
 	JumpAction = MakeAction(this, TEXT("IA_Jump"), EInputActionValueType::Boolean);
 	InteractAction = MakeAction(this, TEXT("IA_Interact"), EInputActionValueType::Boolean);
+	PunchAction = MakeAction(this, TEXT("IA_Punch"), EInputActionValueType::Boolean);
 	EnterExitAction = MakeAction(this, TEXT("IA_EnterExit"), EInputActionValueType::Boolean);
 	for (int32 Slot = 0; Slot < 3; ++Slot)
 	{
@@ -96,6 +97,8 @@ void ADTGPlayerController::BuildInput()
 	MapKey(FootContext, InteractAction, EKeys::Gamepad_FaceButton_Left);
 	MapKey(FootContext, EnterExitAction, EKeys::F);
 	MapKey(FootContext, EnterExitAction, EKeys::Gamepad_FaceButton_Top);
+	MapKey(FootContext, PunchAction, EKeys::LeftMouseButton);
+	MapKey(FootContext, PunchAction, EKeys::Gamepad_FaceButton_Right);
 	MapKey(FootContext, PowerActions[0], EKeys::One);
 	MapKey(FootContext, PowerActions[1], EKeys::Two);
 	MapKey(FootContext, PowerActions[2], EKeys::Three);
@@ -142,6 +145,7 @@ void ADTGPlayerController::SetupInputComponent()
 	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &ADTGPlayerController::OnJump);
 	Input->BindAction(InteractAction, ETriggerEvent::Started, this, &ADTGPlayerController::OnInteract);
 	Input->BindAction(EnterExitAction, ETriggerEvent::Started, this, &ADTGPlayerController::OnEnterExit);
+	Input->BindAction(PunchAction, ETriggerEvent::Started, this, &ADTGPlayerController::OnPunch);
 	Input->BindAction(PowerActions[0], ETriggerEvent::Started, this, &ADTGPlayerController::OnPowerOne);
 	Input->BindAction(PowerActions[1], ETriggerEvent::Started, this, &ADTGPlayerController::OnPowerTwo);
 	Input->BindAction(PowerActions[2], ETriggerEvent::Started, this, &ADTGPlayerController::OnPowerThree);
@@ -198,6 +202,19 @@ void ADTGPlayerController::SetMenuOpen(bool bOpen)
 void ADTGPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
+	// Anyone the player is fighting takes a swing back, about once a second.
+	if (Game && Game->IsContentLoaded() && !Game->Sim().Fights.Fighters().empty())
+	{
+		NextFightTurn -= DeltaTime;
+		if (NextFightTurn <= 0.0f)
+		{
+			NextFightTurn = 1.0f;
+			for (const std::string& Line : Game->Sim().FightBack())
+			{
+				Game->OnNotice.Broadcast(UTF8_TO_TCHAR(Line.c_str()));
+			}
+		}
+	}
 	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
 	ADTGVehicle* Car = Player ? Player->DrivingNow() : Cast<ADTGVehicle>(GetPawn());
 	if (!Car)
@@ -347,6 +364,18 @@ void ADTGPlayerController::OnEnterExit()
 		{
 			Car->SetDriverInput(DriverInput());
 		}
+	}
+}
+
+void ADTGPlayerController::OnPunch()
+{
+	if (bMenuOpen)
+	{
+		return;
+	}
+	if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn()))
+	{
+		Player->Punch();
 	}
 }
 

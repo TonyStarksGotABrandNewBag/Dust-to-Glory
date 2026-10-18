@@ -365,3 +365,74 @@ DTG_TEST(GettingCaughtCostsEverything)
 	EXPECT(Restored.Scheme.Stage() == SchemeStage::Exposed);
 	EXPECT(Restored.Scheme.Insiders().size() == State.Scheme.Insiders().size());
 }
+
+DTG_TEST(FightsHaveConsequences)
+{
+	GameState State = dtg_test::FreshGame(1201);
+	State.Funds.Deposit(Dollars(20000), MoneyCategory::Other, "test", 0);
+	EXPECT_NEAR(State.Health(), CombatSystem::PlayerMaxHealth, 0.01);
+
+	// Hitting someone who isn't fighting is assault, and the street notices.
+	const std::string Bystander = State.EngageFighter("ped-1", "A passer-by", false, 0);
+	const int StarsBefore = State.Wanted.Stars();
+	bool bLanded = false;
+	for (int Swing = 0; Swing < 8 && !bLanded; ++Swing)
+	{
+		bLanded = State.Strike(Bystander, StrikeKind::Fist).bLanded;
+	}
+	EXPECT(bLanded);
+	EXPECT(State.Npcs.GetOrCreate("ped-1").Affinity < 0.0);
+	EXPECT(State.Wanted.Stars() >= StarsBefore);
+
+	// A villain is a different proposition: harder to hit, hits back, and worth money.
+	GameState Hero = dtg_test::FreshGame(1202);
+	Hero.Player.AddSkillXp(Skill::Fitness, 8000);
+	const std::string Villain = Hero.EngageSuperhuman(Alignment::Villain, 3);
+	const Fighter* Who = Hero.Fights.Find(Villain);
+	EXPECT(Who && Who->bSuperhuman && Who->Bounty > 0 && Who->MaxHealth > CombatSystem::PlayerMaxHealth);
+	const Money CashBefore = Hero.Funds.Balance();
+	int Swings = 0;
+	while (Hero.Fights.Find(Villain) && Swings++ < 200)
+	{
+		Hero.Strike(Villain, StrikeKind::Fist);
+	}
+	EXPECT(!Hero.Fights.Find(Villain));        // they went down
+	EXPECT(Hero.Funds.Balance() > CashBefore); // and the bounty was paid
+	EXPECT(Hero.Markets.PlayerReputation().Followers > 100);
+
+	// Being hit hurts, and losing puts you in hospital with a bill rather than ending the game.
+	GameState Loser = dtg_test::FreshGame(1203);
+	Loser.Funds.Deposit(Dollars(5000), MoneyCategory::Other, "test", 0);
+	const std::string Brute = Loser.EngageSuperhuman(Alignment::Villain, 5);
+	Loser.Strike(Brute, StrikeKind::Fist); // start it
+	const Money Wallet = Loser.Funds.Balance();
+	int Rounds = 0;
+	bool bHospital = false;
+	while (!bHospital && Rounds++ < 400)
+	{
+		for (const std::string& Line : Loser.FightBack())
+		{
+			bHospital = bHospital || Line.find("hospital") != std::string::npos;
+		}
+	}
+	EXPECT(bHospital);
+	EXPECT(Loser.Funds.Balance() < Wallet);                        // the bill
+	EXPECT_NEAR(Loser.Health(), CombatSystem::PlayerMaxHealth, 0.01); // patched up
+	EXPECT(Loser.Fights.Fighters().empty());                       // and the fight is over
+
+	// Health comes back on its own, faster for the fit.
+	GameState Resting = dtg_test::FreshGame(1204);
+	Resting.Fights.Hurt(60.0);
+	const double Hurt = Resting.Health();
+	Resting.Skip(6 * 60);
+	EXPECT(Resting.Health() > Hurt);
+
+	// A fight survives a save.
+	GameState Saved = dtg_test::FreshGame(1205);
+	Saved.EngageSuperhuman(Alignment::Hero, 2);
+	Saved.Fights.Hurt(25.0);
+	GameState Restored = dtg_test::LoadedState();
+	EXPECT(Restored.LoadFromJson(Saved.SaveToJson(), nullptr));
+	EXPECT(Restored.Fights.Fighters().size() == Saved.Fights.Fighters().size());
+	EXPECT_NEAR(Restored.Health(), Saved.Health(), 0.01);
+}

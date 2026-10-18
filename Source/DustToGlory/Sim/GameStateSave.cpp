@@ -584,6 +584,28 @@ namespace dtg::sim
 			SchemeJson.Set("crew", CrewJson);
 			Root.Set("scheme", SchemeJson);
 		}
+		{
+			const CombatSystem::Snapshot Data = Fights.Save();
+			JsonValue FightJson = JsonValue::MakeObject();
+			FightJson.Set("health", Num(Data.Health));
+			JsonValue WhoJson = JsonValue::MakeArray();
+			for (const Fighter& Who : Data.Active)
+			{
+				JsonValue Item = JsonValue::MakeObject();
+				Item.Set("id", Str(Who.Id));
+				Item.Set("name", Str(Who.Name));
+				Item.Set("health", Num(Who.Health));
+				Item.Set("max", Num(Who.MaxHealth));
+				Item.Set("skill", Num(Who.Skill));
+				Item.Set("super", Bool(Who.bSuperhuman));
+				Item.Set("hostile", Bool(Who.bHostile));
+				Item.Set("bounty", Num(static_cast<double>(Who.Bounty)));
+				Item.Set("threat", Num(Who.Threat));
+				WhoJson.Push(Item);
+			}
+			FightJson.Set("fighters", WhoJson);
+			Root.Set("fights", FightJson);
+		}
 		Root.Set("phoneNumber", Str(PhoneNumber));
 		JsonValue CarsJson = JsonValue::MakeArray();
 		for (const PrivateCar& Car : PrivateCars)
@@ -1062,6 +1084,26 @@ namespace dtg::sim
 				Data.Crew.push_back(Member);
 			}
 			Scheme.Load(Data);
+		}
+		{
+			const JsonValue& FightJson = Root.Get("fights");
+			CombatSystem::Snapshot Data;
+			Data.Health = FightJson.GetNumber("health", CombatSystem::PlayerMaxHealth);
+			for (const JsonValue& Item : FightJson.Get("fighters").Items())
+			{
+				Fighter Who;
+				Who.Id = Item.GetString("id");
+				Who.Name = Item.GetString("name");
+				Who.Health = Item.GetNumber("health", 100.0);
+				Who.MaxHealth = Item.GetNumber("max", 100.0);
+				Who.Skill = Item.GetNumber("skill", 0.3);
+				Who.bSuperhuman = Item.GetBool("super");
+				Who.bHostile = Item.GetBool("hostile");
+				Who.Bounty = Item.GetInt64("bounty");
+				Who.Threat = Item.GetInt("threat");
+				Data.Active.push_back(Who);
+			}
+			Fights.Load(Data);
 		}
 		PhoneNumber = Root.GetString("phoneNumber", "(843) 555-0100");
 		PrivateCars.clear();

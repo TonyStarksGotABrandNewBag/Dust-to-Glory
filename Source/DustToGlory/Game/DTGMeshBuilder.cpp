@@ -25,6 +25,7 @@ void FDTGMesh::Append(const FDTGMesh& Other)
 	Normals.Append(Other.Normals);
 	Uvs.Append(Other.Uvs);
 	Colors.Append(Other.Colors);
+	Tangents.Append(Other.Tangents);
 	Tris.Reserve(Tris.Num() + Other.Tris.Num());
 	for (const int32 Index : Other.Tris)
 	{
@@ -108,10 +109,11 @@ void FDTGMesh::AddTaperedBox(const FVector& Min, const FVector& Max, double Inse
 	{
 		return FVector::CrossProduct(P1 - P0, P2 - P0).GetSafeNormal();
 	};
-	AddQuad(A, B, F, E, -Slope(A, B, F), Colour);
-	AddQuad(C, D, H, G, -Slope(C, D, H), Colour);
-	AddQuad(B, C, G, F, -Slope(B, C, G), Colour);
-	AddQuad(D, A, E, H, -Slope(D, A, E), Colour);
+	// Slope() already gives the outward normal; AddQuad winds the triangles to match it.
+	AddQuad(A, B, F, E, Slope(A, B, F), Colour);
+	AddQuad(C, D, H, G, Slope(C, D, H), Colour);
+	AddQuad(B, C, G, F, Slope(B, C, G), Colour);
+	AddQuad(D, A, E, H, Slope(D, A, E), Colour);
 }
 
 void FDTGMesh::AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, const FLinearColor& Tyre, const FLinearColor& Rim, int32 Sides)

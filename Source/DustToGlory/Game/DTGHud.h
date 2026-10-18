@@ -28,6 +28,7 @@ enum class EDTGScreen : uint8
 	Jail,       // serve the day, programs, parole, appeal -- and the ways out
 	Garage,     // the player's cars
 	Talk,       // a conversation with someone in the street
+	Events,     // what's on at the venues, and entering it
 	Title       // the front end: new game, continue, slots
 };
 
@@ -67,6 +68,7 @@ private:
 	void DrawOnFoot(const ADTGCharacter& Player);
 	void DrawStatusBar();
 	void DrawMinimap();
+	void DrawFight();
 	void DrawNotices();
 	void DrawMenu();
 	TArray<FString> BuildOptions() const;
@@ -75,6 +77,7 @@ private:
 	void RunCourtOption(int32 Index);
 	void RunTalkOption(int32 Index);
 	void RunTitleOption(int32 Index);
+	void RunEventOption(int32 Index);
 
 	void Text(const FString& Line, float X, float Y, const FLinearColor& Colour = FLinearColor::White, float Scale = 1.0f);
 	void Panel(float X, float Y, float W, float H, const FLinearColor& Colour);

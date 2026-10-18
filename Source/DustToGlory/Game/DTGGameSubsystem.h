@@ -38,7 +38,7 @@ public:
 
 	/** The state file in use ("state.json"), and the others found next to it. */
 	const FString& StateFile() const { return CurrentState; }
-	TArray<FString> AvailableStates() const;
+	const TArray<FString>& AvailableStates() const;
 	/** Loads a different state and starts a new game in it; a save belongs to the state it was made in. */
 	bool SwitchState(const FString& FileName, const FString& PlayerName);
 
@@ -83,5 +83,6 @@ private:
 	dtg::sim::TickReport Report;
 	bool bContentLoaded = false;
 	FString CurrentState = TEXT("state.json");
+	mutable TArray<FString> StateList;
 	TArray<FString> Mods;
 };

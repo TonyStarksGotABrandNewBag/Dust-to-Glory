@@ -57,10 +57,14 @@ std::string UDTGGameSubsystem::ReadData(const FString& Name)
 	return std::string(TCHAR_TO_UTF8(*Text));
 }
 
-TArray<FString> UDTGGameSubsystem::AvailableStates() const
+const TArray<FString>& UDTGGameSubsystem::AvailableStates() const
 {
-	// Every state the game can be played in: the shipped ones plus any a mod adds.
-	TArray<FString> Found;
+	// Read from disk once: the front end asks for this every frame it is open.
+	if (!StateList.IsEmpty())
+	{
+		return StateList;
+	}
+	TArray<FString>& Found = StateList;
 	IPlatformFile& Platform = FPlatformFileManager::Get().GetPlatformFile();
 	auto Collect = [&Found, &Platform](const FString& Dir)
 	{
@@ -89,11 +93,13 @@ bool UDTGGameSubsystem::SwitchState(const FString& FileName, const FString& Play
 	const FString Previous = CurrentState;
 	if (!LoadContent(FileName))
 	{
-		LoadContent(Previous); // put it back rather than leave the game with no world
+		// Loading mutates the simulation in place, so put the old state back rather than leave half of one.
+		bContentLoaded = LoadContent(Previous);
 		return false;
 	}
 	bContentLoaded = true;
 	CurrentState = FileName;
+	StateList.Reset();
 	return StartNewGame(PlayerName);
 }
 
