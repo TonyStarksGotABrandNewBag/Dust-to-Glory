@@ -15,8 +15,34 @@ DATA = ROOT / "Content" / "Data"
 REQUIRED = [
     "economy.json", "vehicles.json", "parts.json", "careers.json",
     "powers.json", "furniture.json", "companies.json", "laws.json", "state.json",
-    "state-florida.json",
 ]
+# Every state file, whatever it is called: the front end offers whatever is in the folder, so a new
+# one that does not parse is a menu entry that fails when it is picked.
+REQUIRED += sorted(p.name for p in DATA.glob("state-*.json"))
+
+
+def check_state(name: str, data: dict) -> list:
+    """A state file's own internal consistency, which JSON parsing cannot see.
+
+    A highway can name a city as a waypoint instead of giving coordinates. If that name is not a city
+    in the same file the route quietly loses a point, and the road goes somewhere else -- there is no
+    error anywhere, just a highway that misses the town it is named for.
+    """
+    problems = []
+    towns = {city["name"] for city in data.get("cities", [])}
+    starts = [city["name"] for city in data.get("cities", []) if city.get("start")]
+    for highway in data.get("highways", []):
+        for point in highway.get("route", []):
+            if isinstance(point, str) and point not in towns:
+                problems.append(f"{name}: {highway['name']} routes through '{point}', "
+                                f"which is not a city in this state")
+    if len(starts) != 1:
+        problems.append(f"{name}: {len(starts)} cities marked as the start; there must be exactly one")
+    outline = data.get("outline", [])
+    coast = data.get("coast", [])
+    if len(coast) == 2 and not (0 <= coast[0] < coast[1] <= len(outline)):
+        problems.append(f"{name}: coast {coast} is not a range inside an outline of {len(outline)} points")
+    return problems
 
 
 def strip_comments(text: str) -> str:
@@ -65,6 +91,13 @@ def main() -> int:
             print(f"{name}: {error}")
             failures += 1
             continue
+        if name.startswith("state"):
+            problems = check_state(name, value)
+            for problem in problems:
+                print(problem)
+            failures += len(problems)
+            if problems:
+                continue
         count = len(value) if isinstance(value, (list, dict)) else 1
         print(f"{name}: ok ({count} top-level entries)")
 

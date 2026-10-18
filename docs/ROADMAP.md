@@ -68,6 +68,15 @@ ones -- a meal, a hotel room, an hour in the gym, a doctor, the window at the po
 simulation of their own, so what they cost and what they give you is one set of numbers rather than
 two.
 
+**North Carolina**, and roads that are built rather than draped. The third state climbs from sea level to
+2,037 m, which the generator had no answer for: a highway was pinned to the terrain at each of its own
+vertices and followed the hillside between them, so US-64 came out of the Blue Ridge at 56% and I-26 hit
+244% where US-64 crossed over it -- the two roads were being averaged into one hillside instead of one
+passing over the other. Highways are now cut and filled to their own graded profile, crossings belong to
+whichever road is underneath, and every deck is tapered so it cannot rise or fall faster than 6%. All
+three states now come out at or under that, bridge ramps and mountain passes included; before this work
+South Carolina reached 8.5% and nobody had noticed.
+
 ## Next
 
 In the order it's worth doing:
@@ -75,8 +84,7 @@ In the order it's worth doing:
 1. **Art.** The generated shapes are a floor, not a ceiling: they are the right size, in the right place,
    with the right silhouette, which is exactly what makes them straightforward to replace with modelled
    meshes and proper materials. Vehicle models would change the look of the game on their own.
-2. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
-3. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
+2. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
    supports it yet either.
 
 ## Thin on purpose
@@ -85,4 +93,4 @@ In the order it's worth doing:
   not yet a shop with a back office.
 - **Animation is procedural.** Limbs swing at the right cadence; there is no skeletal animation, because
   there are no animation assets to play.
-- **Two states.** South Carolina and Florida.
+- **Three states.** South Carolina, Florida and North Carolina.

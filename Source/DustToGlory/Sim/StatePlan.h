@@ -126,6 +126,16 @@ namespace dtg::sim
 		static double SegmentDistance(const Point2& A, const Point2& B, double X, double Y, double* OutT = nullptr);
 		/** Height a road is graded to at a polyline vertex: the level of a city or venue it enters, else the land. */
 		double AnchorHeight(const Point2& Where) const;
+		/**
+		 * Cuts and fills every highway to a grade a road can actually be built at.
+		 *
+		 * Without this a road is pinned to the terrain at each of its own vertices and simply follows
+		 * the hillside between them, which is fine across a coastal plain and absurd in a mountain
+		 * range -- North Carolina's US-64 came out climbing at 56%. Heights inside a town are pinned,
+		 * because the road has to meet the streets; everything between them is free to be dug out of
+		 * the hill or carried across it on an embankment.
+		 */
+		void GradeHighways();
 		/** Nearest point on the state outline. */
 		Point2 NearestBorderPoint(double X, double Y) const;
 		std::uint64_t Seed = 1977;

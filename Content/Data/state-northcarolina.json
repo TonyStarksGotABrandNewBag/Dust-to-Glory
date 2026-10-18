@@ -1,0 +1,454 @@
+// North Carolina: the third playable state, and the one that asks the most of the terrain.
+//
+// South Carolina rises to 1,085 m and Florida barely rises at all. This state runs from the Outer Banks
+// to Mount Mitchell -- 2,037 m, the highest ground east of the Mississippi -- in about 800 km, so the
+// generator has to route interstates through a mountain range, bridge a sound, and still keep every
+// grade drivable. The Appalachian end of I-40 and the Blue Ridge are the test.
+//
+// Places are real, as always; everything in them is invented. Start is Boone, up in the mountains, which
+// is a different opening to Longs: no ocean, a hard climb out in any direction, and the nearest city an
+// hour away.
+{
+  "name": "North Carolina",
+  "abbreviation": "NC",
+  "scale": 25.0,
+  // Lower than the other two states, and it has to be. Heights are exaggerated so that South
+  // Carolina's gentle upstate reads as hills at all; here the hills are real, and a 3x exaggeration
+  // turns a genuine 5% mountain interstate into a 15% wall that nothing can climb. At 1.5x Mount
+  // Mitchell still stands 122 m over the map and the roads into Boone and Asheville are drivable.
+  "verticalScale": 1.5,
+  "origin": [-81.674, 36.217],
+
+  // Clockwise from the north-west corner: the Tennessee line, the Virginia line along the top, down the
+  // Outer Banks, round the sounds, west along the South Carolina line and back up through the mountains.
+  "outline": [
+    [-84.32, 36.6], [-83.6, 36.59], [-82.6, 36.6], [-81.68, 36.59], [-80.9, 36.56], [-80.0, 36.55],
+    [-79.0, 36.54], [-78.0, 36.55], [-77.2, 36.55], [-76.5, 36.55], [-76.0, 36.55], [-75.87, 36.55],
+    [-75.77, 36.2], [-75.6, 35.9], [-75.5, 35.6], [-75.47, 35.25], [-75.55, 35.22], [-76.0, 35.1],
+    [-76.5, 34.95], [-76.9, 34.7], [-77.4, 34.52], [-77.9, 34.2], [-78.0, 33.9], [-78.55, 33.85],
+    [-79.0, 34.3], [-79.45, 34.6], [-80.0, 34.82], [-80.78, 34.82], [-81.04, 35.05], [-81.37, 35.17],
+    [-82.0, 35.08], [-82.6, 35.0], [-83.1, 35.0], [-83.6, 34.99], [-84.0, 34.99], [-84.32, 35.2],
+    [-84.1, 35.5], [-83.9, 35.7], [-84.0, 36.0], [-84.2, 36.3]
+  ],
+  // The ocean-facing run: the Outer Banks and the coast up to the Brunswick line. Indices into outline.
+  "coast": [11, 24],
+
+  "cities": [
+    {
+      "name": "Boone",
+      "lon": -81.674, "lat": 36.217,
+      "style": "Rural", "grid": 2, "start": true,
+      "landmarks": [
+        ["Church", "Howard's Knob Fellowship"],
+        ["Shop", "King Street Mercantile"],
+        ["Diner", "Blue Ridge Diner"],
+        ["UsedCarLot", "Watauga Auto Sales"]
+      ]
+    },
+    {
+      "name": "Charlotte",
+      "lon": -80.843, "lat": 35.227,
+      "style": "Hub", "grid": 7,
+      "landmarks": [
+        ["Hospital", "Mecklenburg General"],
+        ["University", "Queen City University"],
+        ["TechCampus", "Trade & Tryon Technology Park"],
+        ["Courthouse", "Mecklenburg County Courthouse"],
+        ["Museum", "Carolina Motor Museum"]
+      ]
+    },
+    {
+      "name": "Raleigh",
+      "lon": -78.638, "lat": 35.779,
+      "style": "City", "grid": 6,
+      "landmarks": [
+        ["Courthouse", "Wake County Courthouse"],
+        ["University", "Oak Grove State University"],
+        ["Hospital", "Wake Memorial"],
+        ["TechCampus", "Research Triangle Works"]
+      ]
+    },
+    {
+      "name": "Durham",
+      "lon": -78.899, "lat": 35.994,
+      "style": "City", "grid": 5,
+      "landmarks": [
+        ["University", "Bull City University"],
+        ["Hospital", "Durham Medical Center"],
+        ["TechCampus", "Tobacco Road Labs"]
+      ]
+    },
+    {
+      "name": "Greensboro",
+      "lon": -79.792, "lat": 36.073,
+      "style": "City", "grid": 5,
+      "landmarks": [
+        ["Hospital", "Guilford General"],
+        ["Museum", "Piedmont Textile Museum"],
+        ["Shop", "Elm Street Dry Goods"]
+      ]
+    },
+    {
+      "name": "Winston-Salem",
+      "lon": -80.244, "lat": 36.1,
+      "style": "City", "grid": 4,
+      "landmarks": [
+        ["Hospital", "Forsyth Memorial"],
+        ["University", "Salem Hill College"]
+      ]
+    },
+    {
+      "name": "Asheville",
+      "lon": -82.551, "lat": 35.595,
+      "style": "Town", "grid": 4,
+      "landmarks": [
+        ["Museum", "Blue Ridge Folk Museum"],
+        ["Hospital", "Buncombe Regional"],
+        ["Diner", "Biltmore Avenue Diner"]
+      ]
+    },
+    {
+      "name": "Wilmington",
+      "lon": -77.944, "lat": 34.226,
+      "style": "Beach", "grid": 4,
+      "landmarks": [
+        ["Courthouse", "New Hanover Courthouse"],
+        ["Hospital", "Cape Fear Medical"],
+        ["Shop", "Riverwalk Outfitters"]
+      ]
+    },
+    {
+      "name": "Fayetteville",
+      "lon": -78.879, "lat": 35.053,
+      "style": "Town", "grid": 4,
+      "landmarks": [
+        ["Jail", "Cumberland County Detention"],
+        ["Courthouse", "Cumberland County Courthouse"],
+        ["UsedCarLot", "All American Motors"]
+      ]
+    },
+    {
+      "name": "Greenville",
+      "lon": -77.374, "lat": 35.613,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["University", "Tar River University"],
+        ["Hospital", "Pitt County Memorial"]
+      ]
+    },
+    {
+      "name": "Hickory",
+      "lon": -81.341, "lat": 35.733,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["Shop", "Catawba Furniture Outlet"],
+        ["Diner", "Highway 70 Grill"]
+      ]
+    },
+    {
+      "name": "Statesville",
+      "lon": -80.887, "lat": 35.783,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["UsedCarLot", "Iredell Used Cars"],
+        ["Diner", "Signal Hill Diner"]
+      ]
+    },
+    {
+      "name": "Wilkesboro",
+      "lon": -81.165, "lat": 36.146,
+      "style": "Rural", "grid": 2,
+      "landmarks": [
+        ["Church", "Yadkin Valley Chapel"],
+        ["Shop", "Wilkes Hardware"]
+      ]
+    },
+    {
+      "name": "Mount Airy",
+      "lon": -80.608, "lat": 36.499,
+      "style": "Rural", "grid": 2,
+      "landmarks": [
+        ["Diner", "Granite City Lunch"],
+        ["Shop", "Main Street Five and Dime"]
+      ]
+    },
+    {
+      "name": "Rocky Mount",
+      "lon": -77.792, "lat": 35.939,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["Hospital", "Nash General"],
+        ["Jail", "Edgecombe County Jail"]
+      ]
+    },
+    {
+      "name": "Jacksonville",
+      "lon": -77.437, "lat": 34.754,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["Shop", "Lejeune Surplus"],
+        ["Diner", "New River Diner"]
+      ]
+    },
+    {
+      "name": "New Bern",
+      "lon": -77.044, "lat": 35.108,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["Museum", "Tryon Palace Museum"],
+        ["Church", "Christ Church on Pollock"]
+      ]
+    },
+    {
+      "name": "Morehead City",
+      "lon": -76.726, "lat": 34.723,
+      "style": "Beach", "grid": 2,
+      "landmarks": [
+        ["Shop", "Bogue Sound Tackle"],
+        ["Diner", "Waterfront Fish House"]
+      ]
+    },
+    {
+      "name": "Nags Head",
+      "lon": -75.624, "lat": 35.958,
+      "style": "Beach", "grid": 2,
+      "landmarks": [
+        ["Shop", "Outer Banks Supply"],
+        ["Diner", "Jockey's Ridge Cafe"]
+      ]
+    },
+    {
+      "name": "Kitty Hawk",
+      "lon": -75.706, "lat": 36.064,
+      "style": "Beach", "grid": 2,
+      "landmarks": [
+        ["Museum", "First Flight Museum"],
+        ["Church", "Kitty Hawk Chapel"]
+      ]
+    },
+    {
+      "name": "Elizabeth City",
+      "lon": -76.251, "lat": 36.294,
+      "style": "Town", "grid": 2,
+      "landmarks": [
+        ["Hospital", "Albemarle Regional"],
+        ["Shop", "Pasquotank Marine"]
+      ]
+    },
+    {
+      "name": "Cherokee",
+      "lon": -83.315, "lat": 35.474,
+      "style": "Rural", "grid": 2,
+      "landmarks": [
+        ["Museum", "Oconaluftee Heritage Museum"],
+        ["Shop", "Smoky Mountain Trading Post"]
+      ]
+    },
+    {
+      "name": "Southern Pines",
+      "lon": -79.394, "lat": 35.174,
+      "style": "Rural", "grid": 2,
+      "landmarks": [
+        ["Church", "Sandhills Chapel"],
+        ["Diner", "Broad Street Diner"]
+      ]
+    },
+    {
+      "name": "Goldsboro",
+      "lon": -77.993, "lat": 35.385,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["Hospital", "Wayne Memorial"],
+        ["Diner", "Center Street Lunch"]
+      ]
+    },
+    {
+      "name": "Salisbury",
+      "lon": -80.474, "lat": 35.67,
+      "style": "Town", "grid": 3,
+      "landmarks": [
+        ["Courthouse", "Rowan County Courthouse"],
+        ["UsedCarLot", "Rowan Motor Company"]
+      ]
+    }
+  ],
+
+  "highways": [
+    {
+      "name": "I-40",
+      "interstate": true,
+      // The long one: the Outer Banks end of the state to the Tennessee line, over the Blue Ridge.
+      "route": [
+        "Morehead City", [-77.1, 35.0], "New Bern", [-77.6, 35.3], "Greenville", [-78.2, 35.5],
+        "Raleigh", "Durham", [-79.3, 36.0], "Greensboro", "Winston-Salem", "Statesville",
+        "Hickory", [-81.9, 35.7], "Asheville", [-82.9, 35.5], "Cherokee", [-84.0, 35.45]
+      ]
+    },
+    {
+      "name": "I-85",
+      "interstate": true,
+      "route": [
+        [-81.4, 35.0], "Charlotte", "Salisbury", [-80.3, 35.9], "Greensboro", [-79.4, 36.2],
+        [-78.6, 36.5]
+      ]
+    },
+    {
+      "name": "I-95",
+      "interstate": true,
+      "route": [
+        [-78.9, 34.3], "Fayetteville", [-78.6, 35.4], "Rocky Mount", [-77.6, 36.2], [-77.4, 36.5]
+      ]
+    },
+    {
+      "name": "I-77",
+      "interstate": true,
+      "route": [[-80.9, 35.0], "Charlotte", "Statesville", [-80.85, 36.1], [-80.8, 36.5]]
+    },
+    {
+      "name": "I-26",
+      "interstate": true,
+      "route": [[-82.3, 35.1], [-82.4, 35.3], "Asheville", [-82.7, 35.8], [-82.6, 36.1]]
+    },
+    {
+      "name": "I-73",
+      "interstate": true,
+      "route": ["Greensboro", [-79.8, 35.7], [-79.7, 35.4], "Southern Pines", [-79.5, 34.9]]
+    },
+    {
+      "name": "US-17",
+      "route": [
+        [-78.5, 33.9], "Wilmington", "Jacksonville", "New Bern", [-76.9, 35.5], [-76.7, 35.9],
+        "Elizabeth City", [-76.2, 36.5]
+      ]
+    },
+    {
+      "name": "US-421",
+      "route": [
+        "Wilmington", [-78.5, 34.6], "Fayetteville", [-79.2, 35.6], "Greensboro", "Winston-Salem",
+        "Wilkesboro", "Boone", [-81.9, 36.35]
+      ]
+    },
+    {
+      "name": "US-64",
+      "route": [
+        "Nags Head", [-75.9, 35.9], [-76.6, 35.85], "Rocky Mount", [-78.2, 35.8], "Raleigh",
+        [-79.4, 35.75], [-80.2, 35.75], "Statesville", [-81.5, 35.75], [-82.2, 35.6], "Cherokee"
+      ]
+    },
+    {
+      "name": "US-70",
+      "route": [
+        "Morehead City", "New Bern", [-77.5, 35.25], "Goldsboro", "Raleigh", "Durham",
+        [-79.6, 35.95], "Greensboro"
+      ]
+    },
+    {
+      "name": "US-220",
+      "route": ["Greensboro", [-79.85, 35.85], [-79.9, 35.5], "Southern Pines"]
+    },
+    {
+      "name": "US-74",
+      "route": [[-78.9, 34.3], "Wilmington", [-78.6, 34.4], [-79.5, 34.8], "Charlotte", [-81.5, 35.25], [-82.2, 35.3]]
+    },
+    {
+      "name": "US-321",
+      "route": [[-81.2, 35.0], "Hickory", [-81.6, 35.95], "Boone", [-81.8, 36.4]]
+    },
+    {
+      "name": "US-52",
+      "route": ["Salisbury", [-80.4, 35.95], "Winston-Salem", [-80.45, 36.25], "Mount Airy", [-80.55, 36.55]]
+    },
+    {
+      "name": "NC-12",
+      // The Outer Banks road: a thread of sand with the Atlantic on one side and the sound on the other.
+      "route": [[-75.5, 35.25], [-75.5, 35.55], [-75.55, 35.8], "Nags Head", "Kitty Hawk", [-75.8, 36.3]]
+    },
+    {
+      "name": "US-19",
+      "route": ["Asheville", [-82.9, 35.55], "Cherokee", [-83.6, 35.3], [-84.0, 35.15]]
+    }
+  ],
+
+  "rivers": [
+    {
+      "name": "Cape Fear River",
+      "width": 11,
+      "points": [
+        [-79.3, 35.5], [-79.1, 35.3], [-78.9, 35.05], [-78.7, 34.8], [-78.4, 34.55],
+        [-78.0, 34.3], [-77.95, 34.05], [-78.0, 33.92]
+      ]
+    },
+    {
+      "name": "Neuse River",
+      "width": 9,
+      "points": [
+        [-78.9, 36.05], [-78.6, 35.8], [-78.3, 35.5], [-77.9, 35.3], [-77.4, 35.2],
+        [-77.04, 35.11], [-76.8, 35.1], [-76.6, 35.05]
+      ]
+    },
+    {
+      "name": "Roanoke River",
+      "width": 9,
+      "points": [[-77.9, 36.5], [-77.4, 36.35], [-77.0, 36.1], [-76.75, 35.95], [-76.6, 35.9]]
+    },
+    {
+      "name": "Yadkin River",
+      "width": 7,
+      "points": [[-81.5, 36.3], [-81.0, 36.15], [-80.6, 36.0], [-80.4, 35.8], [-80.3, 35.5], [-80.2, 35.2]]
+    },
+    {
+      "name": "Catawba River",
+      "width": 7,
+      "points": [[-81.9, 35.9], [-81.5, 35.75], [-81.1, 35.6], [-80.95, 35.4], [-80.9, 35.1]]
+    },
+    {
+      "name": "French Broad River",
+      "width": 7,
+      "points": [[-82.5, 35.25], [-82.55, 35.45], [-82.55, 35.6], [-82.7, 35.8], [-82.85, 36.0]]
+    },
+    {
+      "name": "Tar River",
+      "width": 7,
+      "points": [[-78.6, 36.3], [-78.2, 36.1], [-77.8, 35.95], [-77.5, 35.75], [-77.37, 35.61], [-77.1, 35.45]]
+    },
+    {
+      "name": "New River",
+      "width": 6,
+      "points": [[-77.6, 34.95], [-77.5, 34.85], [-77.44, 34.75], [-77.4, 34.6]]
+    }
+  ],
+
+  "lakes": [
+    // The sounds. Brackish rather than fresh, but mechanically a sound is water you bridge, and
+    // without them the Outer Banks are not banks -- they are just the edge of the mainland.
+    {"name": "Pamlico Sound", "lon": -76.05, "lat": 35.42, "radiusKm": 22.0},
+    {"name": "Albemarle Sound", "lon": -76.2, "lat": 36.06, "radiusKm": 11.0},
+    {"name": "Lake Norman", "lon": -80.95, "lat": 35.55, "radiusKm": 9.0},
+    {"name": "Lake Gaston", "lon": -77.95, "lat": 36.52, "radiusKm": 5.0},
+    {"name": "Falls Lake", "lon": -78.72, "lat": 36.02, "radiusKm": 4.0},
+    {"name": "Jordan Lake", "lon": -79.02, "lat": 35.72, "radiusKm": 4.5},
+    {"name": "High Rock Lake", "lon": -80.25, "lat": 35.65, "radiusKm": 5.0},
+    {"name": "Fontana Lake", "lon": -83.75, "lat": 35.44, "radiusKm": 4.0},
+    {"name": "Lake James", "lon": -81.9, "lat": 35.73, "radiusKm": 4.0},
+    {"name": "W. Kerr Scott Reservoir", "lon": -81.25, "lat": 36.13, "radiusKm": 3.0}
+  ],
+
+  // The Blue Ridge and the Smokies. Mount Mitchell is 2,037 m, the highest ground east of the
+  // Mississippi, which is nearly twice South Carolina's peak and the hardest thing the terrain and the
+  // highway grader have been given to do.
+  "mountains": {
+    "outline": [
+      [-84.32, 35.15], [-84.1, 35.8], [-83.7, 36.3], [-83.0, 36.55], [-82.3, 36.58],
+      [-81.55, 36.5], [-81.0, 36.3], [-81.2, 35.95], [-81.7, 35.6], [-82.3, 35.35],
+      [-83.0, 35.1], [-83.8, 35.02]
+    ],
+    "peakMeters": 2037
+  },
+
+  "venues": [
+    {"kind": "DragRace", "name": "Piedmont Dragway", "lon": -79.6, "lat": 36.2},
+    {"kind": "DemolitionDerby", "name": "Catawba County Fairgrounds", "lon": -81.25, "lat": 35.82},
+    {"kind": "MonsterJam", "name": "Queen City Coliseum", "lon": -80.95, "lat": 35.15},
+    {"kind": "Formula", "name": "Sandhills Motor Circuit", "lon": -79.3, "lat": 35.28}
+  ]
+}

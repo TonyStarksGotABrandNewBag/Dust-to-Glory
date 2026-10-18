@@ -57,15 +57,44 @@ with use. People who see you use them remember it, and enough of that wakes them
 hit a bystander and it's assault, put a wanted villain down and you're paid for it, lose and you wake up
 at the hospital with a bill.
 
-**Weather you feel.** The sun follows the clock and sets where it should; rain takes grip away from the
-tires and a storm takes more; headlights come on at dusk.
+**Weather you feel.** The sun follows the clock and sets where it should; headlights come on at dusk.
+Rain falls in three layers around you, leaning into the wind and into your own speed, so driving fast
+lays it over towards you and it radiates from a point ahead. Lightning lights the sky and the thunder
+arrives when its sound would really arrive -- a strike across the marsh is a roll eight seconds later.
+Rain takes grip away from the tires while you watch it, and a storm takes more.
 
-**Florida too.** A second playable state, picked from the front end: the panhandle, the peninsula, the Gulf
-and the Atlantic, and US-1 out to Key West over the water. The map generator takes a state file, so a third
-is data, not code.
+**People who talk back.** A passer-by is from somewhere, carries a problem, knows something and knows
+other people. Ask about the town, their work, what they have been seeing, what is going around. Ask the
+same thing twice and the answer gets shorter; keep at it and they walk off. Somebody who trusts you tells
+you what is wrong in their life, and you can put it right. What they know has a price, split by Nash
+bargaining, so a friend gives away what a stranger will not sell. And whatever you do in front of them
+travels: word reaches the people they actually know, attributed and losing conviction at every mouth,
+until the town has an opinion of you that nobody gave it.
+
+**Three states.** South Carolina, Florida and North Carolina, picked from the front end. Florida is the
+panhandle, the peninsula, the Gulf and the Atlantic, with US-1 out to Key West over open water. North
+Carolina runs from the Outer Banks over Pamlico Sound to Mount Mitchell -- 2,037 m, the highest ground
+east of the Mississippi -- and you start in Boone, up in the mountains, where the nearest city is an hour
+away and every road out of town is a climb. The map generator takes a state file, so a fourth is data,
+not code.
 
 **Mods are just the data files.** Drop a folder in `Mods/` with any of them in it and the game uses yours
 instead — including a whole new state.
+
+## Before you build it
+
+The simulation core — the rules, the physics, the economy, the game theory, all of it — is tested and
+runs anywhere: 96 tests, green on Linux, macOS and Windows, and clean under the address and
+undefined-behaviour sanitizers. That half you can trust.
+
+The Unreal layer has never been compiled, because it was written somewhere without an engine installed.
+It has been read closely, several times, and that found real things: a player spawning at the world
+origin, a camera inside the car, pedestrians that could not move. But reading is not building, and the
+first time you open `DustToGlory.uproject` you should expect to fix a few compile errors that a
+compiler would have caught in a second. `Tests/check_headers.py` catches the one class of them a script
+can — a simulation name used unqualified in an engine header — and runs in CI.
+
+Nothing in `Sim/` depends on the engine, so a problem in `Game/` is always a local one.
 
 ## Repository layout
 
@@ -74,7 +103,7 @@ instead — including a whole new state.
 | `Source/DustToGlory/Sim/` | The whole game, as engine-independent C++20. No Unreal headers. |
 | `Source/DustToGlory/Game/` | The Unreal layer: pawns, world building, input, HUD, audio, AI. |
 | `Content/Data/` | Every bit of game content, as JSON you can edit without a compiler. |
-| `Tests/` | The core's test suite (CMake + CTest), and the content checker. |
+| `Tests/` | The core's test suite (CMake + CTest), and the content, service and header checks. |
 | `Mods/` | Drop-in replacements for any data file, including whole new states. |
 | `docs/` | Architecture, roadmap, content guide and audio notes. |
 

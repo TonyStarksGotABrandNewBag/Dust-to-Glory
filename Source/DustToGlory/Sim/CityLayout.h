@@ -139,6 +139,11 @@ namespace dtg::sim
 		std::vector<std::array<double, 2>> Points;
 		double WidthM = 16.0;
 		bool bInterstate = false;
+		/**
+		 * The graded height at each point of the polyline: what the road was cut and filled to, rather
+		 * than whatever the hillside happened to be doing there. Empty until the state plan grades it.
+		 */
+		std::vector<double> AnchorM;
 		/** Road surface height every DeckStepM metres along the polyline (bridges and their ramps included). */
 		std::vector<double> DeckM;
 		double DeckStepM = 5.0;

@@ -218,6 +218,7 @@ namespace dtg::sim
 		PlaceVenues();
 		DetourAroundCities(); // venue connector roads too
 		JoinCrossings();
+		GradeHighways();
 		ComputeDecks();
 
 		return Errors.empty();
@@ -471,10 +472,33 @@ namespace dtg::sim
 				return WeightSum > 0.0 ? Base + (ValueSum / WeightSum - Base) * Strongest : Base;
 			}
 		};
-		// Roads are graded to a straight line between their vertices (over water too: that's the bridge deck).
-		Blend Roads;
+		// Cities and venues sit on level pads, which fill any water they cover.
+		Blend Pads;
+		for (const StateCity& City : Cities)
+		{
+			Pads.Add(RectDistance(CityRect(City, CityPad), X, Y), CityFade, City.LevelM);
+		}
+		for (std::size_t Index = 0; Index < Venues.size() && Index < VenueLayouts.size(); ++Index)
+		{
+			Pads.Add(RectDistance(detail_stateplan::Expand(VenueLayouts[Index].Area, VenuePad), X, Y), VenueFade, Venues[Index].LevelM);
+		}
+		const double PadHeight = Pads.Apply(Info.GroundM);
+
+		// Then the roads, on top of the pads rather than under them. A road is cut and filled to its own
+		// graded profile (see GradeHighways) and that profile has to hold right up to the edge of a town
+		// -- letting the pad overwrite it meant the road was dragged to the town's level over the few
+		// metres of the pad's fade, which is a step, and steps measured as grades of two hundred per
+		// cent. Where a road runs into a town its own anchors are pinned to that town's level, so the
+		// two agree and there is nothing to argue about.
+		// Where roads meet, the ground belongs to the lowest of them: two roads crossing at different
+		// heights is an overpass, and mixing the two would leave the ground halfway up the piers --
+		// which is what sent I-26 up a 244% ramp where US-64 passes over it in the Blue Ridge.
+		double RoadHeight = 0.0;
+		double RoadWeight = 0.0;
+		bool bOnRoad = false;
 		for (const HighwayPlan& Road : Highways)
 		{
+			const bool bGraded = Road.AnchorM.size() == Road.Points.size();
 			for (std::size_t Index = 0; Index + 1 < Road.Points.size(); ++Index)
 			{
 				const Point2& A = Road.Points[Index];
@@ -487,21 +511,28 @@ namespace dtg::sim
 				}
 				double T = 0.0;
 				const double Distance = SegmentDistance(A, B, X, Y, &T);
-				Roads.Add(Distance - 0.5 * Road.WidthM - RoadShoulder, RoadFade, AnchorHeight(A) + (AnchorHeight(B) - AnchorHeight(A)) * T);
+				const double Edge = Distance - 0.5 * Road.WidthM - RoadShoulder;
+				if (Edge >= RoadFade)
+				{
+					continue;
+				}
+				const double Weight = 1.0 - detail_stateplan::Smooth(std::max(0.0, Edge) / RoadFade);
+				const double HeightA = bGraded ? Road.AnchorM[Index] : AnchorHeight(A);
+				const double HeightB = bGraded ? Road.AnchorM[Index + 1] : AnchorHeight(B);
+				const double Here = HeightA + (HeightB - HeightA) * T;
+				if (!bOnRoad || Here < RoadHeight)
+				{
+					RoadHeight = Here;
+					bOnRoad = true;
+				}
+				RoadWeight = std::max(RoadWeight, Weight);
 			}
 		}
-		const double RoadGrade = Roads.Apply(Info.GroundM);
-		// Cities and venues sit on level pads (filling any water they cover); roads blend into them.
-		Blend Pads;
-		for (const StateCity& City : Cities)
-		{
-			Pads.Add(RectDistance(CityRect(City, CityPad), X, Y), CityFade, City.LevelM);
-		}
-		for (std::size_t Index = 0; Index < Venues.size() && Index < VenueLayouts.size(); ++Index)
-		{
-			Pads.Add(RectDistance(detail_stateplan::Expand(VenueLayouts[Index].Area, VenuePad), X, Y), VenueFade, Venues[Index].LevelM);
-		}
-		const double LandHeight = Pads.Apply(RoadGrade);
+		// Inside a town the pad wins: a town is a level platform and its streets are built on it, so a
+		// highway ramping in from lower ground must not drag the ground down with it. Outside the pad
+		// -- including the fade around it -- the road wins, which is what lets it hold its own grade
+		// right up to the edge of town and meet the pad there, where its anchors are pinned to it.
+		const double LandHeight = (bOnRoad && !Pads.bCore) ? PadHeight + (RoadHeight - PadHeight) * RoadWeight : PadHeight;
 		if (Info.bWater)
 		{
 			const double Bed = Pads.Apply(Info.GroundM);
@@ -624,26 +655,55 @@ namespace dtg::sim
 			const std::size_t Count = static_cast<std::size_t>(std::ceil(Length / Road.DeckStepM)) + 1;
 			std::vector<double> Grade(Count, 0.0);
 			std::vector<double> Lift(Count, 0.0);
+			// Walked along the road's own graded profile rather than read off the ground, because the
+			// ground at a crossing belongs to whichever road is underneath.
+			const bool bGraded = Road.AnchorM.size() == Road.Points.size();
 			for (std::size_t Index = 0; Index < Count; ++Index)
 			{
-				const std::array<double, 3> Where = Road.At(std::min(Length, static_cast<double>(Index) * Road.DeckStepM));
+				const double Along = std::min(Length, static_cast<double>(Index) * Road.DeckStepM);
+				const std::array<double, 3> Where = Road.At(Along);
 				const SurfaceInfo Info = SurfaceAt(Where[0], Where[1]);
-				Grade[Index] = Info.RoadGradeM;
-				Lift[Index] = Info.bWater ? std::max(0.0, Info.WaterM + Clearance - Info.RoadGradeM) : 0.0;
+				double Own = Info.RoadGradeM;
+				if (bGraded)
+				{
+					// The height this road was graded to at this distance along itself.
+					double Walked = 0.0;
+					for (std::size_t Which = 0; Which + 1 < Road.Points.size(); ++Which)
+					{
+						const double Span = std::hypot(Road.Points[Which + 1][0] - Road.Points[Which][0],
+							Road.Points[Which + 1][1] - Road.Points[Which][1]);
+						if (Along <= Walked + Span || Which + 2 == Road.Points.size())
+						{
+							const double T = Span > 0.0 ? Clamp((Along - Walked) / Span, 0.0, 1.0) : 0.0;
+							Own = Road.AnchorM[Which] + (Road.AnchorM[Which + 1] - Road.AnchorM[Which]) * T;
+							break;
+						}
+						Walked += Span;
+					}
+				}
+				// Never below the ground it crosses, which is what a cutting already took care of.
+				Grade[Index] = std::max(Own, Info.bWater ? Own : Info.GroundM);
+				Lift[Index] = Info.bWater ? std::max(0.0, Info.WaterM + Clearance - Grade[Index]) : 0.0;
 			}
 			const double Taper = MaxRamp * Road.DeckStepM;
-			for (std::size_t Index = 1; Index < Count; ++Index)
-			{
-				Lift[Index] = std::max(Lift[Index], Lift[Index - 1] - Taper);
-			}
-			for (std::size_t Index = Count - 1; Index-- > 0;)
-			{
-				Lift[Index] = std::max(Lift[Index], Lift[Index + 1] - Taper);
-			}
 			Road.DeckM.resize(Count);
 			for (std::size_t Index = 0; Index < Count; ++Index)
 			{
 				Road.DeckM[Index] = Grade[Index] + Lift[Index];
+			}
+			// Two passes that only ever raise the deck, each one forbidding it to fall faster than the
+			// ramp allows. Run both ways that means it cannot rise faster either -- a rise from here to
+			// there is a fall from there to here -- so the whole profile comes out under the limit
+			// without a single sample ending up below the ground it was sitting on. It is the same
+			// trick that gave bridges their approach ramps; it just needed applying to all of it,
+			// because a road meeting a town's level apron is a ramp in exactly the same way.
+			for (std::size_t Index = 1; Index < Count; ++Index)
+			{
+				Road.DeckM[Index] = std::max(Road.DeckM[Index], Road.DeckM[Index - 1] - Taper);
+			}
+			for (std::size_t Index = Count - 1; Index-- > 0;)
+			{
+				Road.DeckM[Index] = std::max(Road.DeckM[Index], Road.DeckM[Index + 1] - Taper);
 			}
 		}
 	}
@@ -666,6 +726,142 @@ namespace dtg::sim
 			}
 		}
 		return false;
+	}
+
+
+	void StatePlan::GradeHighways()
+	{
+		using namespace detail_stateplan;
+		// A road is a cutting and an embankment, not a tracing of the hillside. Each vertex starts at
+		// the ground under it -- or at the level of the town it stands in, which is pinned, because the
+		// road has to meet the streets -- and then the profile is relaxed until no stretch climbs more
+		// than a road climbs. Hills get dug through and valleys get carried across.
+		constexpr double MaxGrade = 0.05;
+		// Which pad, if any, holds a point: towns and venues sit on level ground that reaches a little
+		// way past their outer road, and a road inside that is at the town's level whether it likes it
+		// or not.
+		auto PadLevel = [this](double X, double Y, double& OutLevel)
+		{
+			for (const StateCity& City : Cities)
+			{
+				if (CityRect(City, CityPad + CityFade).Contains(X, Y))
+				{
+					OutLevel = City.LevelM;
+					return true;
+				}
+			}
+			for (std::size_t Which = 0; Which < Venues.size() && Which < VenueLayouts.size(); ++Which)
+			{
+				if (detail_stateplan::Expand(VenueLayouts[Which].Area, VenuePad + VenueFade).Contains(X, Y))
+				{
+					OutLevel = Venues[Which].LevelM;
+					return true;
+				}
+			}
+			return false;
+		};
+		for (HighwayPlan& Road : Highways)
+		{
+			const std::size_t Count = Road.Points.size();
+			if (Count < 2)
+			{
+				continue;
+			}
+			std::vector<double> Height(Count, 0.0);
+			std::vector<bool> bPinned(Count, false);
+			std::vector<double> Span(Count, 0.0);
+			for (std::size_t Index = 0; Index < Count; ++Index)
+			{
+				const Point2& Where = Road.Points[Index];
+				Height[Index] = AnchorHeight(Where);
+				// Pinned out to where the pad has finished blending back into the land, not just to
+				// the pad itself: the ground across that whole skirt is already the town's level.
+				double Level = 0.0;
+				if (PadLevel(Where[0], Where[1], Level))
+				{
+					bPinned[Index] = true;
+					Height[Index] = Level;
+				}
+				if (Index + 1 < Count)
+				{
+					Span[Index] = std::hypot(Road.Points[Index + 1][0] - Where[0], Road.Points[Index + 1][1] - Where[1]);
+				}
+			}
+			const std::vector<double> Pinned = Height;
+			// Any stretch running between two towns whose levels are further apart than the grade
+			// allows gets a steady climb from one to the other instead. A road that has to gain more
+			// than it should is a hard road; a road that gains it all in the last eighty metres is a
+			// wall, and that is what happens if the pins are simply forced back after each pass.
+			std::vector<bool> bFixed = bPinned;
+			for (std::size_t From = 0; From < Count; ++From)
+			{
+				if (!bPinned[From])
+				{
+					continue;
+				}
+				std::size_t To = From + 1;
+				while (To < Count && !bPinned[To])
+				{
+					++To;
+				}
+				if (To >= Count)
+				{
+					break;
+				}
+				double Run = 0.0;
+				for (std::size_t Step = From; Step < To; ++Step)
+				{
+					Run += Span[Step];
+				}
+				if (Run > 1.0 && std::fabs(Pinned[To] - Pinned[From]) > MaxGrade * Run)
+				{
+					double Walked = 0.0;
+					for (std::size_t Step = From; Step <= To; ++Step)
+					{
+						Height[Step] = Pinned[From] + (Pinned[To] - Pinned[From]) * (Walked / Run);
+						bFixed[Step] = true;
+						Walked += Step < To ? Span[Step] : 0.0;
+					}
+				}
+			}
+			// A town's streets are where they are, so those heights go back before and after every
+			// pass -- not only after. Restoring them only at the end of an iteration means the next
+			// pass relaxes against a pin value that the previous pass had already clamped away, and
+			// the error collects in the one stretch next to the pin instead of spreading out.
+			auto ApplyPins = [&]()
+			{
+				for (std::size_t Index = 0; Index < Count; ++Index)
+				{
+					if (bPinned[Index])
+					{
+						Height[Index] = Pinned[Index];
+					}
+				}
+			};
+			// Relaxed both ways, because a climb limited only from one end pushes the whole road up.
+			for (int Pass = 0; Pass < 60; ++Pass)
+			{
+				ApplyPins();
+				for (std::size_t Index = 1; Index < Count; ++Index)
+				{
+					const double Allowed = MaxGrade * std::max(1.0, Span[Index - 1]);
+					Height[Index] = Clamp(Height[Index], Height[Index - 1] - Allowed, Height[Index - 1] + Allowed);
+				}
+				ApplyPins();
+				for (std::size_t Index = Count - 1; Index-- > 0;)
+				{
+					const double Allowed = MaxGrade * std::max(1.0, Span[Index]);
+					Height[Index] = Clamp(Height[Index], Height[Index + 1] - Allowed, Height[Index + 1] + Allowed);
+				}
+			}
+			ApplyPins();
+			// Never underground, and never under the sea.
+			for (std::size_t Index = 0; Index < Count; ++Index)
+			{
+				Height[Index] = std::max(0.5, Height[Index]);
+			}
+			Road.AnchorM = std::move(Height);
+		}
 	}
 
 	double StatePlan::AnchorHeight(const Point2& Where) const

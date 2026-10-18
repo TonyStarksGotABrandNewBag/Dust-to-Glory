@@ -273,8 +273,8 @@ DTG_TEST(RoadsStayDryAndDrivable)
 			{
 				EXPECT_MSG(Here[2] >= Info.GroundM - 0.01, Road.Name + " is buried");
 			}
-			// No steps or walls: under a 10% grade everywhere, bridge ramps included.
-			EXPECT_MSG(std::fabs(Here[2] - Previous) / 5.0 < 0.10, Road.Name + " is too steep");
+			// No steps or walls anywhere: every deck is tapered to a 6% ramp, bridges included.
+			EXPECT_MSG(std::fabs(Here[2] - Previous) / 5.0 <= 0.0601, Road.Name + " is too steep");
 			EXPECT_NEAR(State.RoadHeightAt(Here[0], Here[1]), Here[2], 0.25);
 			Previous = Here[2];
 		}
@@ -363,4 +363,132 @@ DTG_TEST(FloridaShipsAsASecondState)
 		}
 	}
 	EXPECT(Causeway > 0);
+}
+
+DTG_TEST(NorthCarolinaIsTheHardOne)
+{
+	// A third state, and the one that asks the most of the generator: sea level on the Outer Banks to
+	// 2,037 m on Mount Mitchell, with interstates that have to cross the Blue Ridge and still be
+	// drivable. South Carolina tops out at 1,085 m and Florida is flat, so this is where the terrain
+	// and the highway grader are actually tested.
+	GameState Tarheel;
+	ContentReport Report;
+	const bool bOk = Tarheel.LoadContent(dtg_test::LoadAllFiles("state-northcarolina.json"), Report);
+	for (const std::string& Error : Report.Errors)
+	{
+		EXPECT_MSG(false, Error);
+	}
+	EXPECT(bOk);
+	Tarheel.NewGame(9, "Tester");
+
+	const StatePlan& Map = Tarheel.Map;
+	EXPECT(Map.Name == "North Carolina");
+	EXPECT(Map.Cities.size() >= 24);
+	// You start in the mountains this time, which is a different opening entirely.
+	EXPECT(Map.StartCity() && Map.StartCity()->Name == "Boone");
+	for (const char* Name : {"Charlotte", "Raleigh", "Asheville", "Wilmington", "Nags Head", "Cherokee"})
+	{
+		EXPECT_MSG(Tarheel.City.FindCity(Name) != nullptr, Name);
+	}
+
+	// Towns on land and off each other, as in any state.
+	for (std::size_t A = 0; A < Map.Cities.size(); ++A)
+	{
+		const StateCity& City = Map.Cities[A];
+		EXPECT_MSG(Map.InsideState(City.Bounds.MinX, City.Bounds.MinY) && Map.InsideState(City.Bounds.MaxX, City.Bounds.MaxY) &&
+				Map.InsideState(City.Bounds.MinX, City.Bounds.MaxY) && Map.InsideState(City.Bounds.MaxX, City.Bounds.MinY),
+			City.Name + " is in the sea");
+		for (std::size_t B = A + 1; B < Map.Cities.size(); ++B)
+		{
+			EXPECT_MSG(!City.Bounds.Overlaps(Map.Cities[B].Bounds), City.Name + " overlaps " + Map.Cities[B].Name);
+		}
+	}
+
+	// The state actually rises. Boone and Asheville are mountain towns and the coast is at sea level,
+	// which is the whole reason this file exists.
+	const CityInfo* Mountain = Tarheel.City.FindCity("Boone");
+	const CityInfo* Coast = Tarheel.City.FindCity("Nags Head");
+	EXPECT(Mountain != nullptr && Coast != nullptr);
+	if (Mountain && Coast)
+	{
+		const StateCity* High = Map.FindCity("Boone");
+		const StateCity* Low = Map.FindCity("Nags Head");
+		EXPECT(High && Low);
+		if (High && Low)
+		{
+			// World metres: 1:25 with a 3x vertical exaggeration, so Mount Mitchell's 2,037 m is
+			// about 244 of the ground actually driven on.
+			EXPECT_MSG(High->LevelM > 25.0, "Boone is not in the mountains");
+			EXPECT_MSG(Low->LevelM < 10.0, "Nags Head is not at the sea");
+			EXPECT(High->LevelM > Low->LevelM + 20.0);
+		}
+	}
+	// And somewhere in it is genuinely high ground.
+	double Highest = 0.0;
+	for (double Lon = -84.2; Lon <= -81.0; Lon += 0.1)
+	{
+		for (double Lat = 35.1; Lat <= 36.5; Lat += 0.1)
+		{
+			const Point2 At = Map.ToWorld(Lon, Lat);
+			Highest = std::max(Highest, Map.NaturalHeight(At[0], At[1]));
+		}
+	}
+	// World metres again: 2,037 m of Mount Mitchell at 1:25 with this state's 1.5x exaggeration is
+	// about 122 on the map, and the ridges around it a good deal less.
+	EXPECT_MSG(Highest > 100.0, "the Blue Ridge is missing");
+
+	// The Atlantic is east of the Outer Banks, and Tennessee is land rather than sea.
+	const Point2 Atlantic = Map.ToWorld(-75.1, 35.6);
+	const Point2 Tennessee = Map.ToWorld(-84.8, 35.8);
+	EXPECT(Map.IsOcean(Atlantic[0], Atlantic[1]));
+	EXPECT(!Map.IsOcean(Tennessee[0], Tennessee[1]) && !Map.InsideState(Tennessee[0], Tennessee[1]));
+
+	// You can still drive everywhere, mountains and all.
+	const CityInfo* Start = Tarheel.City.FindCity("Boone");
+	EXPECT(Start != nullptr);
+	if (!Start)
+	{
+		return;
+	}
+	const std::set<int> Reached = Reachable(Tarheel.City, Tarheel.City.NearestIntersection(Start->Bounds.CenterX(), Start->Bounds.CenterY()));
+	for (const CityInfo& City : Tarheel.City.Cities)
+	{
+		EXPECT_MSG(Reached.count(Tarheel.City.NearestIntersection(City.Bounds.CenterX(), City.Bounds.CenterY())) == 1,
+			"can't drive from Boone to " + City.Name);
+	}
+
+	// Every road stays above the ground it crosses and out of the water, and -- the point of this
+	// state -- no grade is steeper than a road can be built.
+	double Steepest = 0.0;
+	std::string Worst;
+	for (const HighwayPlan& Road : Map.Highways)
+	{
+		EXPECT(!Road.DeckM.empty());
+		const double Length = Road.LengthM();
+		double LastZ = Road.At(5.0)[2];
+		for (double Along = 25.0; Along <= Length; Along += 20.0)
+		{
+			const std::array<double, 3> Here = Road.At(Along);
+			const SurfaceInfo Info = Map.SurfaceAt(Here[0], Here[1]);
+			if (Info.bWater)
+			{
+				EXPECT_MSG(Here[2] >= Info.WaterM + 2.5, Road.Name + " dips into the water");
+			}
+			else
+			{
+				EXPECT_MSG(Here[2] >= Info.GroundM - 0.01, Road.Name + " is buried");
+			}
+			const double Grade = std::fabs(Here[2] - LastZ) / 20.0;
+			if (Grade > Steepest)
+			{
+				Steepest = Grade;
+				Worst = Road.Name;
+			}
+			LastZ = Here[2];
+		}
+	}
+	// Every road in every state comes out at or under the 6% ramp the decks are tapered to. Before
+	// the roads were graded at all this read 56%, and before crossings were treated as overpasses
+	// rather than averaged into the hillside, 244%.
+	EXPECT_MSG(Steepest <= 0.0601, Worst + " climbs at " + std::to_string(Steepest * 100.0) + "%");
 }
