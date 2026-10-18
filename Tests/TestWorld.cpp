@@ -520,3 +520,172 @@ DTG_TEST(AWeekInDustValley)
 	EXPECT(State.Markets.News().size() > 0 || State.Markets.Stocks().front().History.size() > 5);
 	EXPECT(State.NetWorth() > 0);
 }
+
+DTG_TEST(RubinsteinBargainingRewardsPatience)
+{
+	EXPECT_NEAR(RubinsteinShare(0.9, 0.9), 1.0 / 1.9, 1e-9);
+	// An impatient responder concedes almost everything to the proposer.
+	EXPECT(RubinsteinShare(0.9, 0.5) > 0.9);
+	// A patient responder holds out.
+	EXPECT(RubinsteinShare(0.5, 0.95) < 0.1);
+}
+
+namespace detail_offer_test
+{
+	std::string FindCar(dtg::sim::GameState& State, bool (*Want)(const dtg::sim::PrivateCar&))
+	{
+		for (int Index = 0; Index < 400; ++Index)
+		{
+			const std::string Id = "home-" + std::to_string(Index) + "-0";
+			if (Want(State.PrivateCarAt(Id)))
+			{
+				return Id;
+			}
+		}
+		return std::string();
+	}
+
+	void SetTime(dtg::sim::GameState& State, int Day, int Hour)
+	{
+		State.Clock.SetTotalMinutes(static_cast<double>(Day * 24 * 60 + Hour * 60));
+	}
+}
+
+DTG_TEST(OffersOnAnyParkedCar)
+{
+	using namespace detail_offer_test;
+	GameState State = dtg_test::FreshGame(61);
+	State.Funds.Deposit(Dollars(1000000), MoneyCategory::Other, "test", 0);
+	EXPECT(State.PhoneNumber.find("555-01") != std::string::npos);
+
+	// The same spot always holds the same car and owner.
+	const PrivateCar First = State.PrivateCarAt("home-7-0");
+	const PrivateCar Again = MakePrivateCar(State.Vehicles, "home-7-0", State.WorldSeed);
+	EXPECT(First.ModelId == Again.ModelId && First.Condition == Again.Condition);
+
+	const std::string Id = FindCar(State, [](const PrivateCar& Car)
+	{
+		return Car.Schedule == OwnerSchedule::DayWorker && Car.Attachment < 0.5;
+	});
+	EXPECT(!Id.empty());
+	if (Id.empty()) return;
+	const VehicleModel* Model = State.Vehicles.FindModel(State.PrivateCarAt(Id).ModelId);
+	const double Value = ToDollars(MarketValue(*Model, State.PrivateCarAt(Id).Condition, State.PrivateCarAt(Id).MileageKm, State.PrivateCarAt(Id).Issues));
+
+	SetTime(State, 1, 11); // Tuesday morning: at work
+	EXPECT(!State.IsOwnerHomeNow(Id));
+	EXPECT(State.OfferInPerson(Id, Dollars(100000)).Reply.find("Nobody answers") != std::string::npos);
+
+	SetTime(State, 1, 19); // Tuesday evening: home
+	EXPECT(State.IsOwnerHomeNow(Id));
+	EXPECT(State.OfferInPerson(Id, ToMoney(Value * 0.3)).Outcome == OfferOutcome::Declined);
+	const std::size_t CarsBefore = State.Garage.size();
+	const OfferResponse Deal = State.OfferInPerson(Id, ToMoney(Value * 1.6));
+	EXPECT(Deal.Outcome == OfferOutcome::Accepted);
+	EXPECT(State.Garage.size() == CarsBefore + 1);
+	EXPECT(State.PrivateCarAt(Id).bSold);
+
+	// Some owners won't sell for any normal money.
+	const std::string Loved = FindCar(State, [](const PrivateCar& Car) { return Car.Attachment > 0.86 && Car.Schedule == OwnerSchedule::DayWorker; });
+	if (!Loved.empty())
+	{
+		const VehicleModel* LovedModel = State.Vehicles.FindModel(State.PrivateCarAt(Loved).ModelId);
+		const double LovedValue = ToDollars(MarketValue(*LovedModel, State.PrivateCarAt(Loved).Condition, State.PrivateCarAt(Loved).MileageKm, {}));
+		EXPECT(State.OfferInPerson(Loved, ToMoney(LovedValue * 1.3)).Outcome == OfferOutcome::NotForSale);
+	}
+}
+
+DTG_TEST(NotesCallbacksTextsAndEmail)
+{
+	using namespace detail_offer_test;
+	GameState State = dtg_test::FreshGame(62);
+	State.Funds.Deposit(Dollars(1000000), MoneyCategory::Other, "test", 0);
+	const std::string Id = FindCar(State, [](const PrivateCar& Car)
+	{
+		return Car.Prefers == Channel::Text && Car.Attachment < 0.6 && Car.Schedule == OwnerSchedule::DayWorker;
+	});
+	EXPECT(!Id.empty());
+	if (Id.empty()) return;
+	SetTime(State, 1, 11);
+	const PrivateCar& Car = State.PrivateCarAt(Id);
+	const VehicleModel* Model = State.Vehicles.FindModel(Car.ModelId);
+	const double Reservation = OwnerReservation(*Model, Car);
+	EXPECT(State.LeaveNote(Id, ToMoney(Reservation * 0.9)).bOk);
+	EXPECT(!State.LeaveNote(Id, ToMoney(Reservation)).bOk); // one note at a time
+	EXPECT(!State.TextOffer(Id, ToMoney(Reservation)).bOk); // no number yet
+	const TickReport Day = State.Skip(2 * 24 * 60);
+	EXPECT(!Day.NewMessages.empty());
+	const auto Thread = State.Phone.Thread("car:" + Id);
+	EXPECT(!Thread.empty());
+	if (Thread.empty()) return;
+	const Message& Reply = *Thread.back();
+	EXPECT(Reply.Via == Channel::Text);
+	EXPECT(Reply.Topic == MessageTopic::CarOffer);
+	EXPECT(Reply.Outcome != OfferOutcome::NotForSale);
+
+	// Haggle by text: the owner answers within hours.
+	if (Reply.Outcome == OfferOutcome::Countered)
+	{
+		EXPECT(State.TextOffer(Id, ToMoney(Reservation * 0.95)).bOk);
+		State.Skip(6 * 60);
+		const auto Updated = State.Phone.Thread("car:" + Id);
+		EXPECT(Updated.size() >= Thread.size() + 2); // our text and their reply
+		const Message* Latest = State.Phone.LatestIncoming("car:" + Id);
+		EXPECT(Latest != nullptr && Latest->Via == Channel::Text);
+		if (Latest && Latest->bAwaitingReply)
+		{
+			EXPECT(State.RespondToMessage(Latest->Id, true).bOk);
+			EXPECT(State.PrivateCarAt(Id).bSold);
+		}
+	}
+	else if (Reply.bAwaitingReply)
+	{
+		EXPECT(State.RespondToMessage(Reply.Id, true).bOk);
+	}
+
+	// Impatient owners concede more in text haggling (Rubinstein).
+	PrivateCar Patient = MakePrivateCar(State.Vehicles, "street-1-0", State.WorldSeed);
+	Patient.Attachment = 0.2;
+	Patient.CashNeed = 0.0;
+	PrivateCar Eager = Patient;
+	Eager.CashNeed = 1.0;
+	const VehicleModel* SameModel = State.Vehicles.FindModel(Patient.ModelId);
+	Rng Random(3);
+	const Money Lowish = ToMoney(OwnerReservation(*SameModel, Patient) * 0.85);
+	const OfferResponse FromPatient = EvaluateOffer(*SameModel, Patient, Lowish, 2, 0.0, BargainStyle::Text, Random);
+	const OfferResponse FromEager = EvaluateOffer(*SameModel, Eager, Lowish, 2, 0.0, BargainStyle::Text, Random);
+	EXPECT(FromEager.Outcome == OfferOutcome::Accepted || (FromPatient.Outcome == OfferOutcome::Countered && FromEager.Price < FromPatient.Price));
+
+	// Businesses email.
+	const int Unread = State.Phone.Unread();
+	State.SendEmail(MessageTopic::Business, "Seaside Bistro", "owner@bistro.example", "Can you help us?", "We're struggling and heard you can help.");
+	EXPECT(State.Phone.Unread() == Unread + 1);
+	EXPECT(!State.Phone.OfChannel(Channel::Email).empty());
+
+	// Everything survives a save.
+	GameState Restored = dtg_test::LoadedState();
+	EXPECT(Restored.LoadFromJson(State.SaveToJson(), nullptr));
+	EXPECT(Restored.Phone.All().size() == State.Phone.All().size());
+	EXPECT(Restored.PrivateCarAt(Id).bSold == State.PrivateCarAt(Id).bSold);
+	EXPECT(Restored.PhoneNumber == State.PhoneNumber);
+}
+
+DTG_TEST(BackingOutOfADealIsRemembered)
+{
+	using namespace detail_offer_test;
+	GameState State = dtg_test::FreshGame(63);
+	State.Funds.Deposit(Dollars(1000000), MoneyCategory::Other, "test", 0);
+	const std::string Id = FindCar(State, [](const PrivateCar& Car) { return Car.Attachment < 0.4; });
+	EXPECT(!Id.empty());
+	if (Id.empty()) return;
+	const VehicleModel* Model = State.Vehicles.FindModel(State.PrivateCarAt(Id).ModelId);
+	EXPECT(State.LeaveNote(Id, ToMoney(OwnerReservation(*Model, State.PrivateCarAt(Id)) * 1.5)).bOk);
+	State.Skip(7 * 24 * 60);
+	const Message* Reply = State.Phone.LatestIncoming("car:" + Id);
+	EXPECT(Reply != nullptr && Reply->Outcome == OfferOutcome::Accepted);
+	if (!Reply) return;
+	const double Before = State.Npcs.GetOrCreate(State.PrivateCarAt(Id).OwnerId).Affinity;
+	EXPECT(State.RespondToMessage(Reply->Id, false).bOk);
+	EXPECT(State.Npcs.GetOrCreate(State.PrivateCarAt(Id).OwnerId).Affinity < Before);
+	EXPECT(!State.PrivateCarAt(Id).bSold);
+}

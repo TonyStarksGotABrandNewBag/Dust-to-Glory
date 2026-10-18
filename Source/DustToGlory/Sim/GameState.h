@@ -18,6 +18,7 @@
 #include "Sim/NpcMinds.h"
 #include "Sim/Politics.h"
 #include "Sim/Powers.h"
+#include "Sim/PrivateSales.h"
 #include "Sim/Tuning.h"
 #include "Sim/Vehicles.h"
 #include "Sim/Wanted.h"
@@ -90,6 +91,7 @@ namespace dtg::sim
 		bool bPowerSurge = false;
 		MutationEvent Surge;
 		ElectionResult Election;
+		std::vector<Message> NewMessages; // calls, texts and email that arrived this tick
 		std::vector<std::string> Messages;
 	};
 
@@ -133,6 +135,11 @@ namespace dtg::sim
 		int NextVehicleNumber = 1;
 		int EventsWon = 0;
 		bool bManualTransmission = false;
+		std::string PhoneNumber;                 // written on notes left for car owners
+		std::vector<PrivateCar> PrivateCars;     // parked cars the player has dealt with (others are regenerated)
+		std::vector<PendingOffer> PendingOffers; // notes and texted counters waiting for a reply
+		Inbox Phone;                             // calls, texts and email
+		int NextOfferId = 1;
 
 		/** Parses every data file and builds the catalog, city and businesses. */
 		bool LoadContent(const ContentFiles& Files, ContentReport& Report);
@@ -186,6 +193,22 @@ namespace dtg::sim
 		ActionResult SellPrivately(const std::string& Uid, Money Price);
 		/** Setup for an owned car including its faults. */
 		VehicleSetup SetupForOwned(const OwnedVehicle& Car) const;
+
+		// ---------------------------------------------------------------- Offers on any parked car
+		/** The car parked in a spot (and its owner), created on first look. */
+		PrivateCar& PrivateCarAt(const std::string& CarId);
+		bool IsOwnerHomeNow(const std::string& CarId);
+		/** Knock on the door and make an offer face to face. Accepted offers complete the purchase. */
+		OfferResponse OfferInPerson(const std::string& CarId, Money Amount);
+		/** Leave a note with the offer and your number; the owner calls, texts or emails back after they get home. */
+		ActionResult LeaveNote(const std::string& CarId, Money Amount);
+		/** Text a (counter-)offer in an owner's thread; they text back (Rubinstein alternating offers). */
+		ActionResult TextOffer(const std::string& CarId, Money Amount);
+		/** Accept a counter (or confirm an accepted offer) to buy, or decline. */
+		ActionResult RespondToMessage(int MessageId, bool bAccept);
+		/** System and business email (job offers, deliveries, consulting requests...). Returns the message id. */
+		int SendEmail(MessageTopic Topic, const std::string& FromName, const std::string& FromAddress, const std::string& Subject,
+			const std::string& Body);
 
 		// ---------------------------------------------------------------- Careers and education
 		CareerProgress* FindJob(const std::string& CareerId);
@@ -264,6 +287,8 @@ namespace dtg::sim
 		void RunMinute(std::int64_t Minute, TickReport& Report);
 		void RunDay(std::int64_t Minute, TickReport& Report);
 		void RunWeek(std::int64_t Minute, TickReport& Report);
+		ActionResult BuyPrivateCar(PrivateCar& Car, Money Price);
+		void Deliver(Message Value, TickReport* Report);
 
 		std::vector<std::string> PendingNotifications;
 		JsonValue CompaniesData;

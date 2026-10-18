@@ -6,6 +6,25 @@ namespace dtg::sim
 {
 	namespace detail_state
 	{
+		/** A stable fictional phone number for an NPC (555-01xx is reserved for fiction). */
+		std::string PhoneFor(const std::string& Id)
+		{
+			char Number[32];
+			std::snprintf(Number, sizeof(Number), "(843) 555-01%02u", static_cast<unsigned>(HashString(Id) % 100u));
+			return Number;
+		}
+
+		/** A fictional email address on a reserved example domain. */
+		std::string EmailFor(const std::string& Name)
+		{
+			std::string Local = Slugify(Name);
+			for (char& Letter : Local)
+			{
+				if (Letter == '-') Letter = '.';
+			}
+			return Local + "@mail.example";
+		}
+
 		std::uint32_t ParseColor(const std::string& Text, std::uint32_t Fallback)
 		{
 			if (Text.size() != 7 || Text[0] != '#')
@@ -814,6 +833,11 @@ namespace dtg::sim
 		NextVehicleNumber = 1;
 		EventsWon = 0;
 		PendingNotifications.clear();
+		PrivateCars.clear();
+		PendingOffers.clear();
+		Phone = Inbox();
+		NextOfferId = 1;
+		bManualTransmission = false;
 
 		// Everyone starts with a modest apartment and a cheap, old car.
 		if (City.StarterHomeId >= 0)
@@ -823,7 +847,8 @@ namespace dtg::sim
 		const VehicleModel* Starter = nullptr;
 		for (const VehicleModel& Model : Vehicles.Models())
 		{
-			if (!Model.bEventOnly && (Model.Body == BodyStyle::Hatchback || Model.Body == BodyStyle::Sedan) &&
+			// A cheap, tired everyday car (not a collectible).
+			if (!Model.bEventOnly && !Model.IsClassic() && Model.AgeYears >= 8 && (Model.Body == BodyStyle::Hatchback || Model.Body == BodyStyle::Sedan) &&
 				(!Starter || Model.MarketPrice < Starter->MarketPrice))
 			{
 				Starter = &Model;
@@ -834,9 +859,242 @@ namespace dtg::sim
 			ActiveVehicleUid = GrantVehicle(Starter->Id);
 		}
 		RefreshHackBoard();
+		{
+			char Number[32];
+			std::snprintf(Number, sizeof(Number), "(843) 555-01%02d", Random.RangeInt(0, 99));
+			PhoneNumber = Number; // 555-0100..0199: reserved for fiction
+		}
 		RefreshUsedCars();
 		RefreshDealerStock();
 		Notify("Welcome to Dust Valley, " + PlayerName + ". Choose your powers, find a job, and make something of yourself.");
+	}
+
+	// ==================================================================================== Offers on parked cars
+
+	PrivateCar& GameState::PrivateCarAt(const std::string& CarId)
+	{
+		for (PrivateCar& Car : PrivateCars)
+		{
+			if (Car.Id == CarId)
+			{
+				return Car;
+			}
+		}
+		PrivateCars.push_back(MakePrivateCar(Vehicles, CarId, WorldSeed));
+		return PrivateCars.back();
+	}
+
+	bool GameState::IsOwnerHomeNow(const std::string& CarId)
+	{
+		return IsOwnerHome(PrivateCarAt(CarId), Clock.DayOfWeek(), Clock.Hour());
+	}
+
+	ActionResult GameState::BuyPrivateCar(PrivateCar& Car, Money Price)
+	{
+		const VehicleModel* Model = Vehicles.FindModel(Car.ModelId);
+		if (!Model || Car.bSold)
+		{
+			return ActionResult::Failure("That car isn't available anymore.");
+		}
+		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Bought " + Model->DisplayName + " from its owner", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You need " + FormatMoney(Price) + " in the bank to close the deal.");
+		}
+		OwnedVehicle Owned;
+		Owned.Uid = "car-" + std::to_string(NextVehicleNumber++);
+		Owned.ModelId = Car.ModelId;
+		Owned.Condition = Car.Condition;
+		Owned.MileageKm = Car.MileageKm;
+		Owned.Issues = Car.Issues;
+		Owned.Build.PaintRgb = Car.PaintRgb;
+		Garage.push_back(Owned);
+		Car.bSold = true;
+		NpcMind& Owner = Npcs.GetOrCreate(Car.OwnerId);
+		Owner.Affinity = Clamp(Owner.Affinity + 0.1, -1.0, 1.0);
+		RecordOpponentMove(Owner.Deal, true);
+		return ActionResult::Success("Signed the title over: the " + Model->DisplayName + " is yours. It's waiting where it's parked.");
+	}
+
+	OfferResponse GameState::OfferInPerson(const std::string& CarId, Money Amount)
+	{
+		PrivateCar& Car = PrivateCarAt(CarId);
+		OfferResponse Response;
+		const VehicleModel* Model = Vehicles.FindModel(Car.ModelId);
+		if (!Model || Car.bSold)
+		{
+			Response.Reply = "Nobody's selling that.";
+			return Response;
+		}
+		if (!IsOwnerHome(Car, Clock.DayOfWeek(), Clock.Hour()))
+		{
+			Response.Reply = "Nobody answers the door. You could leave a note.";
+			return Response;
+		}
+		if (Amount > Funds.Balance())
+		{
+			Response.Reply = "You can't offer money you don't have.";
+			return Response;
+		}
+		NpcMind& Owner = Npcs.GetOrCreate(Car.OwnerId);
+		Npcs.Observe(Owner, Stimulus::TalkedWith, 0.4, Clock.TotalMinutes(), Random, "Offered to buy their car");
+		Response = EvaluateOffer(*Model, Car, Amount, Player.SkillLevel(Skill::People), Owner.Affinity, BargainStyle::FaceToFace, Random);
+		Player.AddSkillXp(Skill::People, 5);
+		if (Response.Outcome == OfferOutcome::Accepted)
+		{
+			const ActionResult Bought = BuyPrivateCar(Car, Response.Price);
+			Response.Reply += " " + Bought.Message;
+			Car.Rounds = 0;
+		}
+		else if (Response.Outcome != OfferOutcome::Countered)
+		{
+			Car.Rounds = 0;
+			if (Response.Outcome == OfferOutcome::Declined && ToDollars(Amount) < 0.5 * OwnerReservation(*Model, Car))
+			{
+				Owner.Affinity = Clamp(Owner.Affinity - 0.05, -1.0, 1.0); // lowballs are remembered
+			}
+		}
+		return Response;
+	}
+
+	ActionResult GameState::LeaveNote(const std::string& CarId, Money Amount)
+	{
+		PrivateCar& Car = PrivateCarAt(CarId);
+		if (Car.bSold || !Vehicles.FindModel(Car.ModelId))
+		{
+			return ActionResult::Failure("Nobody's selling that.");
+		}
+		for (const PendingOffer& Existing : PendingOffers)
+		{
+			if (Existing.CarId == CarId)
+			{
+				return ActionResult::Failure("You already reached out about this one. Give them time to answer.");
+			}
+		}
+		PendingOffer Offer;
+		Offer.Id = NextOfferId++;
+		Offer.CarId = CarId;
+		Offer.Amount = Amount;
+		Offer.PlacedMinute = Clock.TotalMinutes();
+		Offer.ResponseMinute = NextHomeMinute(Car, Clock.TotalMinutes()) + Random.RangeInt(30, 240);
+		Offer.Style = BargainStyle::Note;
+		PendingOffers.push_back(Offer);
+		return ActionResult::Success("You tuck a note under the wiper: \"I'd buy your car for " + FormatMoney(Amount) + ". Call or text " + PhoneNumber + ".\"");
+	}
+
+	ActionResult GameState::TextOffer(const std::string& CarId, Money Amount)
+	{
+		PrivateCar& Car = PrivateCarAt(CarId);
+		const VehicleModel* Model = Vehicles.FindModel(Car.ModelId);
+		if (Car.bSold || !Model)
+		{
+			return ActionResult::Failure("Nobody's selling that.");
+		}
+		const std::string Thread = "car:" + CarId;
+		if (Phone.Thread(Thread).empty())
+		{
+			return ActionResult::Failure("You don't have their number yet. Leave a note first.");
+		}
+		for (const PendingOffer& Existing : PendingOffers)
+		{
+			if (Existing.CarId == CarId)
+			{
+				return ActionResult::Failure("Wait for them to answer your last message.");
+			}
+		}
+		NpcMind& Owner = Npcs.GetOrCreate(Car.OwnerId);
+		Message Sent;
+		Sent.Via = Channel::Text;
+		Sent.Topic = MessageTopic::CarOffer;
+		Sent.FromName = "You";
+		Sent.bFromPlayer = true;
+		Sent.ThreadId = Thread;
+		Sent.CarId = CarId;
+		Sent.Price = Amount;
+		Sent.Minute = Clock.TotalMinutes();
+		Sent.Text = "Would you take " + FormatMoney(Amount) + " for the " + Model->Nameplate + "?";
+		Phone.Post(Sent);
+		if (Message* Last = Phone.LatestIncoming(Thread))
+		{
+			Last->bAwaitingReply = false; // a new offer replaces their last counter
+		}
+		PendingOffer Offer;
+		Offer.Id = NextOfferId++;
+		Offer.CarId = CarId;
+		Offer.Amount = Amount;
+		Offer.PlacedMinute = Clock.TotalMinutes();
+		// Impatient owners answer fast; everyone answers faster when they like you.
+		const double Patience = OwnerPatience(Car);
+		Offer.ResponseMinute = Clock.TotalMinutes() + static_cast<std::int64_t>(Random.Range(5.0, 120.0) * Patience * (1.0 - 0.3 * Owner.Affinity));
+		Offer.Style = BargainStyle::Text;
+		PendingOffers.push_back(Offer);
+		return ActionResult::Success("Sent.");
+	}
+
+	void GameState::Deliver(Message Value, TickReport* Report)
+	{
+		switch (Value.Via)
+		{
+		case Channel::Call: Notify("Call from " + Value.FromName + ": " + Value.Text); break;
+		case Channel::Text: Notify("Text from " + Value.FromName + ": " + Value.Text); break;
+		case Channel::Email: Notify("Email from " + Value.FromName + ": " + Value.Subject); break;
+		case Channel::Count: break;
+		}
+		const int Id = Phone.Post(Value);
+		if (Report)
+		{
+			if (const Message* Posted = Phone.Find(Id))
+			{
+				Report->NewMessages.push_back(*Posted);
+			}
+		}
+	}
+
+	int GameState::SendEmail(MessageTopic Topic, const std::string& FromName, const std::string& FromAddress, const std::string& Subject,
+		const std::string& Body)
+	{
+		Message Mail;
+		Mail.Via = Channel::Email;
+		Mail.Topic = Topic;
+		Mail.FromName = FromName;
+		Mail.FromAddress = FromAddress;
+		Mail.Subject = Subject;
+		Mail.Text = Body;
+		Mail.ThreadId = "mail:" + Subject;
+		Mail.Minute = Clock.TotalMinutes();
+		Deliver(Mail, nullptr);
+		return Phone.All().empty() ? 0 : Phone.All().back().Id;
+	}
+
+	ActionResult GameState::RespondToMessage(int MessageId, bool bAccept)
+	{
+		Message* Value = Phone.Find(MessageId);
+		if (!Value || !Value->bAwaitingReply)
+		{
+			return ActionResult::Failure("There's nothing to answer.");
+		}
+		Value->bAwaitingReply = false;
+		Value->bRead = true;
+		if (Value->Topic != MessageTopic::CarOffer)
+		{
+			return ActionResult::Success(bAccept ? "Accepted." : "Declined.");
+		}
+		PrivateCar& Car = PrivateCarAt(Value->CarId);
+		NpcMind& Owner = Npcs.GetOrCreate(Car.OwnerId);
+		const std::string Name = Value->FromName;
+		const Money Price = Value->Price;
+		const OfferOutcome Outcome = Value->Outcome;
+		if (!bAccept)
+		{
+			if (Outcome == OfferOutcome::Accepted)
+			{
+				// They said yes to your own offer and you backed out: that's remembered (repeated game).
+				Owner.Affinity = Clamp(Owner.Affinity - 0.15, -1.0, 1.0);
+				RecordOpponentMove(Owner.Deal, false);
+				return ActionResult::Success(Name + " is disappointed: \"You made the offer...\"");
+			}
+			return ActionResult::Success("You thank " + Name + " and pass.");
+		}
+		return BuyPrivateCar(Car, Price);
 	}
 
 	// ==================================================================================== Time
@@ -875,13 +1133,16 @@ namespace dtg::sim
 		for (const DeliveryEvent& Event : Homes.Update(Minute))
 		{
 			Report.Deliveries.push_back(Event);
+			const std::string Order = "#" + std::to_string(Event.OrderId);
 			if (Event.NewStatus == OrderStatus::OutForDelivery)
 			{
-				Notify("Your furniture order #" + std::to_string(Event.OrderId) + " is out for delivery.");
+				SendEmail(MessageTopic::Delivery, "Furniture Delivery", "deliveries@furniture.example", "Order " + Order + " is out for delivery",
+					"Good news! Your order " + Order + " is on the truck and will arrive today. Someone will need to be home.");
 			}
 			else if (Event.NewStatus == OrderStatus::Delivered)
 			{
-				Notify("Furniture order #" + std::to_string(Event.OrderId) + " was delivered. Arrange it at home.");
+				SendEmail(MessageTopic::Delivery, "Furniture Delivery", "deliveries@furniture.example", "Order " + Order + " delivered",
+					"Your order " + Order + " has been delivered. Arrange it however you like. Enjoy your new furniture!");
 			}
 		}
 		const std::int64_t TimeOfDay = Minute % GameClock::MinutesPerDay;
@@ -892,6 +1153,53 @@ namespace dtg::sim
 			RefreshHackBoard();
 			RefreshUsedCars();
 		}
+		for (std::size_t Index = 0; Index < PendingOffers.size();)
+		{
+			if (PendingOffers[Index].ResponseMinute > Minute)
+			{
+				++Index;
+				continue;
+			}
+			const PendingOffer Offer = PendingOffers[Index];
+			PendingOffers.erase(PendingOffers.begin() + static_cast<std::ptrdiff_t>(Index));
+			PrivateCar& Car = PrivateCarAt(Offer.CarId);
+			const VehicleModel* Model = Vehicles.FindModel(Car.ModelId);
+			if (!Model || Car.bSold)
+			{
+				continue;
+			}
+			NpcMind& Owner = Npcs.GetOrCreate(Car.OwnerId);
+			const OfferResponse Response = EvaluateOffer(*Model, Car, Offer.Amount, Player.SkillLevel(Skill::People), Owner.Affinity, Offer.Style, Random);
+			Message Reply;
+			Reply.Via = Offer.Style == BargainStyle::Text ? Channel::Text : Car.Prefers;
+			Reply.Topic = MessageTopic::CarOffer;
+			Reply.FromId = Owner.Id;
+			Reply.FromName = Owner.Name;
+			Reply.FromAddress = Reply.Via == Channel::Email ? detail_state::EmailFor(Owner.Name) : detail_state::PhoneFor(Owner.Id);
+			Reply.ThreadId = "car:" + Car.Id;
+			Reply.CarId = Car.Id;
+			Reply.Outcome = Response.Outcome;
+			Reply.Price = Response.Outcome == OfferOutcome::Accepted ? Offer.Amount : Response.Price;
+			Reply.Minute = Minute;
+			Reply.bAwaitingReply = Response.Outcome == OfferOutcome::Accepted || Response.Outcome == OfferOutcome::Countered;
+			if (Offer.Style == BargainStyle::Text)
+			{
+				Reply.Text = Response.Reply;
+			}
+			else
+			{
+				Reply.Subject = "Your offer on my " + Model->Nameplate;
+				Reply.Text = (Reply.Via == Channel::Text ? "Hey, it's " : "Hi, this is ") + Owner.Name + ". I found your note on my " + Model->Nameplate +
+					". " + Response.Reply;
+			}
+			if (Response.Outcome == OfferOutcome::Accepted)
+			{
+				Reply.Text += " Still want it?";
+			}
+			Owner.Conversations += 1;
+			Deliver(Reply, &Report);
+		}
+
 		const ElectionResult Election = Politics.Update(Minute, Random);
 		if (Election.bHeld)
 		{
@@ -899,6 +1207,10 @@ namespace dtg::sim
 			const int Share = static_cast<int>(std::lround(Election.PlayerShare * 100.0));
 			Notify(Election.bWon ? "Election night: you won with " + std::to_string(Share) + "%! You are now " + OfficeTitle(Election.Target) + "."
 				: "Election night: " + Election.Opponent + " beat you (" + std::to_string(Share) + "% for you).");
+			SendEmail(MessageTopic::Politics, "Board of Elections", "results@elections.example",
+				std::string("Official results: ") + OfficeTitle(Election.Target),
+				"Certified results: you received " + std::to_string(Share) + "% of the vote. " +
+				(Election.bWon ? std::string("Congratulations, and welcome to office.") : Election.Opponent + " won the race."));
 		}
 		if (TimeOfDay == 16 * 60)
 		{
@@ -954,6 +1266,33 @@ namespace dtg::sim
 	{
 		Report.bNewWeek = true;
 		RefreshDealerStock();
+		for (PrivateCar& Car : PrivateCars)
+		{
+			Car.CashNeed = Clamp(Car.CashNeed + Random.Range(-0.1, 0.15), 0.0, 1.0);
+			const VehicleModel* Model = Vehicles.FindModel(Car.ModelId);
+			if (Car.bSold || Car.OffersMade == 0 || !Model || Car.CashNeed < 0.6 || !Random.Chance(0.15))
+			{
+				continue;
+			}
+			// Circumstances change: an owner who turned the player down calls back.
+			NpcMind& Owner = Npcs.GetOrCreate(Car.OwnerId);
+			Message Call;
+			Call.Via = Car.Prefers;
+			Call.Topic = MessageTopic::CarOffer;
+			Call.FromId = Owner.Id;
+			Call.FromName = Owner.Name;
+			Call.FromAddress = Call.Via == Channel::Email ? detail_state::EmailFor(Owner.Name) : detail_state::PhoneFor(Owner.Id);
+			Call.ThreadId = "car:" + Car.Id;
+			Call.CarId = Car.Id;
+			Call.Outcome = OfferOutcome::Countered;
+			Call.Price = ToMoney(std::round(OwnerReservation(*Model, Car) / 50.0) * 50.0);
+			Call.Minute = Minute;
+			Call.bAwaitingReply = true;
+			Call.Subject = "Still interested in my " + Model->Nameplate + "?";
+			Call.Text = "Hi, it's " + Owner.Name + ". You asked about my " + Model->Nameplate + " a while back. Things have changed. Would you still do " +
+				FormatMoney(Call.Price) + "?";
+			Deliver(Call, &Report);
+		}
 		if (PlayerMinistry.IsFounded())
 		{
 			Report.Offering = PlayerMinistry.CollectWeeklyOffering(Random);
@@ -1236,6 +1575,8 @@ namespace dtg::sim
 		if (Result.bPromoted)
 		{
 			Notify("Promotion! You're now " + Result.Title + ".");
+			SendEmail(MessageTopic::JobOffer, "Human Resources", "hr@" + Slugify(Def->Workplace) + ".example", "Congratulations on your promotion",
+				"We're pleased to let you know you've been promoted to " + Result.Title + ". Your new pay rate starts with your next shift.");
 		}
 		return Result;
 	}

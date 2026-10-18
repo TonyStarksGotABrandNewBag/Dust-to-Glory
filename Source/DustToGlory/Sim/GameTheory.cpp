@@ -488,4 +488,11 @@ namespace dtg::sim
 		Game.ColLabels = Game.RowLabels;
 		return Game;
 	}
+
+	double RubinsteinShare(double ProposerPatience, double ResponderPatience)
+	{
+		const double Proposer = Clamp(ProposerPatience, 0.0, 0.999);
+		const double Responder = Clamp(ResponderPatience, 0.0, 0.999);
+		return (1.0 - Responder) / (1.0 - Proposer * Responder);
+	}
 }

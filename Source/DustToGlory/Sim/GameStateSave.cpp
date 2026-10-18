@@ -477,6 +477,65 @@ namespace dtg::sim
 		PoliticsJson.Set("campaign", RunJson);
 		Root.Set("politics", PoliticsJson);
 
+		Root.Set("phoneNumber", Str(PhoneNumber));
+		JsonValue CarsJson = JsonValue::MakeArray();
+		for (const PrivateCar& Car : PrivateCars)
+		{
+			JsonValue Item = JsonValue::MakeObject();
+			Item.Set("id", Str(Car.Id));
+			Item.Set("model", Str(Car.ModelId));
+			Item.Set("condition", Num(Car.Condition));
+			Item.Set("km", Num(Car.MileageKm));
+			Item.Set("issues", Issues(Car.Issues));
+			Item.Set("paint", Num(Car.PaintRgb));
+			Item.Set("attachment", Num(Car.Attachment));
+			Item.Set("cashNeed", Num(Car.CashNeed));
+			Item.Set("schedule", Num(static_cast<int>(Car.Schedule)));
+			Item.Set("prefers", Num(static_cast<int>(Car.Prefers)));
+			Item.Set("sold", Bool(Car.bSold));
+			Item.Set("offers", Num(Car.OffersMade));
+			CarsJson.Push(Item);
+		}
+		Root.Set("privateCars", CarsJson);
+		JsonValue PendingJson = JsonValue::MakeArray();
+		for (const PendingOffer& Offer : PendingOffers)
+		{
+			JsonValue Item = JsonValue::MakeObject();
+			Item.Set("id", Num(Offer.Id));
+			Item.Set("car", Str(Offer.CarId));
+			Item.Set("amount", Cash(Offer.Amount));
+			Item.Set("placed", Num(static_cast<double>(Offer.PlacedMinute)));
+			Item.Set("due", Num(static_cast<double>(Offer.ResponseMinute)));
+			Item.Set("style", Num(static_cast<int>(Offer.Style)));
+			PendingJson.Push(Item);
+		}
+		Root.Set("pendingOffers", PendingJson);
+		Root.Set("nextOffer", Num(NextOfferId));
+		JsonValue InboxJson = JsonValue::MakeArray();
+		for (const Message& Value : Phone.All())
+		{
+			JsonValue Item = JsonValue::MakeObject();
+			Item.Set("id", Num(Value.Id));
+			Item.Set("via", Num(static_cast<int>(Value.Via)));
+			Item.Set("topic", Num(static_cast<int>(Value.Topic)));
+			Item.Set("fromId", Str(Value.FromId));
+			Item.Set("from", Str(Value.FromName));
+			Item.Set("address", Str(Value.FromAddress));
+			Item.Set("subject", Str(Value.Subject));
+			Item.Set("text", Str(Value.Text));
+			Item.Set("thread", Str(Value.ThreadId));
+			Item.Set("car", Str(Value.CarId));
+			Item.Set("outcome", Num(static_cast<int>(Value.Outcome)));
+			Item.Set("price", Cash(Value.Price));
+			Item.Set("minute", Num(static_cast<double>(Value.Minute)));
+			Item.Set("mine", Bool(Value.bFromPlayer));
+			Item.Set("read", Bool(Value.bRead));
+			Item.Set("awaiting", Bool(Value.bAwaitingReply));
+			InboxJson.Push(Item);
+		}
+		Root.Set("inbox", InboxJson);
+		Root.Set("nextMessage", Num(Phone.NextId()));
+
 		return Root.Dump(true);
 	}
 
@@ -795,6 +854,66 @@ namespace dtg::sim
 		PoliticsData.Run.Endorsements = RunJson.GetInt("endorsements");
 		PoliticsData.Run.ElectionMinute = RunJson.GetInt64("election");
 		Politics.Load(PoliticsData);
+
+		PhoneNumber = Root.GetString("phoneNumber", "(843) 555-0100");
+		PrivateCars.clear();
+		for (const JsonValue& Item : Root.Get("privateCars").Items())
+		{
+			PrivateCar Car;
+			Car.Id = Item.GetString("id");
+			Car.OwnerId = "owner-" + Car.Id;
+			Car.ModelId = Item.GetString("model");
+			Car.Condition = Item.GetNumber("condition", 0.7);
+			Car.MileageKm = Item.GetNumber("km", 90000.0);
+			Car.Issues = ReadIssues(Item.Get("issues"));
+			Car.PaintRgb = static_cast<std::uint32_t>(Item.GetInt64("paint", 0x808080));
+			Car.Attachment = Item.GetNumber("attachment", 0.3);
+			Car.CashNeed = Item.GetNumber("cashNeed", 0.2);
+			Car.Schedule = static_cast<OwnerSchedule>(Clamp(Item.GetInt("schedule"), 0, static_cast<int>(OwnerSchedule::Count) - 1));
+			Car.Prefers = static_cast<Channel>(Clamp(Item.GetInt("prefers"), 0, static_cast<int>(Channel::Count) - 1));
+			Car.bSold = Item.GetBool("sold");
+			Car.OffersMade = Item.GetInt("offers");
+			if (Vehicles.FindModel(Car.ModelId))
+			{
+				PrivateCars.push_back(Car);
+			}
+		}
+		PendingOffers.clear();
+		for (const JsonValue& Item : Root.Get("pendingOffers").Items())
+		{
+			PendingOffer Offer;
+			Offer.Id = Item.GetInt("id");
+			Offer.CarId = Item.GetString("car");
+			Offer.Amount = ReadCash(Item, "amount");
+			Offer.PlacedMinute = Item.GetInt64("placed");
+			Offer.ResponseMinute = Item.GetInt64("due");
+			Offer.Style = static_cast<BargainStyle>(Clamp(Item.GetInt("style"), 0, 2));
+			PendingOffers.push_back(Offer);
+		}
+		NextOfferId = Root.GetInt("nextOffer", 1);
+		std::vector<Message> InboxList;
+		for (const JsonValue& Item : Root.Get("inbox").Items())
+		{
+			Message Value;
+			Value.Id = Item.GetInt("id");
+			Value.Via = static_cast<Channel>(Clamp(Item.GetInt("via"), 0, static_cast<int>(Channel::Count) - 1));
+			Value.Topic = static_cast<MessageTopic>(Clamp(Item.GetInt("topic"), 0, static_cast<int>(MessageTopic::Count) - 1));
+			Value.FromId = Item.GetString("fromId");
+			Value.FromName = Item.GetString("from");
+			Value.FromAddress = Item.GetString("address");
+			Value.Subject = Item.GetString("subject");
+			Value.Text = Item.GetString("text");
+			Value.ThreadId = Item.GetString("thread");
+			Value.CarId = Item.GetString("car");
+			Value.Outcome = static_cast<OfferOutcome>(Clamp(Item.GetInt("outcome"), 0, 3));
+			Value.Price = ReadCash(Item, "price");
+			Value.Minute = Item.GetInt64("minute");
+			Value.bFromPlayer = Item.GetBool("mine");
+			Value.bRead = Item.GetBool("read");
+			Value.bAwaitingReply = Item.GetBool("awaiting");
+			InboxList.push_back(Value);
+		}
+		Phone.Restore(InboxList, Root.GetInt("nextMessage", 1));
 
 		UsedCars = UsedCarMarket();
 		std::vector<UsedListing> Lot;

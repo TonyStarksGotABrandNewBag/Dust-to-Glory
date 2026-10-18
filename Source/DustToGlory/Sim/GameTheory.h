@@ -54,6 +54,12 @@ namespace dtg::sim
 	int SampleStrategy(const std::vector<double>& Mix, Rng& Random);
 
 	/**
+	 * Rubinstein alternating-offers bargaining: the subgame-perfect share of the pie claimed by the player who
+	 * proposes first, given each side's per-round discount factor (patience). (1 - dR) / (1 - dP * dR).
+	 */
+	double RubinsteinShare(double ProposerPatience, double ResponderPatience);
+
+	/**
 	 * Generalized Nash bargaining over a surplus. Each side gets its disagreement payoff (walk-away value) plus a
 	 * share of what is left, weighted by bargaining power: Share_A = D_A + Power_A * (Surplus - D_A - D_B).
 	 */
