@@ -689,3 +689,109 @@ DTG_TEST(BackingOutOfADealIsRemembered)
 	EXPECT(State.Npcs.GetOrCreate(State.PrivateCarAt(Id).OwnerId).Affinity < Before);
 	EXPECT(!State.PrivateCarAt(Id).bSold);
 }
+
+DTG_TEST(CourtsPleasAndSentences)
+{
+	GameState State = dtg_test::FreshGame(71);
+	State.Funds.Deposit(Dollars(50000), MoneyCategory::Other, "test", 0);
+	// A speeding stop is just a fine.
+	State.ReportCrime(Crime::Speeding, true, false);
+	const Money Fine = State.Busted();
+	EXPECT(Fine > 0 && !State.Justice.Case().bOpen && !State.InJail());
+
+	// Stealing a car is a felony: court.
+	State.ReportCrime(Crime::VehicleTheft, true, false);
+	State.ReportCrime(Crime::EvadingPolice, true, false);
+	EXPECT(State.Busted() == 0);
+	EXPECT(State.Justice.Case().bOpen);
+	const int Trial = State.Justice.Case().TrialDays;
+	const int PleaAlone = State.Justice.PleaOffer(State.Player.SkillLevel(Skill::People));
+	EXPECT(PleaAlone < Trial);
+	EXPECT(State.HireLawyer().bOk);
+	const int PleaWithLawyer = State.Justice.PleaOffer(State.Player.SkillLevel(Skill::People));
+	EXPECT(PleaWithLawyer < PleaAlone);
+	const Verdict Plea = State.TakePlea();
+	EXPECT(Plea.bConvicted && Plea.SentenceDays == PleaWithLawyer);
+	EXPECT(State.InJail());
+	EXPECT(State.Justice.HasFelony());
+	EXPECT(!State.ApplyForCareer("police-officer").bOk);
+
+	// Classes and good behavior get you out early.
+	const std::int64_t Release = State.Justice.Jail().ReleaseMinute;
+	for (int Day = 0; Day < 10 && State.InJail(); ++Day)
+	{
+		State.ServeJailDay(JailActivity::Study);
+	}
+	EXPECT(!State.InJail() || State.Justice.Jail().ReleaseMinute < Release);
+	int Days = 0;
+	while (State.InJail() && Days < 400)
+	{
+		if (State.Justice.CanRequestParole(State.Clock.TotalMinutes()))
+		{
+			State.RequestParole();
+		}
+		else
+		{
+			State.ServeJailDay(JailActivity::KeepHeadDown);
+		}
+		++Days;
+	}
+	EXPECT(!State.InJail());
+
+	// The record survives a save; expungement needs three clean years.
+	GameState Restored = dtg_test::LoadedState();
+	EXPECT(Restored.LoadFromJson(State.SaveToJson(), nullptr));
+	EXPECT(Restored.Justice.HasFelony());
+	EXPECT(!State.ExpungeRecord().bOk);
+	State.Clock.SetTotalMinutes(static_cast<double>(State.Clock.TotalMinutes()) + 4.0 * 365 * 24 * 60);
+	EXPECT(State.ExpungeRecord().bOk);
+	EXPECT(!State.Justice.HasFelony());
+	EXPECT(State.ApplyForCareer("landscaper").bOk);
+}
+
+DTG_TEST(TrialsCanGoEitherWay)
+{
+	int Acquittals = 0;
+	int Convictions = 0;
+	for (std::uint64_t Seed = 1; Seed <= 40; ++Seed)
+	{
+		GameState State = dtg_test::FreshGame(Seed);
+		State.Funds.Deposit(Dollars(50000), MoneyCategory::Other, "test", 0);
+		State.ReportCrime(Crime::UnauthorizedHack, true, false);
+		State.Busted();
+		State.HireLawyer();
+		const Verdict Result = State.GoToTrial();
+		Acquittals += Result.bDecided && !Result.bConvicted ? 1 : 0;
+		Convictions += Result.bConvicted ? 1 : 0;
+	}
+	EXPECT(Acquittals > 3 && Convictions > 3);
+}
+
+DTG_TEST(CoDefendantsPlayThePrisonersDilemma)
+{
+	// Testifying is each side's dominant strategy, so the only equilibrium is both testifying.
+	const MatrixGame Game = JusticeSystem::CoDefendantGame(60);
+	const auto Pure = PureEquilibria(Game);
+	EXPECT(Pure.size() == 1 && Pure[0].first == 1 && Pure[0].second == 1);
+
+	// A friend who trusts you (and whom you've never betrayed) keeps quiet.
+	GameState State = dtg_test::FreshGame(72);
+	NpcMind& Friend = State.Npcs.GetOrCreate("friend-1");
+	Friend.Deal.Strategy = RepeatedStrategy::TitForTat;
+	State.ReportCrime(Crime::VehicleTheft, true, false);
+	State.Busted("friend-1");
+	EXPECT(State.Justice.Case().CoDefendantName == Friend.Name);
+	const Verdict Loyal = State.CoDefendantChoice(false);
+	EXPECT(Loyal.bConvicted);
+	EXPECT(Loyal.SentenceDays < 15); // both silent: light time
+	// Betray them, and next time they remember.
+	State.Justice.Release();
+	State.ReportCrime(Crime::VehicleTheft, true, false);
+	State.Busted("friend-1");
+	State.CoDefendantChoice(true);
+	State.Justice.Release();
+	State.ReportCrime(Crime::VehicleTheft, true, false);
+	State.Busted("friend-1");
+	const Verdict Payback = State.CoDefendantChoice(false);
+	EXPECT(Payback.SentenceDays >= 30); // they testified against you
+}

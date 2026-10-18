@@ -13,6 +13,7 @@
 #include "Sim/Garage.h"
 #include "Sim/Hacking.h"
 #include "Sim/Json.h"
+#include "Sim/Justice.h"
 #include "Sim/Market.h"
 #include "Sim/Ministry.h"
 #include "Sim/NpcMinds.h"
@@ -135,6 +136,8 @@ namespace dtg::sim
 		int NextVehicleNumber = 1;
 		int EventsWon = 0;
 		bool bManualTransmission = false;
+		JusticeSystem Justice;
+		std::vector<Crime> OpenCharges;          // crimes reported during the current police chase
 		std::string PhoneNumber;                 // written on notes left for car owners
 		std::vector<PrivateCar> PrivateCars;     // parked cars the player has dealt with (others are regenerated)
 		std::vector<PendingOffer> PendingOffers; // notes and texted counters waiting for a reply
@@ -268,8 +271,18 @@ namespace dtg::sim
 		Money EventEntryFee(EventKind Kind, int Tier) const;
 		ActionResult EnterEvent(EventKind Kind, int Tier);
 		Money FinishEvent(EventKind Kind, int Tier, int Position, int FieldSize);
-		/** Busted by police: fine and clear heat. */
-		Money Busted();
+		/** Busted by police: a fine for minor matters, otherwise a court case (see Justice). Returns the fine paid. */
+		Money Busted(const std::string& CoDefendantId = std::string());
+		ActionResult HireLawyer();
+		Verdict TakePlea();
+		Verdict GoToTrial();
+		/** Prisoner's dilemma with a co-defendant: they decide from their repeated-game memory of the player. */
+		Verdict CoDefendantChoice(bool bTestify);
+		JailDayResult ServeJailDay(JailActivity Activity);
+		ActionResult RequestParole();
+		ActionResult FileAppeal();
+		ActionResult ExpungeRecord();
+		bool InJail() const { return Justice.Jail().bInJail; }
 		/** Knocked out (lost a fight or a crash): hospital bill. */
 		Money Hospitalized();
 
@@ -289,6 +302,7 @@ namespace dtg::sim
 		void RunWeek(std::int64_t Minute, TickReport& Report);
 		ActionResult BuyPrivateCar(PrivateCar& Car, Money Price);
 		void Deliver(Message Value, TickReport* Report);
+		void ApplyVerdict(const Verdict& Result);
 
 		std::vector<std::string> PendingNotifications;
 		JsonValue CompaniesData;

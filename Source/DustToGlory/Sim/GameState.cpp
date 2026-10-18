@@ -399,6 +399,7 @@ namespace dtg::sim
 			Def.Description = CareerJson.GetString("description");
 			Def.Workplace = CareerJson.GetString("workplace");
 			Def.Education = CareerJson.GetString("education");
+			Def.bCleanRecord = CareerJson.GetBool("cleanRecord", false);
 			Def.RequiredSkillLevel = CareerJson.GetInt("requiredLevel", 0);
 			Def.ShiftHours = CareerJson.GetInt("shiftHours", 8);
 			if (!ParseSkill(CareerJson.GetString("skill", "People"), Def.PrimarySkill))
@@ -835,6 +836,8 @@ namespace dtg::sim
 		PendingNotifications.clear();
 		PrivateCars.clear();
 		PendingOffers.clear();
+		Justice = JusticeSystem();
+		OpenCharges.clear();
 		Phone = Inbox();
 		NextOfferId = 1;
 		bManualTransmission = false;
@@ -1102,6 +1105,10 @@ namespace dtg::sim
 	TickReport GameState::Advance(double RealSeconds)
 	{
 		TickReport Report;
+		if (!Wanted.IsWanted() && !OpenCharges.empty())
+		{
+			OpenCharges.clear(); // lost the police: nobody to charge
+		}
 		const std::int64_t Before = Clock.TotalMinutes();
 		Report.MinutesElapsed = Clock.Advance(RealSeconds);
 		for (std::int64_t Minute = Before + 1; Minute <= Before + Report.MinutesElapsed; ++Minute)
@@ -1548,6 +1555,15 @@ namespace dtg::sim
 		{
 			return ActionResult::Failure(Reason);
 		}
+		const CareerDef* Applying = Careers.FindCareer(CareerId);
+		if (Applying && Applying->bCleanRecord && Justice.HasFelony())
+		{
+			return ActionResult::Failure("This job requires a clean record. A lawyer can help expunge old convictions.");
+		}
+		if (InJail())
+		{
+			return ActionResult::Failure("Not from a jail cell.");
+		}
 		CareerProgress Job;
 		Job.CareerId = CareerId;
 		Jobs.push_back(Job);
@@ -1560,7 +1576,7 @@ namespace dtg::sim
 		ShiftResult Result;
 		CareerProgress* Job = FindJob(CareerId);
 		const CareerDef* Def = Careers.FindCareer(CareerId);
-		if (!Job || !Def)
+		if (!Job || !Def || InJail())
 		{
 			return Result;
 		}
@@ -1904,18 +1920,161 @@ namespace dtg::sim
 		return Prize;
 	}
 
-	Money GameState::Busted()
+	Money GameState::Busted(const std::string& CoDefendantId)
 	{
-		const Money Fine = Wanted.BustFine(Funds.Balance());
 		if (Politics.Current() != Office::None)
 		{
 			Politics.Scandal(0.4);
 			Markets.PlayerReputation().Trust = Clamp(Markets.PlayerReputation().Trust - 0.1, 0.0, 1.0);
 		}
-		const Money Taken = Funds.Charge(Fine, MoneyCategory::Fine, "Police fine", Clock.TotalMinutes());
+		std::vector<Crime> Charges = OpenCharges;
+		if (Charges.empty())
+		{
+			Charges.push_back(Crime::EvadingPolice);
+		}
+		// Evidence: more stars means more witnesses and footage.
+		const double Evidence = 0.35 + 0.1 * Wanted.Stars();
+		std::string CoName;
+		if (!CoDefendantId.empty())
+		{
+			CoName = Npcs.GetOrCreate(CoDefendantId).Name;
+		}
 		Wanted.Clear();
-		Notify("Busted. You paid " + FormatMoney(Taken) + " in fines.");
-		return Taken;
+		OpenCharges.clear();
+		if (!Justice.Arrest(Charges, Evidence, CoDefendantId, CoName, Funds.Balance()))
+		{
+			const Money Taken = Funds.Charge(Justice.Case().Fine, MoneyCategory::Fine, "Police fine", Clock.TotalMinutes());
+			Notify("Busted. You paid " + FormatMoney(Taken) + " in fines.");
+			return Taken;
+		}
+		Notify("Busted. You're booked and arraigned: " + std::to_string(Charges.size()) + " charge(s). Talk to a lawyer before you decide how to plead.");
+		return 0;
+	}
+
+	ActionResult GameState::HireLawyer()
+	{
+		if (!Justice.Case().bOpen || Justice.Case().bLawyer)
+		{
+			return ActionResult::Failure("You don't need a lawyer right now.");
+		}
+		const Money Fee = JusticeSystem::LawyerFee(Justice.Case().TrialDays);
+		if (!Funds.TrySpend(Fee, MoneyCategory::Fine, "Defense attorney", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("A good defense attorney costs " + FormatMoney(Fee) + ". The public defender will take your case.");
+		}
+		Justice.HireLawyer();
+		return ActionResult::Success("Your attorney is reviewing the evidence. Your plea offer just got better.");
+	}
+
+	void GameState::ApplyVerdict(const Verdict& Result)
+	{
+		if (!Result.bDecided)
+		{
+			return;
+		}
+		Notify(Result.Summary);
+		if (Result.bConvicted && Politics.Current() != Office::None && Justice.HasFelony())
+		{
+			Politics.Scandal(1.0);
+			Politics.Leave();
+			Notify("The conviction forced you out of office.");
+		}
+		if (Result.SentenceDays > 0)
+		{
+			Justice.BeginSentence(Result.SentenceDays, Clock.TotalMinutes());
+		}
+	}
+
+	Verdict GameState::TakePlea()
+	{
+		const Verdict Result = Justice.TakePlea(Player.SkillLevel(Skill::People), Clock.TotalMinutes());
+		ApplyVerdict(Result);
+		return Result;
+	}
+
+	Verdict GameState::GoToTrial()
+	{
+		const Verdict Result = Justice.GoToTrial(Player.SkillLevel(Skill::People), Random, Clock.TotalMinutes());
+		ApplyVerdict(Result);
+		return Result;
+	}
+
+	Verdict GameState::CoDefendantChoice(bool bTestify)
+	{
+		const std::string OtherId = Justice.Case().CoDefendantId;
+		bool bOtherTestifies = false;
+		if (!OtherId.empty())
+		{
+			// The co-defendant plays the repeated game: how the player has treated them decides whether they keep quiet.
+			NpcMind& Other = Npcs.GetOrCreate(OtherId);
+			bOtherTestifies = !DecideCooperate(Other.Deal, Random);
+			RecordOpponentMove(Other.Deal, !bTestify);
+			Other.Affinity = Clamp(Other.Affinity + (bTestify ? -0.4 : 0.15), -1.0, 1.0);
+		}
+		const Verdict Result = Justice.CoDefendantVerdict(bTestify, bOtherTestifies, Clock.TotalMinutes());
+		ApplyVerdict(Result);
+		return Result;
+	}
+
+	JailDayResult GameState::ServeJailDay(JailActivity Activity)
+	{
+		const JailDayResult Result = Justice.ServeDay(Activity, Player, Clock.TotalMinutes());
+		if (Result.Earned > 0)
+		{
+			Funds.Deposit(Result.Earned, MoneyCategory::Job, "Jail job", Clock.TotalMinutes());
+		}
+		Skip(GameClock::MinutesPerDay);
+		if (Result.bReleased)
+		{
+			Notify("Released from county jail.");
+		}
+		return Result;
+	}
+
+	ActionResult GameState::RequestParole()
+	{
+		if (!Justice.CanRequestParole(Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You're not eligible for a parole hearing yet.");
+		}
+		if (Justice.ParoleHearing(Clock.TotalMinutes(), Random))
+		{
+			return ActionResult::Success("Parole granted. Stay out of trouble.");
+		}
+		return ActionResult::Success("Parole denied. You can ask again in 30 days.");
+	}
+
+	ActionResult GameState::FileAppeal()
+	{
+		if (!InJail())
+		{
+			return ActionResult::Failure("There's nothing to appeal.");
+		}
+		const Money Cost = JusticeSystem::AppealCost(Justice.Jail().SentenceDays);
+		if (!Funds.TrySpend(Cost, MoneyCategory::Fine, "Appeal", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("An appeal costs " + FormatMoney(Cost) + ".");
+		}
+		if (Justice.Appeal(Random))
+		{
+			return ActionResult::Success("Conviction overturned on appeal! You're released and your record is cleared.");
+		}
+		return ActionResult::Success("The appeals court upheld your conviction.");
+	}
+
+	ActionResult GameState::ExpungeRecord()
+	{
+		const Money Fee = Dollars(1500);
+		if (!Funds.CanAfford(Fee))
+		{
+			return ActionResult::Failure("An expungement petition costs " + FormatMoney(Fee) + ".");
+		}
+		if (!Justice.Expunge(Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("Nothing on your record is old enough to expunge (three years).");
+		}
+		Funds.TrySpend(Fee, MoneyCategory::Fine, "Expungement", Clock.TotalMinutes());
+		return ActionResult::Success("The court granted your petition. Old convictions are sealed.");
 	}
 
 	Money GameState::Hospitalized()
@@ -2232,6 +2391,10 @@ namespace dtg::sim
 	ActionResult GameState::RunForOffice(Office Target)
 	{
 		std::string Error;
+		if (Justice.HasFelony())
+		{
+			return ActionResult::Failure("A felony conviction keeps you off the ballot unless it's expunged or pardoned.");
+		}
 		const Reputation& Rep = Markets.PlayerReputation();
 		if (!Politics.StartCampaign(Target, Rep.Followers, Rep.Trust, Rep.Score(), Funds, Clock.TotalMinutes(), Random, &Error))
 		{
@@ -2324,7 +2487,12 @@ namespace dtg::sim
 		{
 			return; // relaxed speed limits: most speeding goes unpunished
 		}
+		const double HeatBefore = Wanted.Heat();
 		Wanted.ReportCrime(Value, bPoliceWitness, bCivilianWitness, Random);
+		if (Wanted.Heat() > HeatBefore)
+		{
+			OpenCharges.push_back(Value);
+		}
 		if (Value == Crime::Speeding && Laws.SpeedingHeatMul > 1.0 && bPoliceWitness)
 		{
 			Wanted.ReportCrime(Value, true, false, Random); // stricter enforcement: counts twice

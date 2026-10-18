@@ -15,6 +15,8 @@ namespace dtg::sim
 			case Crime::HitPoliceCar: return 120.0;
 			case Crime::EvadingPolice: return 60.0;
 			case Crime::UnauthorizedHack: return 100.0;
+			case Crime::Assault: return 80.0;
+			case Crime::Fraud: return 150.0;
 			case Crime::Count: break;
 			}
 			return 0.0;
@@ -27,6 +29,7 @@ namespace dtg::sim
 			case Crime::VehicleTheft: return 0.6;
 			case Crime::PropertyDamage: return 0.3;
 			case Crime::RecklessDriving: return 0.15;
+			case Crime::Assault: return 0.7;
 			default: return 0.0;
 			}
 		}
@@ -43,6 +46,8 @@ namespace dtg::sim
 		case Crime::HitPoliceCar: return "Hitting a police car";
 		case Crime::EvadingPolice: return "Evading police";
 		case Crime::UnauthorizedHack: return "Unauthorized hacking";
+		case Crime::Assault: return "Assault";
+		case Crime::Fraud: return "Fraud";
 		case Crime::Count: break;
 		}
 		return "Crime";

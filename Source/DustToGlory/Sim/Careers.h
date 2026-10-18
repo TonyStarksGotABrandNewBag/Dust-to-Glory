@@ -59,6 +59,7 @@ namespace dtg::sim
 		std::string Description;
 		std::string Workplace;     // building role that hosts shifts, e.g. "Hospital"
 		std::string Education;     // required education id, empty when none
+		bool bCleanRecord = false; // a felony on the record disqualifies (police, law, teaching, medicine...)
 		Skill PrimarySkill = Skill::People;
 		int RequiredSkillLevel = 0;
 		MinigameKind Minigame = MinigameKind::SkillCheck;

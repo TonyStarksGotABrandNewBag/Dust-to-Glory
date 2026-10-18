@@ -15,6 +15,8 @@ namespace dtg::sim
 		HitPoliceCar,
 		EvadingPolice,
 		UnauthorizedHack,
+		Assault,            // fighting civilians or heroes
+		Fraud,              // smear campaigns and scams, found by investigators
 		Count
 	};
 

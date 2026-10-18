@@ -477,6 +477,52 @@ namespace dtg::sim
 		PoliticsJson.Set("campaign", RunJson);
 		Root.Set("politics", PoliticsJson);
 
+		{
+			const JusticeSystem::Snapshot Court = Justice.Save();
+			JsonValue JusticeJson = JsonValue::MakeObject();
+			JsonValue RecordJson = JsonValue::MakeArray();
+			for (const RecordEntry& Entry : Court.Entries)
+			{
+				JsonValue Item = JsonValue::MakeObject();
+				Item.Set("charge", Num(static_cast<int>(Entry.Charge)));
+				Item.Set("minute", Num(static_cast<double>(Entry.Minute)));
+				Item.Set("days", Num(Entry.SentenceDays));
+				Item.Set("expunged", Bool(Entry.bExpunged));
+				RecordJson.Push(Item);
+			}
+			JusticeJson.Set("record", RecordJson);
+			JsonValue CaseJson = JsonValue::MakeObject();
+			CaseJson.Set("open", Bool(Court.OpenCase.bOpen));
+			JsonValue ChargesJson = JsonValue::MakeArray();
+			for (const Crime Charge : Court.OpenCase.Charges)
+			{
+				ChargesJson.Push(Num(static_cast<int>(Charge)));
+			}
+			CaseJson.Set("charges", ChargesJson);
+			CaseJson.Set("evidence", Num(Court.OpenCase.Evidence));
+			CaseJson.Set("coId", Str(Court.OpenCase.CoDefendantId));
+			CaseJson.Set("coName", Str(Court.OpenCase.CoDefendantName));
+			CaseJson.Set("trialDays", Num(Court.OpenCase.TrialDays));
+			CaseJson.Set("lawyer", Bool(Court.OpenCase.bLawyer));
+			JusticeJson.Set("case", CaseJson);
+			JsonValue JailJson = JsonValue::MakeObject();
+			JailJson.Set("inJail", Bool(Court.Jail.bInJail));
+			JailJson.Set("release", Num(static_cast<double>(Court.Jail.ReleaseMinute)));
+			JailJson.Set("sentence", Num(Court.Jail.SentenceDays));
+			JailJson.Set("served", Num(Court.Jail.DaysServed));
+			JailJson.Set("behavior", Num(Court.Jail.GoodBehavior));
+			JailJson.Set("programDays", Num(Court.Jail.ProgramDays));
+			JailJson.Set("programs", Num(Court.Jail.ProgramsCompleted));
+			JailJson.Set("parole", Num(static_cast<double>(Court.Jail.NextParoleMinute)));
+			JusticeJson.Set("jail", JailJson);
+			JsonValue OpenJson = JsonValue::MakeArray();
+			for (const Crime Charge : OpenCharges)
+			{
+				OpenJson.Push(Num(static_cast<int>(Charge)));
+			}
+			JusticeJson.Set("openCharges", OpenJson);
+			Root.Set("justice", JusticeJson);
+		}
 		Root.Set("phoneNumber", Str(PhoneNumber));
 		JsonValue CarsJson = JsonValue::MakeArray();
 		for (const PrivateCar& Car : PrivateCars)
@@ -855,6 +901,49 @@ namespace dtg::sim
 		PoliticsData.Run.ElectionMinute = RunJson.GetInt64("election");
 		Politics.Load(PoliticsData);
 
+		{
+			const JsonValue& JusticeJson = Root.Get("justice");
+			JusticeSystem::Snapshot Court;
+			auto ReadCrime = [](const JsonValue& Value)
+			{
+				return static_cast<Crime>(Clamp(Value.AsInt(), 0, static_cast<int>(Crime::Count) - 1));
+			};
+			for (const JsonValue& Item : JusticeJson.Get("record").Items())
+			{
+				RecordEntry Entry;
+				Entry.Charge = ReadCrime(Item.Get("charge"));
+				Entry.Minute = Item.GetInt64("minute");
+				Entry.SentenceDays = Item.GetInt("days");
+				Entry.bExpunged = Item.GetBool("expunged");
+				Court.Entries.push_back(Entry);
+			}
+			const JsonValue& CaseJson = JusticeJson.Get("case");
+			Court.OpenCase.bOpen = CaseJson.GetBool("open");
+			for (const JsonValue& Item : CaseJson.Get("charges").Items())
+			{
+				Court.OpenCase.Charges.push_back(ReadCrime(Item));
+			}
+			Court.OpenCase.Evidence = CaseJson.GetNumber("evidence", 0.6);
+			Court.OpenCase.CoDefendantId = CaseJson.GetString("coId");
+			Court.OpenCase.CoDefendantName = CaseJson.GetString("coName");
+			Court.OpenCase.TrialDays = CaseJson.GetInt("trialDays");
+			Court.OpenCase.bLawyer = CaseJson.GetBool("lawyer");
+			const JsonValue& JailJson = JusticeJson.Get("jail");
+			Court.Jail.bInJail = JailJson.GetBool("inJail");
+			Court.Jail.ReleaseMinute = JailJson.GetInt64("release");
+			Court.Jail.SentenceDays = JailJson.GetInt("sentence");
+			Court.Jail.DaysServed = JailJson.GetInt("served");
+			Court.Jail.GoodBehavior = JailJson.GetNumber("behavior", 0.5);
+			Court.Jail.ProgramDays = JailJson.GetInt("programDays");
+			Court.Jail.ProgramsCompleted = JailJson.GetInt("programs");
+			Court.Jail.NextParoleMinute = JailJson.GetInt64("parole");
+			Justice.Load(Court);
+			OpenCharges.clear();
+			for (const JsonValue& Item : JusticeJson.Get("openCharges").Items())
+			{
+				OpenCharges.push_back(ReadCrime(Item));
+			}
+		}
 		PhoneNumber = Root.GetString("phoneNumber", "(843) 555-0100");
 		PrivateCars.clear();
 		for (const JsonValue& Item : Root.Get("privateCars").Items())
