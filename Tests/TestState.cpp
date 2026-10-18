@@ -7,6 +7,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <chrono>
+#include <cstdio>
 #include <set>
 #include <string>
 #include <vector>
@@ -491,4 +493,170 @@ DTG_TEST(NorthCarolinaIsTheHardOne)
 	// the roads were graded at all this read 56%, and before crossings were treated as overpasses
 	// rather than averaged into the hillside, 244%.
 	EXPECT_MSG(Steepest <= 0.0601, Worst + " climbs at " + std::to_string(Steepest * 100.0) + "%");
+}
+
+// The lookup grid is a speed trick and nothing more: SurfaceAt and RoadHeightAt must return exactly
+// what they returned when they walked every road and town in the state for every single sample. A
+// cell that misses a segment reaching into it would show up here as a seam in the terrain or a car
+// dropping through a bridge, so every state is checked across its whole extent -- and, more densely,
+// through its towns and along its roads, where the answers actually vary.
+DTG_TEST(StateLookupMatchesExhaustiveSearch)
+{
+	const char* States[] = {"state.json", "state-florida.json", "state-northcarolina.json"};
+	for (const char* Which : States)
+	{
+		GameState Indexed;
+		ContentReport Report;
+		Indexed.LoadContent(dtg_test::LoadAllFiles(Which), Report);
+		EXPECT_MSG(Report.Errors.empty(), std::string(Which) + " failed to load");
+
+		GameState Exact = Indexed;
+		Exact.Map.ForgetLookup();
+
+		std::vector<std::array<double, 2>> Samples;
+		const Rect& Bounds = Indexed.Map.Bounds;
+		for (int Row = 0; Row <= 40; ++Row)
+		{
+			for (int Column = 0; Column <= 40; ++Column)
+			{
+				Samples.push_back({Bounds.MinX + Bounds.Width() * Column / 40.0,
+					Bounds.MinY + Bounds.Depth() * Row / 40.0});
+			}
+		}
+		// Through the towns, where the pads are.
+		for (const StateCity& City : Indexed.Map.Cities)
+		{
+			for (int Row = -6; Row <= 6; ++Row)
+			{
+				for (int Column = -6; Column <= 6; ++Column)
+				{
+					Samples.push_back({City.X + Column * 180.0, City.Y + Row * 180.0});
+				}
+			}
+		}
+		// And along the roads, including off to either side, where the decks and shoulders are.
+		for (const HighwayPlan& Road : Indexed.Map.Highways)
+		{
+			const double Length = Road.LengthM();
+			for (double Along = 0.0; Along <= Length; Along += 37.0)
+			{
+				const std::array<double, 3> Here = Road.At(Along);
+				for (const double Offset : {-30.0, -12.0, 0.0, 12.0, 30.0})
+				{
+					Samples.push_back({Here[0] + Offset, Here[1]});
+					Samples.push_back({Here[0], Here[1] + Offset});
+				}
+			}
+		}
+
+		std::size_t Mismatches = 0;
+		std::string First;
+		for (const std::array<double, 2>& Where : Samples)
+		{
+			const SurfaceInfo Fast = Indexed.Map.SurfaceAt(Where[0], Where[1]);
+			const SurfaceInfo Slow = Exact.Map.SurfaceAt(Where[0], Where[1]);
+			const double Road = Indexed.Map.RoadHeightAt(Where[0], Where[1]);
+			const double RoadSlow = Exact.Map.RoadHeightAt(Where[0], Where[1]);
+			const bool bSame = std::fabs(Fast.GroundM - Slow.GroundM) < 1e-9 &&
+				std::fabs(Fast.WaterM - Slow.WaterM) < 1e-9 && Fast.bWater == Slow.bWater &&
+				std::fabs(Road - RoadSlow) < 1e-9;
+			if (!bSame)
+			{
+				if (Mismatches == 0)
+				{
+					First = std::string(Which) + " at " + std::to_string(Where[0]) + "," +
+						std::to_string(Where[1]) + ": ground " + std::to_string(Fast.GroundM) + " vs " +
+						std::to_string(Slow.GroundM) + ", road " + std::to_string(Road) + " vs " +
+						std::to_string(RoadSlow);
+				}
+				++Mismatches;
+			}
+		}
+		EXPECT_MSG(Mismatches == 0, "lookup grid disagrees with exhaustive search in " +
+			std::to_string(Mismatches) + " of " + std::to_string(Samples.size()) + " samples -- " + First);
+	}
+}
+
+// Load times and the frame budget. Terrain is streamed while the player drives, so a height sample
+// is not allowed to drift back into walking the whole road network: a chunk is some four and a half
+// thousand samples and a frame is 16.7 ms. The budget here is a count of segments examined rather
+// than a stopwatch, so it means the same thing on a busy build machine as on a quiet one.
+DTG_TEST(StateHeightQueriesStayCheap)
+{
+	const char* States[] = {"state.json", "state-florida.json", "state-northcarolina.json"};
+	for (const char* Which : States)
+	{
+		GameState State;
+		ContentReport Report;
+		State.LoadContent(dtg_test::LoadAllFiles(Which), Report);
+		EXPECT_MSG(Report.Errors.empty(), std::string(Which) + " failed to load");
+
+		std::size_t Total = 0;
+		for (const HighwayPlan& Road : State.Map.Highways)
+		{
+			Total += Road.Points.size() > 0 ? Road.Points.size() - 1 : 0;
+		}
+		EXPECT(Total > 0);
+
+		// A chunk's worth of samples around the spawn, which is where the first frames are spent.
+		std::size_t Looked = 0;
+		std::size_t Worst = 0;
+		const int Cells = 64;
+		const double Step = 192.0 / Cells;
+		for (int Row = 0; Row <= Cells; ++Row)
+		{
+			for (int Column = 0; Column <= Cells; ++Column)
+			{
+				const std::size_t Here = State.Map.RoadCandidatesAt(
+					State.City.SpawnX + Column * Step, State.City.SpawnY + Row * Step);
+				Looked += Here;
+				Worst = std::max(Worst, Here);
+			}
+		}
+		const double Average = static_cast<double>(Looked) /
+			static_cast<double>((Cells + 1) * (Cells + 1));
+		// Absolute bounds, because what costs a frame is the number of segments examined, not the
+		// fraction. Today these read 14.3/18 for South Carolina (its start town is a junction of
+		// several routes), 5.0/5 for Florida and 4.0/4 for North Carolina. Drop the lookup grid and
+		// the average becomes the whole network -- 69, 75 and 141 -- which is what this guards.
+		EXPECT_MSG(Average <= 24.0, std::string(Which) + " examines " + std::to_string(Average) +
+			" road segments per height sample, of " + std::to_string(Total));
+		EXPECT_MSG(Worst <= 48, std::string(Which) + " has a cell holding " + std::to_string(Worst) +
+			" road segments, of " + std::to_string(Total));
+		// And on a network big enough for the fraction to mean anything, it has to scale: a bigger
+		// state must not cost proportionally more per sample.
+		if (Total >= 100)
+		{
+			EXPECT_MSG(Average < 0.15 * static_cast<double>(Total),
+				std::string(Which) + " examines " + std::to_string(Average) + " of " +
+					std::to_string(Total) + " segments per sample -- the grid has stopped scaling");
+		}
+	}
+}
+
+// Startup. Generating a whole state -- terrain, towns, every building, the road network and its
+// grading -- happens before the player sees anything, so it is measured here. The budget is
+// deliberately loose, some thirty times what this costs today (24 ms for South Carolina, 41 for
+// Florida, 46 for North Carolina), because a build machine's clock is shared and nobody should be
+// chasing a red test over a busy afternoon. It is here to catch an order-of-growth mistake -- a
+// generation step that quietly became quadratic in the number of buildings -- not to police
+// milliseconds.
+DTG_TEST(StateLoadsFastEnoughToStartPlaying)
+{
+	const char* States[] = {"state.json", "state-florida.json", "state-northcarolina.json"};
+	for (const char* Which : States)
+	{
+		const dtg::sim::ContentFiles Files = dtg_test::LoadAllFiles(Which);
+		const std::chrono::steady_clock::time_point Started = std::chrono::steady_clock::now();
+		GameState State;
+		ContentReport Report;
+		State.LoadContent(Files, Report);
+		State.NewGame(7, "Tester");
+		const double Elapsed = std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - Started).count();
+		EXPECT_MSG(Report.Errors.empty(), std::string(Which) + " failed to load");
+		EXPECT_MSG(!State.City.Buildings.empty(), std::string(Which) + " generated no buildings");
+		EXPECT_MSG(Elapsed < 1500.0, std::string(Which) + " took " + std::to_string(Elapsed) +
+			" ms to become playable");
+	}
 }

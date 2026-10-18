@@ -1,0 +1,261 @@
+// Vegetation: it has to be stable, it has to stay off the road, and it has to belong to the place.
+//
+// Stability is the one that would actually ruin a drive. Terrain streams in chunks that are built,
+// thrown away and built again as the player moves, so if the trees depended on which chunk asked for
+// them, a pine would hop two metres sideways every time you drove past it.
+#include "Sim/Vegetation.h"
+
+#include "TestFramework.h"
+#include "TestSupport.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <map>
+#include <string>
+#include <vector>
+
+using namespace dtg::sim;
+
+namespace
+{
+	Rect Around(double X, double Y, double Half)
+	{
+		return Rect{X - Half, Y - Half, X + Half, Y + Half};
+	}
+
+	std::string Key(const Plant& Value)
+	{
+		// Enough precision to catch a plant that moved at all, not so much that it is noise.
+		auto Round = [](double V) { return std::to_string(static_cast<long long>(std::llround(V * 1000.0))); };
+		return Round(Value.X) + "," + Round(Value.Y) + "," + Round(Value.HeightM) + "," +
+			Round(Value.RadiusM) + "," + std::to_string(static_cast<int>(Value.Kind));
+	}
+}
+
+// The same ground gives the same trees, however it is asked for: twice over, and in overlapping
+// pieces. A chunk boundary must not be visible as a seam in the planting, and a chunk rebuilt after
+// being released must come back identical.
+DTG_TEST(VegetationIsStableInWorldSpace)
+{
+	const GameState& State = dtg_test::LoadedState();
+	// Somewhere that actually grows things, found rather than assumed: the start town is Longs,
+	// which is ten miles from the North Carolina line, so a fixed offset can easily land in the
+	// next state or out at sea.
+	double X = State.City.SpawnX;
+	double Y = State.City.SpawnY;
+	bool bFound = false;
+	for (int Ring = 1; Ring <= 12 && !bFound; ++Ring)
+	{
+		for (int Step = 0; Step < 8 && !bFound; ++Step)
+		{
+			const double Angle = Step * 0.785398;
+			const double TryX = State.City.SpawnX + Ring * 600.0 * std::cos(Angle);
+			const double TryY = State.City.SpawnY + Ring * 600.0 * std::sin(Angle);
+			if (State.Map.InsideState(TryX, TryY) &&
+				PlantsIn(State.Map, State.City, Around(TryX, TryY, 300.0)).size() > 20)
+			{
+				X = TryX;
+				Y = TryY;
+				bFound = true;
+			}
+		}
+	}
+	EXPECT_MSG(bFound, "no patch of ground within seven kilometres of the start grows anything");
+
+	const std::vector<Plant> Once = PlantsIn(State.Map, State.City, Around(X, Y, 300.0));
+	const std::vector<Plant> Twice = PlantsIn(State.Map, State.City, Around(X, Y, 300.0));
+	EXPECT_MSG(Once.size() == Twice.size(), "asking twice gave a different number of plants");
+	EXPECT_MSG(!Once.empty(), "the patch that grew plants a moment ago is now empty");
+	for (std::size_t Index = 0; Index < Once.size() && Index < Twice.size(); ++Index)
+	{
+		EXPECT_MSG(Key(Once[Index]) == Key(Twice[Index]),
+			"plant " + std::to_string(Index) + " moved between two identical requests");
+	}
+
+	// Now the same ground in four pieces, as four neighbouring chunks would ask for it. Every plant
+	// in the whole must appear in exactly one piece, unchanged.
+	std::map<std::string, int> Whole;
+	for (const Plant& Value : Once)
+	{
+		++Whole[Key(Value)];
+	}
+	std::map<std::string, int> Pieces;
+	const double Half = 150.0;
+	for (const double Dx : {-Half, Half})
+	{
+		for (const double Dy : {-Half, Half})
+		{
+			for (const Plant& Value : PlantsIn(State.Map, State.City, Around(X + Dx, Y + Dy, Half)))
+			{
+				++Pieces[Key(Value)];
+			}
+		}
+	}
+	std::size_t Missing = 0;
+	std::size_t Doubled = 0;
+	for (const auto& Entry : Whole)
+	{
+		const auto Found = Pieces.find(Entry.first);
+		if (Found == Pieces.end())
+		{
+			++Missing;
+		}
+		else if (Found->second > 1)
+		{
+			++Doubled;
+		}
+	}
+	// A plant exactly on a piece boundary can legitimately fall in two pieces, since the rectangles
+	// share an edge; what must not happen is a plant vanishing or changing.
+	EXPECT_MSG(Missing == 0, std::to_string(Missing) + " of " + std::to_string(Whole.size()) +
+		" plants disappear when the same ground is asked for in four pieces -- a seam at every chunk edge");
+	EXPECT_MSG(Doubled * 50 < Whole.size() + 50, std::to_string(Doubled) +
+		" plants are duplicated across piece boundaries, which is more than edge cases");
+}
+
+// Nothing grows on the carriageway, in the water, or in the middle of a town.
+DTG_TEST(VegetationKeepsOffTheRoadAndOutOfTown)
+{
+	const char* States[] = {"state.json", "state-florida.json", "state-northcarolina.json"};
+	for (const char* Which : States)
+	{
+		GameState State;
+		ContentReport Report;
+		State.LoadContent(dtg_test::LoadAllFiles(Which), Report);
+		EXPECT_MSG(Report.Errors.empty(), std::string(Which) + " failed to load");
+
+		std::size_t Checked = 0;
+		std::size_t OnRoad = 0;
+		std::size_t InWater = 0;
+		std::size_t InTown = 0;
+		// Along the highways, where a stray tree would be in the windscreen, and through the towns.
+		for (const HighwayPlan& Road : State.Map.Highways)
+		{
+			const double Length = Road.LengthM();
+			for (double Along = 0.0; Along < Length; Along += 260.0)
+			{
+				const std::array<double, 3> Here = Road.At(Along);
+				for (const Plant& Value : PlantsIn(State.Map, State.City, Around(Here[0], Here[1], 70.0)))
+				{
+					++Checked;
+					const SurfaceInfo Info = State.Map.SurfaceAt(Value.X, Value.Y);
+					if (Info.RoadNearness > 0.0)
+					{
+						++OnRoad;
+					}
+					if (Info.bWater)
+					{
+						++InWater;
+					}
+				}
+			}
+		}
+		for (const StateCity& City : State.Map.Cities)
+		{
+			for (const Plant& Value : PlantsIn(State.Map, State.City, Around(City.X, City.Y, 240.0)))
+			{
+				++Checked;
+				const CityInfo* Town = State.City.CityAt(Value.X, Value.Y);
+				if (Town == nullptr)
+				{
+					continue;
+				}
+				bool bPark = false;
+				for (const Rect& Park : State.City.Parks)
+				{
+					if (Park.Contains(Value.X, Value.Y))
+					{
+						bPark = true;
+						break;
+					}
+				}
+				if (!bPark)
+				{
+					++InTown;
+				}
+			}
+		}
+		EXPECT_MSG(Checked > 0, std::string(Which) + ": nothing grows along any road or in any town");
+		EXPECT_MSG(OnRoad == 0, std::string(Which) + ": " + std::to_string(OnRoad) + " of " +
+			std::to_string(Checked) + " plants stand on a road");
+		EXPECT_MSG(InWater == 0, std::string(Which) + ": " + std::to_string(InWater) +
+			" plants stand in open water");
+		EXPECT_MSG(InTown == 0, std::string(Which) + ": " + std::to_string(InTown) +
+			" plants stand on a town street or lot");
+	}
+}
+
+// Species belong to their ground: palms on the coast and not in the mountains, cypress near water,
+// and every plant a plausible size.
+DTG_TEST(VegetationSuitsItsSurroundings)
+{
+	const char* States[] = {"state.json", "state-florida.json", "state-northcarolina.json"};
+	for (const char* Which : States)
+	{
+		GameState State;
+		ContentReport Report;
+		State.LoadContent(dtg_test::LoadAllFiles(Which), Report);
+		EXPECT_MSG(Report.Errors.empty(), std::string(Which) + " failed to load");
+
+		std::size_t Counts[static_cast<std::size_t>(PlantKind::Count)] = {};
+		std::size_t HighPalms = 0;
+		std::size_t Total = 0;
+		const Rect& Bounds = State.Map.Bounds;
+		for (int Row = 0; Row < 12; ++Row)
+		{
+			for (int Column = 0; Column < 12; ++Column)
+			{
+				const double X = Bounds.MinX + Bounds.Width() * (Column + 0.5) / 12.0;
+				const double Y = Bounds.MinY + Bounds.Depth() * (Row + 0.5) / 12.0;
+				for (const Plant& Value : PlantsIn(State.Map, State.City, Around(X, Y, 120.0)))
+				{
+					++Total;
+					++Counts[static_cast<std::size_t>(Value.Kind)];
+					EXPECT_MSG(Value.HeightM > 0.3 && Value.HeightM < 40.0,
+						std::string(Which) + ": a " + PlantKindName(Value.Kind) + " is " +
+							std::to_string(Value.HeightM) + " m tall");
+					EXPECT_MSG(Value.RadiusM > 0.2 && Value.RadiusM < 14.0,
+						std::string(Which) + ": a " + PlantKindName(Value.Kind) + " is " +
+							std::to_string(Value.RadiusM) + " m across");
+					EXPECT_MSG(std::fabs(Value.GroundM - State.Map.SurfaceAt(Value.X, Value.Y).GroundM) < 0.01,
+						std::string(Which) + ": a " + PlantKindName(Value.Kind) + " floats above the ground");
+					if (Value.Kind == PlantKind::Palm && Value.GroundM > 400.0)
+					{
+						++HighPalms;
+					}
+				}
+			}
+		}
+		EXPECT_MSG(Total > 200, std::string(Which) + " grew only " + std::to_string(Total) +
+			" plants across the whole state");
+		EXPECT_MSG(HighPalms == 0, std::string(Which) + " has " + std::to_string(HighPalms) +
+			" palm trees up a mountain");
+		// Pine is the backbone of both Carolinas and most of inland Florida: it should not be rare.
+		EXPECT_MSG(Counts[static_cast<std::size_t>(PlantKind::Pine)] * 6 > Total,
+			std::string(Which) + " is only " +
+				std::to_string(Counts[static_cast<std::size_t>(PlantKind::Pine)] * 100 / (Total ? Total : 1)) +
+				"% pine, which is not the Southeast");
+	}
+}
+
+// It has to be affordable. Vegetation is generated for every terrain chunk as it streams in, so the
+// cost of one chunk's worth is paid inside a frame that is also drawing the world.
+DTG_TEST(VegetationForAChunkIsAffordable)
+{
+	const GameState& State = dtg_test::LoadedState();
+	// One chunk is 192 m square.
+	const Rect Chunk = Around(State.City.SpawnX + 900.0, State.City.SpawnY + 900.0, 96.0);
+	const std::vector<Plant> Grown = PlantsIn(State.Map, State.City, Chunk);
+	// Enough to look like country, few enough to draw: a chunk is 36,864 square metres.
+	EXPECT_MSG(Grown.size() < 1200, "a single chunk grew " + std::to_string(Grown.size()) +
+		" plants, which will not fit in a frame");
+
+	// And the limit is honoured, however much ground is asked for at once.
+	PlantingRules Tight;
+	Tight.Limit = 50;
+	const std::vector<Plant> Capped = PlantsIn(State.Map, State.City,
+		Around(State.City.SpawnX, State.City.SpawnY, 4000.0), Tight);
+	EXPECT_MSG(Capped.size() <= 50, "the planting limit was ignored: " +
+		std::to_string(Capped.size()) + " plants");
+}

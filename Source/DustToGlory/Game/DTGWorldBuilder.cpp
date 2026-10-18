@@ -1,5 +1,8 @@
 #include "Game/DTGWorldBuilder.h"
 
+#include "Sim/RoadMarkings.h"
+#include "Sim/Vegetation.h"
+
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -97,6 +100,7 @@ void ADTGWorldBuilder::BuildStaticWorld()
 {
 	BuildTownStreets();
 	BuildHighways();
+	BuildRoadMarkings();
 	BuildBuildings();
 	BuildVenues();
 	BuildWater();
@@ -139,7 +143,6 @@ void ADTGWorldBuilder::BuildHighways()
 	const CityPlan& City = Game->Sim().City;
 	const double S = DTGMetresToUnreal;
 	const FLinearColor Asphalt(0.06f, 0.06f, 0.065f);
-	const FLinearColor Line(0.65f, 0.63f, 0.5f);
 	FDTGMesh Mesh;
 
 	for (const HighwayPlan& Road : City.Highways)
@@ -156,8 +159,6 @@ void ADTGWorldBuilder::BuildHighways()
 		const double Half = 0.5 * Road.WidthM;
 		FVector PrevLeft = FVector::ZeroVector;
 		FVector PrevRight = FVector::ZeroVector;
-		FVector PrevInnerLeft = FVector::ZeroVector;
-		FVector PrevInnerRight = FVector::ZeroVector;
 		bool bHavePrevious = false;
 		for (int32 Index = 0; Index <= Steps; ++Index)
 		{
@@ -178,22 +179,14 @@ void ADTGWorldBuilder::BuildHighways()
 			const double Z = (Here[2] + 0.05) * S;
 			const FVector Left((Here[0] - Nx * Half) * S, (Here[1] - Ny * Half) * S, Z);
 			const FVector Right((Here[0] + Nx * Half) * S, (Here[1] + Ny * Half) * S, Z);
-			// A centre line, so a highway reads as a road rather than a grey ribbon.
-			const double LineHalf = 0.12;
-			const FVector InnerLeft((Here[0] - Nx * LineHalf) * S, (Here[1] - Ny * LineHalf) * S, Z + 1.0);
-			const FVector InnerRight((Here[0] + Nx * LineHalf) * S, (Here[1] + Ny * LineHalf) * S, Z + 1.0);
+			// Markings are laid down by BuildRoadMarkings, which follows the US convention per road
+			// class; this pass is only the carriageway itself.
 			if (bHavePrevious)
 			{
 				Mesh.AddQuad(PrevLeft, Left, Right, PrevRight, FVector::UpVector, Asphalt);
-				if (Index % 2 == 0) // a dashed line
-				{
-					Mesh.AddQuad(PrevInnerLeft, InnerLeft, InnerRight, PrevInnerRight, FVector::UpVector, Line);
-				}
 			}
 			PrevLeft = Left;
 			PrevRight = Right;
-			PrevInnerLeft = InnerLeft;
-			PrevInnerRight = InnerRight;
 			bHavePrevious = true;
 		}
 	}
@@ -201,6 +194,110 @@ void ADTGWorldBuilder::BuildHighways()
 	{
 		Surfaces->CreateMeshSection_LinearColor(1, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
 		Surfaces->SetMaterial(1, SurfaceMaterial());
+	}
+}
+
+void ADTGWorldBuilder::BuildRoadMarkings()
+{
+	// The paint. Decided in the simulation (Sim/RoadMarkings) so it can be tested without an engine,
+	// and so what is checked offline is exactly what gets drawn here.
+	const dtg::sim::CityPlan& City = Game->Sim().City;
+	const dtg::sim::StatePlan& Map = Game->Sim().Map;
+	const double S = DTGMetresToUnreal;
+	FDTGMesh Mesh;
+
+	auto Paint = [&Mesh, S](const dtg::sim::RoadMark& Mark)
+	{
+		const double Dx = Mark.Bx - Mark.Ax;
+		const double Dy = Mark.By - Mark.Ay;
+		const double Length = FMath::Max(1e-9, FMath::Sqrt(Dx * Dx + Dy * Dy));
+		const double Nx = -Dy / Length * Mark.WidthM * 0.5;
+		const double Ny = Dx / Length * Mark.WidthM * 0.5;
+		const FVector A((Mark.Ax - Nx) * S, (Mark.Ay - Ny) * S, Mark.Az * S);
+		const FVector B((Mark.Ax + Nx) * S, (Mark.Ay + Ny) * S, Mark.Az * S);
+		const FVector C((Mark.Bx + Nx) * S, (Mark.By + Ny) * S, Mark.Bz * S);
+		const FVector D((Mark.Bx - Nx) * S, (Mark.By - Ny) * S, Mark.Bz * S);
+		Mesh.AddQuad(A, B, C, D, FVector::UpVector,
+			FLinearColor(static_cast<float>(Mark.Rgb[0]), static_cast<float>(Mark.Rgb[1]),
+				static_cast<float>(Mark.Rgb[2])));
+	};
+
+	for (const dtg::sim::HighwayPlan& Road : City.Highways)
+	{
+		for (const dtg::sim::RoadMark& Mark : dtg::sim::MarkHighway(Road))
+		{
+			Paint(Mark);
+		}
+	}
+	// Town streets sit on the town's level pad, so their heights come from the terrain.
+	const auto HeightAt = [](double X, double Y, const void* User) -> double
+	{
+		return static_cast<const dtg::sim::StatePlan*>(User)->HeightAt(X, Y);
+	};
+	for (const dtg::sim::RoadMark& Mark : dtg::sim::MarkStreets(City, HeightAt, &Map))
+	{
+		Paint(Mark);
+	}
+
+	if (!Mesh.IsEmpty())
+	{
+		Surfaces->CreateMeshSection_LinearColor(2, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors,
+			Mesh.Tangents, /*bCreateCollision*/ false);
+		Surfaces->SetMaterial(2, SurfaceMaterial());
+	}
+}
+
+void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh)
+{
+	if (!bPlantVegetation || Mesh == nullptr)
+	{
+		return;
+	}
+	const dtg::sim::StatePlan& Map = Game->Sim().Map;
+	const dtg::sim::CityPlan& City = Game->Sim().City;
+	const double S = DTGMetresToUnreal;
+	const double OriginX = ChunkX * static_cast<double>(ChunkSizeM);
+	const double OriginY = ChunkY * static_cast<double>(ChunkSizeM);
+	const dtg::sim::Rect Area{OriginX, OriginY, OriginX + ChunkSizeM, OriginY + ChunkSizeM};
+
+	dtg::sim::PlantingRules Rules;
+	const std::vector<dtg::sim::Plant> Grown = dtg::sim::PlantsIn(Map, City, Area, Rules);
+	if (Grown.empty())
+	{
+		Mesh->ClearMeshSection(1);
+		return;
+	}
+
+	FDTGMesh Trees;
+	std::vector<dtg::sim::PlantTri> Tris;
+	for (const dtg::sim::Plant& Value : Grown)
+	{
+		Tris.clear();
+		dtg::sim::BuildPlant(Value, Tris);
+		for (const dtg::sim::PlantTri& Tri : Tris)
+		{
+			const FVector A(Tri.P[0][0] * S, Tri.P[0][1] * S, Tri.P[0][2] * S);
+			const FVector B(Tri.P[1][0] * S, Tri.P[1][1] * S, Tri.P[1][2] * S);
+			const FVector C(Tri.P[2][0] * S, Tri.P[2][1] * S, Tri.P[2][2] * S);
+			// The triangle's own normal: foliage is flat-shaded, which at these sizes reads as
+			// leaf clusters catching the light rather than as faceting.
+			const FVector Normal = FVector::CrossProduct(B - A, C - A).GetSafeNormal();
+			Trees.AddTri(A, B, C, Normal.IsNearlyZero() ? FVector::UpVector : Normal,
+				FLinearColor(static_cast<float>(Tri.Rgb[0]), static_cast<float>(Tri.Rgb[1]),
+					static_cast<float>(Tri.Rgb[2])));
+		}
+	}
+	if (!Trees.IsEmpty())
+	{
+		// No collision: a car that clips a pine is a far smaller problem than cooking collision for
+		// several hundred trees every time a chunk streams in.
+		Mesh->CreateMeshSection_LinearColor(1, Trees.Verts, Trees.Tris, Trees.Normals, Trees.Uvs,
+			Trees.Colors, Trees.Tangents, /*bCreateCollision*/ false);
+		Mesh->SetMaterial(1, SurfaceMaterial());
+	}
+	else
+	{
+		Mesh->ClearMeshSection(1);
 	}
 }
 
@@ -517,6 +614,7 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	}
 	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
 	Mesh->SetMaterial(0, SurfaceMaterial());
+	BuildChunkPlants(ChunkX, ChunkY, Mesh);
 	Mesh->SetVisibility(true);
 
 	FDTGTerrainChunk Chunk;
@@ -615,6 +713,11 @@ void ADTGWorldBuilder::ReleaseChunk(int32 Index)
 		// Kept and reused rather than destroyed: creating and registering a component is the expensive
 		// part, and the player will want this many again as soon as they turn round.
 		TerrainParts[Chunks[Index].Part]->ClearMeshSection(0);
+		// Section 1 is this chunk's vegetation. Clearing it matters even though the component is
+		// hidden: the part goes back in the pool, and if the next chunk to take it happens to grow
+		// nothing -- open water, a town centre, the far side of the state line -- it would otherwise
+		// come back visible still carrying the last chunk's trees, standing in the sea.
+		TerrainParts[Chunks[Index].Part]->ClearMeshSection(1);
 		TerrainParts[Chunks[Index].Part]->SetVisibility(false);
 		FreeParts.Add(Chunks[Index].Part);
 	}

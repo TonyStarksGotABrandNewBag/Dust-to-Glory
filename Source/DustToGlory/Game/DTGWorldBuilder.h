@@ -71,6 +71,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Terrain")
 	float ChunkSizeM = 192.0f;
 
+	/**
+	 * Trees and brush on the streamed ground. Vegetation belongs to its chunk and is built and
+	 * thrown away with it, so it needs no draw distance of its own -- a separate one would mean a
+	 * chunk built while far away never growing its trees, because a chunk is never rebuilt in place.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Terrain")
+	bool bPlantVegetation = true;
+
 	/** How far from the player chunks are kept, in metres. */
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Terrain")
 	float ViewDistanceM = 900.0f;
@@ -86,6 +94,10 @@ private:
 	void BuildBuildings();
 	void BuildVenues();
 	void BuildWater();
+	/** The paint on the highways and the town streets, from Sim/RoadMarkings. */
+	void BuildRoadMarkings();
+	/** Trees and scrub for one streamed chunk, as a second section on that chunk's component. */
+	void BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh);
 	void UpdateChunks(const FVector& Around);
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);

@@ -9,6 +9,7 @@
 #include "Sim/SimCommon.h"
 
 #include <array>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,8 @@ namespace dtg::sim
 		double WaterM = 0.0;
 		bool bOcean = false;
 		double RoadGradeM = 0.0;  // the graded surface a road deck follows (equals GroundM on land)
+		bool bRoad = false;       // a highway's carriageway or shoulder runs over this point
+		double RoadNearness = 0.0; // 1 on the carriageway, falling to 0 at the far edge of the verge
 	};
 
 	class StatePlan
@@ -96,6 +99,13 @@ namespace dtg::sim
 		double CoastDistance(double X, double Y) const;
 		bool IsOcean(double X, double Y) const;
 
+		/**
+		 * The terrain's own value noise, in [-1, 1], at a wavelength in metres. Public because
+		 * anything scattered over the land -- trees, scrub -- has to clump where the land does, and
+		 * it has to do so from the same seed, or a forest drifts when the state is regenerated.
+		 */
+		double Noise(double X, double Y, double Wavelength) const;
+
 		/** Terrain height before cities, roads and water are carved in (world metres). */
 		double NaturalHeight(double X, double Y) const;
 		/** Final ground height: flattened under cities, venues and roads, carved for rivers, lakes and the sea. */
@@ -103,6 +113,22 @@ namespace dtg::sim
 		double HeightAt(double X, double Y) const { return SurfaceAt(X, Y).GroundM; }
 		/** Road surface height: a highway's deck profile on a highway, else the ground (or just above water). */
 		double RoadHeightAt(double X, double Y) const;
+
+		/**
+		 * Discards the lookup grid, so SurfaceAt and RoadHeightAt go back to walking every road and
+		 * town in the state. Vastly slower and otherwise identical -- it is the reference the indexed
+		 * path is tested against, and the path Load() itself uses while it is still grading the roads.
+		 * Rebuilt by the next Load().
+		 */
+		void ForgetLookup() { Spatial = Lookup(); }
+
+		/**
+		 * How many road segments a height query at this point will actually look at. The whole point
+		 * of the lookup grid is that this stays a handful rather than every segment in the state, and
+		 * it is a count rather than a stopwatch, so a test can hold it to a budget without flaking on
+		 * a busy machine. Returns the total segment count when the grid is not built.
+		 */
+		std::size_t RoadCandidatesAt(double X, double Y) const;
 
 		/** Generates every city and merges them with highways and venues into one world plan. */
 		CityPlan BuildWorld(const CityConfig& HubTemplate) const;
@@ -119,7 +145,6 @@ namespace dtg::sim
 		bool InsideFlattened(double X, double Y) const;
 		void RouteHighways(const std::vector<std::pair<std::string, std::vector<JsonValue>>>& Routes, const std::vector<bool>& Interstate,
 			std::vector<std::string>& Errors);
-		double Noise(double X, double Y, double Wavelength) const;
 		Rect CityRect(const StateCity& City, double Margin = 0.0) const;
 		/** Distance from a point to a rect (0 inside). */
 		static double RectDistance(const Rect& Area, double X, double Y);
@@ -138,6 +163,36 @@ namespace dtg::sim
 		void GradeHighways();
 		/** Nearest point on the state outline. */
 		Point2 NearestBorderPoint(double X, double Y) const;
+
+		/**
+		 * A uniform grid over every highway segment and every town, built once the world is laid out.
+		 *
+		 * The terrain is a function, and that function is asked for a height a few million times a
+		 * minute: sixty-seven squared samples per streamed chunk, two chunks a frame, plus every wheel
+		 * of every car on the road. Walking all hundred and forty-one road segments and all
+		 * twenty-five towns for each of those is what decides whether there is any frame budget left
+		 * for the world to look like anything.
+		 */
+		struct Lookup
+		{
+			static constexpr double CellM = 400.0;
+			std::vector<std::vector<int>> RoadCells;
+			/** Distance along each road at each of its points, so a segment's offset is not re-walked. */
+			std::vector<std::vector<double>> RoadStartM;  // packed segment ids: Road index << 12 | segment
+			std::vector<std::vector<int>> TownCells;  // city indices
+			double OriginX = 0.0;
+			double OriginY = 0.0;
+			int Stride = 0;
+			int Rows = 0;
+
+			bool Ready() const { return Stride > 0 && Rows > 0; }
+			int CellFor(double X, double Y) const;
+			/** Every cell within Radius of a point, appended to Out. */
+			void CellsNear(double X, double Y, double RadiusM, std::vector<int>& Out) const;
+		};
+		void BuildLookup();
+		Lookup Spatial;
+
 		std::uint64_t Seed = 1977;
 	};
 

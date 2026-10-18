@@ -220,6 +220,7 @@ namespace dtg::sim
 		JoinCrossings();
 		GradeHighways();
 		ComputeDecks();
+		BuildLookup();
 
 		return Errors.empty();
 	}
@@ -472,11 +473,27 @@ namespace dtg::sim
 				return WeightSum > 0.0 ? Base + (ValueSum / WeightSum - Base) * Strongest : Base;
 			}
 		};
+		// Which lookup cell this sample lands in: the towns and road segments that can possibly reach
+		// it. -1 means outside the indexed area (or the index is not built yet), and then everything
+		// gets walked as it always did.
+		const int Cell = Spatial.CellFor(X, Y);
+
 		// Cities and venues sit on level pads, which fill any water they cover.
 		Blend Pads;
-		for (const StateCity& City : Cities)
+		if (Cell >= 0)
 		{
-			Pads.Add(RectDistance(CityRect(City, CityPad), X, Y), CityFade, City.LevelM);
+			for (const int Which : Spatial.TownCells[static_cast<std::size_t>(Cell)])
+			{
+				const StateCity& City = Cities[static_cast<std::size_t>(Which)];
+				Pads.Add(RectDistance(CityRect(City, CityPad), X, Y), CityFade, City.LevelM);
+			}
+		}
+		else
+		{
+			for (const StateCity& City : Cities)
+			{
+				Pads.Add(RectDistance(CityRect(City, CityPad), X, Y), CityFade, City.LevelM);
+			}
 		}
 		for (std::size_t Index = 0; Index < Venues.size() && Index < VenueLayouts.size(); ++Index)
 		{
@@ -496,36 +513,59 @@ namespace dtg::sim
 		double RoadHeight = 0.0;
 		double RoadWeight = 0.0;
 		bool bOnRoad = false;
-		for (const HighwayPlan& Road : Highways)
+		// One road segment's contribution. The indexed and unindexed walks below share it, so the
+		// index can only change which segments get asked, never the answer any of them gives.
+		const auto Consider = [&](const HighwayPlan& Road, std::size_t Part)
 		{
-			const bool bGraded = Road.AnchorM.size() == Road.Points.size();
-			for (std::size_t Index = 0; Index + 1 < Road.Points.size(); ++Index)
+			if (Part + 1 >= Road.Points.size())
 			{
-				const Point2& A = Road.Points[Index];
-				const Point2& B = Road.Points[Index + 1];
-				const double Reach = 0.5 * Road.WidthM + RoadShoulder + RoadFade;
-				if (X < std::min(A[0], B[0]) - Reach || X > std::max(A[0], B[0]) + Reach || Y < std::min(A[1], B[1]) - Reach ||
-					Y > std::max(A[1], B[1]) + Reach)
+				return;
+			}
+			const Point2& A = Road.Points[Part];
+			const Point2& B = Road.Points[Part + 1];
+			const double Reach = 0.5 * Road.WidthM + RoadShoulder + RoadFade;
+			if (X < std::min(A[0], B[0]) - Reach || X > std::max(A[0], B[0]) + Reach || Y < std::min(A[1], B[1]) - Reach ||
+				Y > std::max(A[1], B[1]) + Reach)
+			{
+				return;
+			}
+			double T = 0.0;
+			const double Distance = SegmentDistance(A, B, X, Y, &T);
+			const double Edge = Distance - 0.5 * Road.WidthM - RoadShoulder;
+			if (Edge >= RoadFade)
+			{
+				return;
+			}
+			const double Weight = 1.0 - detail_stateplan::Smooth(std::max(0.0, Edge) / RoadFade);
+			const bool bGraded = Road.AnchorM.size() == Road.Points.size();
+			const double HeightA = bGraded ? Road.AnchorM[Part] : AnchorHeight(A);
+			const double HeightB = bGraded ? Road.AnchorM[Part + 1] : AnchorHeight(B);
+			const double Here = HeightA + (HeightB - HeightA) * T;
+			if (!bOnRoad || Here < RoadHeight)
+			{
+				RoadHeight = Here;
+				bOnRoad = true;
+			}
+			RoadWeight = std::max(RoadWeight, Weight);
+		};
+		// Only the segments in this cell. Walking every road in the state for every height sample --
+		// and a streamed chunk asks for four and a half thousand of them -- is the whole frame budget.
+		// Load() grades and decks the roads before the index exists, so that path still walks them all.
+		if (Cell >= 0)
+		{
+			for (const int Packed : Spatial.RoadCells[static_cast<std::size_t>(Cell)])
+			{
+				Consider(Highways[static_cast<std::size_t>(Packed / 4096)], static_cast<std::size_t>(Packed % 4096));
+			}
+		}
+		else
+		{
+			for (const HighwayPlan& Road : Highways)
+			{
+				for (std::size_t Part = 0; Part + 1 < Road.Points.size(); ++Part)
 				{
-					continue;
+					Consider(Road, Part);
 				}
-				double T = 0.0;
-				const double Distance = SegmentDistance(A, B, X, Y, &T);
-				const double Edge = Distance - 0.5 * Road.WidthM - RoadShoulder;
-				if (Edge >= RoadFade)
-				{
-					continue;
-				}
-				const double Weight = 1.0 - detail_stateplan::Smooth(std::max(0.0, Edge) / RoadFade);
-				const double HeightA = bGraded ? Road.AnchorM[Index] : AnchorHeight(A);
-				const double HeightB = bGraded ? Road.AnchorM[Index + 1] : AnchorHeight(B);
-				const double Here = HeightA + (HeightB - HeightA) * T;
-				if (!bOnRoad || Here < RoadHeight)
-				{
-					RoadHeight = Here;
-					bOnRoad = true;
-				}
-				RoadWeight = std::max(RoadWeight, Weight);
 			}
 		}
 		// Inside a town the pad wins: a town is a level platform and its streets are built on it, so a
@@ -533,6 +573,8 @@ namespace dtg::sim
 		// -- including the fade around it -- the road wins, which is what lets it hold its own grade
 		// right up to the edge of town and meet the pad there, where its anchors are pinned to it.
 		const double LandHeight = (bOnRoad && !Pads.bCore) ? PadHeight + (RoadHeight - PadHeight) * RoadWeight : PadHeight;
+		Info.bRoad = bOnRoad && RoadWeight > 0.999;
+		Info.RoadNearness = bOnRoad ? RoadWeight : 0.0;
 		if (Info.bWater)
 		{
 			const double Bed = Pads.Apply(Info.GroundM);
@@ -556,24 +598,48 @@ namespace dtg::sim
 	double StatePlan::RoadHeightAt(double X, double Y) const
 	{
 		// On a highway: its deck profile. Elsewhere: the ground, or a deck just above any water.
+		// Asked for by every wheel of every car on the road, so it goes through the index too.
 		double Best = 1e18;
 		double Deck = 0.0;
-		for (const HighwayPlan& Road : Highways)
+		// Shared by both walks below, so the index cannot change the answer -- only the work.
+		const auto Consider = [&](const HighwayPlan& Road, std::size_t Part, double Walked)
 		{
-			double Walked = 0.0;
-			for (std::size_t Index = 0; Index + 1 < Road.Points.size(); ++Index)
+			if (Part + 1 >= Road.Points.size() || Road.DeckM.empty())
 			{
-				const Point2& A = Road.Points[Index];
-				const Point2& B = Road.Points[Index + 1];
-				const double Length = std::hypot(B[0] - A[0], B[1] - A[1]);
-				double T = 0.0;
-				const double Distance = SegmentDistance(A, B, X, Y, &T);
-				if (Distance <= 0.5 * Road.WidthM + 2.0 && Distance < Best && !Road.DeckM.empty())
+				return;
+			}
+			const Point2& A = Road.Points[Part];
+			const Point2& B = Road.Points[Part + 1];
+			double T = 0.0;
+			const double Distance = SegmentDistance(A, B, X, Y, &T);
+			if (Distance <= 0.5 * Road.WidthM + 2.0 && Distance < Best)
+			{
+				Best = Distance;
+				Deck = Road.At(Walked + T * std::hypot(B[0] - A[0], B[1] - A[1]))[2];
+			}
+		};
+		const int Cell = Spatial.CellFor(X, Y);
+		if (Cell >= 0)
+		{
+			for (const int Packed : Spatial.RoadCells[static_cast<std::size_t>(Cell)])
+			{
+				const std::size_t Which = static_cast<std::size_t>(Packed / 4096);
+				const std::size_t Part = static_cast<std::size_t>(Packed % 4096);
+				const std::vector<double>& Starts = Spatial.RoadStartM[Which];
+				Consider(Highways[Which], Part, Part < Starts.size() ? Starts[Part] : 0.0);
+			}
+		}
+		else
+		{
+			for (const HighwayPlan& Road : Highways)
+			{
+				double Walked = 0.0;
+				for (std::size_t Part = 0; Part + 1 < Road.Points.size(); ++Part)
 				{
-					Best = Distance;
-					Deck = Road.At(Walked + T * Length)[2];
+					Consider(Road, Part, Walked);
+					Walked += std::hypot(Road.Points[Part + 1][0] - Road.Points[Part][0],
+						Road.Points[Part + 1][1] - Road.Points[Part][1]);
 				}
-				Walked += Length;
 			}
 		}
 		if (Best < 1e17)
@@ -728,6 +794,152 @@ namespace dtg::sim
 		return false;
 	}
 
+
+
+	// ==================================================================================== The index
+
+	int StatePlan::Lookup::CellFor(double X, double Y) const
+	{
+		if (!Ready())
+		{
+			return -1;
+		}
+		const int Column = static_cast<int>(std::floor((X - OriginX) / CellM));
+		const int Row = static_cast<int>(std::floor((Y - OriginY) / CellM));
+		if (Column < 0 || Row < 0 || Column >= Stride || Row >= Rows)
+		{
+			return -1;
+		}
+		return Row * Stride + Column;
+	}
+
+	void StatePlan::Lookup::CellsNear(double X, double Y, double RadiusM, std::vector<int>& Out) const
+	{
+		Out.clear();
+		if (!Ready())
+		{
+			return;
+		}
+		const int MinColumn = std::max(0, static_cast<int>(std::floor((X - RadiusM - OriginX) / CellM)));
+		const int MaxColumn = std::min(Stride - 1, static_cast<int>(std::floor((X + RadiusM - OriginX) / CellM)));
+		const int MinRow = std::max(0, static_cast<int>(std::floor((Y - RadiusM - OriginY) / CellM)));
+		const int MaxRow = std::min(Rows - 1, static_cast<int>(std::floor((Y + RadiusM - OriginY) / CellM)));
+		for (int Row = MinRow; Row <= MaxRow; ++Row)
+		{
+			for (int Column = MinColumn; Column <= MaxColumn; ++Column)
+			{
+				Out.push_back(Row * Stride + Column);
+			}
+		}
+	}
+
+	std::size_t StatePlan::RoadCandidatesAt(double X, double Y) const
+	{
+		const int Cell = Spatial.CellFor(X, Y);
+		if (Cell >= 0)
+		{
+			return Spatial.RoadCells[static_cast<std::size_t>(Cell)].size();
+		}
+		std::size_t Total = 0;
+		for (const HighwayPlan& Road : Highways)
+		{
+			Total += Road.Points.size() > 0 ? Road.Points.size() - 1 : 0;
+		}
+		return Total;
+	}
+
+	void StatePlan::BuildLookup()
+	{
+		using namespace detail_stateplan;
+		Spatial = Lookup();
+		// Generous margins: roads leave the state outline at its edges and towns have skirts.
+		const double Margin = 4.0 * Lookup::CellM;
+		double MinX = Bounds.MinX - Margin;
+		double MinY = Bounds.MinY - Margin;
+		double MaxX = Bounds.MaxX + Margin;
+		double MaxY = Bounds.MaxY + Margin;
+		for (const HighwayPlan& Road : Highways)
+		{
+			for (const Point2& Where : Road.Points)
+			{
+				MinX = std::min(MinX, Where[0] - Margin);
+				MinY = std::min(MinY, Where[1] - Margin);
+				MaxX = std::max(MaxX, Where[0] + Margin);
+				MaxY = std::max(MaxY, Where[1] + Margin);
+			}
+		}
+		if (MaxX <= MinX || MaxY <= MinY)
+		{
+			return;
+		}
+		Spatial.OriginX = MinX;
+		Spatial.OriginY = MinY;
+		Spatial.Stride = std::max(1, static_cast<int>(std::ceil((MaxX - MinX) / Lookup::CellM)));
+		Spatial.Rows = std::max(1, static_cast<int>(std::ceil((MaxY - MinY) / Lookup::CellM)));
+		const std::size_t Count = static_cast<std::size_t>(Spatial.Stride) * static_cast<std::size_t>(Spatial.Rows);
+		Spatial.RoadCells.assign(Count, {});
+		Spatial.TownCells.assign(Count, {});
+
+		// The packing is Road * 4096 + segment, so a world past either bound cannot be addressed.
+		// Rather than quietly index part of it and read heights off an incomplete road network,
+		// leave the index unbuilt: every caller then takes its exact, slower path.
+		if (Highways.size() > 4096)
+		{
+			Spatial = Lookup();
+			return;
+		}
+		for (const HighwayPlan& Road : Highways)
+		{
+			if (Road.Points.size() > 4096)
+			{
+				Spatial = Lookup();
+				return;
+			}
+		}
+
+		Spatial.RoadStartM.assign(Highways.size(), {});
+		std::vector<int> Cells;
+		for (std::size_t Which = 0; Which < Highways.size(); ++Which)
+		{
+			const HighwayPlan& Road = Highways[Which];
+			std::vector<double>& Starts = Spatial.RoadStartM[Which];
+			Starts.assign(Road.Points.size(), 0.0);
+			for (std::size_t Step = 0; Step + 1 < Road.Points.size(); ++Step)
+			{
+				Starts[Step + 1] = Starts[Step] + std::hypot(Road.Points[Step + 1][0] - Road.Points[Step][0],
+					Road.Points[Step + 1][1] - Road.Points[Step][1]);
+			}
+			const double Reach = 0.5 * Road.WidthM + RoadShoulder + RoadFade + Lookup::CellM;
+			for (std::size_t Part = 0; Part + 1 < Road.Points.size(); ++Part)
+			{
+				const Point2& A = Road.Points[Part];
+				const Point2& B = Road.Points[Part + 1];
+				// Every cell the segment's swept box touches. A segment is short next to a cell, so
+				// walking its bounding box is both simple and tight enough.
+				const double LowX = std::min(A[0], B[0]) - Reach;
+				const double HighX = std::max(A[0], B[0]) + Reach;
+				const double LowY = std::min(A[1], B[1]) - Reach;
+				const double HighY = std::max(A[1], B[1]) + Reach;
+				Spatial.CellsNear(0.5 * (LowX + HighX), 0.5 * (LowY + HighY),
+					0.5 * std::max(HighX - LowX, HighY - LowY), Cells);
+				const int Packed = static_cast<int>(Which) * 4096 + static_cast<int>(Part);
+				for (const int Cell : Cells)
+				{
+					Spatial.RoadCells[static_cast<std::size_t>(Cell)].push_back(Packed);
+				}
+			}
+		}
+		for (std::size_t Which = 0; Which < Cities.size(); ++Which)
+		{
+			const Rect Area = CityRect(Cities[Which], CityPad + CityFade);
+			Spatial.CellsNear(0.5 * (Area.MinX + Area.MaxX), 0.5 * (Area.MinY + Area.MaxY),
+				0.5 * std::max(Area.Width(), Area.Depth()) + Lookup::CellM, Cells);
+			for (const int Cell : Cells)
+			{
+				Spatial.TownCells[static_cast<std::size_t>(Cell)].push_back(static_cast<int>(Which));
+			}
+		}
+	}
 
 	void StatePlan::GradeHighways()
 	{
