@@ -164,7 +164,8 @@ void ADTGCharacter::UpdateFocus()
 		Current.CarId = NearestCar->ParkedCarId();
 		const VehicleModel* Model = Game->Sim().Vehicles.FindModel(TCHAR_TO_UTF8(*NearestCar->ModelId()));
 		Current.Title = Model ? UTF8_TO_TCHAR(Model->DisplayName.c_str()) : NearestCar->ModelId();
-		Current.Prompt = NearestCar->OwnedUid().IsEmpty() ? TEXT("Make an offer") : TEXT("Get in");
+		Current.Prompt = NearestCar->bDemonstrator ? TEXT("Take it for a lap")
+			: (NearestCar->OwnedUid().IsEmpty() ? TEXT("Make an offer") : TEXT("Get in"));
 	}
 }
 
@@ -201,9 +202,10 @@ ADTGVehicle* ADTGCharacter::ToggleVehicle()
 		Driving = nullptr;
 		return Left;
 	}
-	// Only a car the player owns is simply got into; anyone else's is an offer (or a theft), not a free ride.
+	// A car the player owns, or one a showroom has brought round for them to try. Anyone else's is an
+	// offer (or a theft), not a free ride.
 	ADTGVehicle* Target = Cast<ADTGVehicle>(Current.Actor);
-	if (!Target || Target->OwnedUid().IsEmpty())
+	if (!Target || (Target->OwnedUid().IsEmpty() && !Target->bDemonstrator))
 	{
 		return nullptr;
 	}

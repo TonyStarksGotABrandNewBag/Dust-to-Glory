@@ -18,3 +18,8 @@ jobs:
       # else catches it: it compiles, it draws, and it tells the player the name of what it did not do.
       - name: Every building service reaches the simulation
         run: python3 Tests/check_services.py
+      # The engine layer cannot be compiled anywhere in CI -- Unreal is not here -- so the one class
+      # of error a script can still catch is a simulation name used unqualified in an engine header,
+      # where the using-directive in the .cpp has not reached yet.
+      - name: Engine headers qualify simulation names
+        run: python3 Tests/check_headers.py

@@ -16,7 +16,6 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGEventDirector.h"
 #include "Game/DTGGameMode.h"
-#include "Game/DTGInterior.h"
 #include "Game/DTGTrafficDirector.h"
 #include "Game/DTGVehicle.h"
 #include "Game/DTGWorldBuilder.h"
@@ -252,23 +251,44 @@ void ADTGHud::DrawMinimap()
 		Out = FVector2D(X + Size * (0.5 + Dx), Y + Size * (0.5 + Dy));
 		return true;
 	};
-	// Only what is on the map. Walking the whole state's roads and buildings to draw two hundred
-	// metres of them was the most expensive thing the HUD did, every frame, for a 190-pixel square.
-	for (const Intersection* Node : Sim.City.NodesNear(Here.X, Here.Y, Span))
+	// Only what is on the map, and only looked up a few times a second. Walking the whole state's
+	// roads and buildings to draw two hundred metres of them was the most expensive thing the HUD
+	// did; doing the indexed lookup every frame still allocates and sorts for a 190-pixel square.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now >= MapUntil)
+	{
+		MapDots.Reset();
+		for (const Intersection* Node : Sim.City.NodesNear(Here.X, Here.Y, Span))
+		{
+			if (Node)
+			{
+				MapDots.Add({Node->X, Node->Y, false, true});
+			}
+		}
+		for (const BuildingPlan* Building : Sim.City.BuildingsNear(Here.X, Here.Y, Span))
+		{
+			if (Building)
+			{
+				MapDots.Add({Building->DoorX, Building->DoorY, IsResidential(Building->Role), false});
+			}
+		}
+		MapUntil = Now + 0.2;
+	}
+	for (const FMapDot& Dot : MapDots)
 	{
 		FVector2D Point;
-		if (Node && Project(Node->X, Node->Y, Point))
+		if (!Project(Dot.X, Dot.Y, Point))
+		{
+			continue;
+		}
+		if (Dot.bRoad)
 		{
 			Panel(Point.X - 1.0f, Point.Y - 1.0f, 3.0f, 3.0f, FLinearColor(0.45f, 0.45f, 0.5f, 0.9f));
 		}
-	}
-	for (const BuildingPlan* Building : Sim.City.BuildingsNear(Here.X, Here.Y, Span))
-	{
-		FVector2D Point;
-		if (Building && Project(Building->DoorX, Building->DoorY, Point))
+		else
 		{
-			const FLinearColor Colour = IsResidential(Building->Role) ? FLinearColor(0.4f, 0.6f, 0.9f, 0.9f) : FLinearColor(0.8f, 0.75f, 0.6f, 0.9f);
-			Panel(Point.X - 2.0f, Point.Y - 2.0f, 4.0f, 4.0f, Colour);
+			Panel(Point.X - 2.0f, Point.Y - 2.0f, 4.0f, 4.0f,
+				Dot.bHome ? FLinearColor(0.4f, 0.6f, 0.9f, 0.9f) : FLinearColor(0.8f, 0.75f, 0.6f, 0.9f));
 		}
 	}
 	Panel(X + Size * 0.5f - 3.0f, Y + Size * 0.5f - 3.0f, 6.0f, 6.0f, Accent);
@@ -348,13 +368,15 @@ const TArray<FString>& ADTGHud::Options() const
 	// are replaced wholesale at six in the morning. Rebuilding the rows again when the player presses
 	// a key would let the list shift under the cursor between the draw and the act, and buy them a
 	// different car than the one they were looking at.
-	if (Now >= OptionsUntil || CachedFor != Current || CachedContext != ContextId || CachedService != ServiceName)
+	if (Now >= OptionsUntil || CachedFor != Current || CachedContext != ContextId || CachedService != ServiceName ||
+		CachedTalkingTo != TalkingTo)
 	{
 		CachedRows = Current == EDTGScreen::Service ? ServiceRows() : TArray<FServiceRow>();
 		CachedOptions = BuildOptions();
 		CachedFor = Current;
 		CachedContext = ContextId;
 		CachedService = ServiceName;
+		CachedTalkingTo = TalkingTo;
 		OptionsUntil = Now + 0.2;
 	}
 	return CachedOptions;
@@ -645,6 +667,7 @@ void ADTGHud::Choose(int32 Index)
 		{
 			const Message& Entry = All[static_cast<std::size_t>(Selection)];
 			Game->Sim().Phone.MarkRead(Entry.Id);
+			InvalidateOptions(); // it is no longer unread, and the list may have moved on
 			OnNotice(Utf8(Entry.Text));
 			if (Entry.bAwaitingReply)
 			{
@@ -712,16 +735,26 @@ void ADTGHud::RunBuildingService(int32 Index)
 	}
 	const FString Service = Utf8(Services[static_cast<std::size_t>(Index)]);
 	// Services that are a list of things -- the job board, the showroom floor, the stock desk -- open
-	// a screen of their own. The rest act here.
-	ServiceName = Service;
-	if (ServiceRows().Num() > 0)
+	// a screen of their own. Named rather than discovered by building the list, because building the
+	// list is the expensive part and this runs to decide whether to build it at all.
+	static const TCHAR* const Listed[] = {
+		TEXT("Job board"), TEXT("Enroll"), TEXT("Browse every model"), TEXT("Test drive"),
+		TEXT("Browse used cars"), TEXT("Browse classics"), TEXT("Used car lot"), TEXT("Sell a car"),
+		TEXT("Parts and tuning"), TEXT("DIY garage"), TEXT("Paint shop"), TEXT("Stock exchange"),
+		TEXT("Buy a business"), TEXT("Browse homes"), TEXT("Shop furniture"), TEXT("Hacking contracts"),
+		TEXT("Hacking tools"), TEXT("Create IP"), TEXT("Research a medicine"), TEXT("Run for office"),
+		TEXT("Legislature"), TEXT("Ministry office")};
+	for (const TCHAR* const Name : Listed)
 	{
-		Selection = 0;
-		InvalidateOptions();
-		Open(EDTGScreen::Service, ContextId);
-		return;
+		if (Service == Name)
+		{
+			ServiceName = Service;
+			Selection = 0;
+			InvalidateOptions();
+			Open(EDTGScreen::Service, ContextId);
+			return;
+		}
 	}
-	ServiceName.Reset();
 	if (Service == TEXT("Serve your time") || Service == TEXT("Plan a way out"))
 	{
 		Open(EDTGScreen::Jail);
@@ -880,7 +913,14 @@ void ADTGHud::RunBuildingService(int32 Index)
 	}
 	if (Service == TEXT("Arrange furniture"))
 	{
-		OnNotice(FString::Printf(TEXT("%d pieces in this place."), static_cast<int32>(Sim.Homes.Orders().size())));
+		const std::string Property = Sim.PropertyIdFor(Building->Id);
+		int32 Here = 0;
+		for (const PlacedFurniture& Piece : Sim.Homes.Placed())
+		{
+			Here += Piece.PropertyId == Property ? 1 : 0;
+		}
+		OnNotice(FString::Printf(TEXT("%d pieces in here, %d still boxed up."), Here,
+			static_cast<int32>(Sim.Homes.Unplaced(Property).size())));
 		return;
 	}
 	if (Service == TEXT("Business consulting"))
@@ -942,6 +982,9 @@ void ADTGHud::RunTalkOption(int32 Index)
 	const std::string Chosen = Choices[static_cast<std::size_t>(Index)].Id;
 	const TalkTurn Turn = Sim.Talk(Who, Chosen);
 	LastReply = Utf8(Turn.Reply);
+	// Helping somebody or buying what they know takes that line off the list, so the labels on screen
+	// are already wrong; without this the next press would run the row below the one highlighted.
+	InvalidateOptions();
 	// Paying for a tip or covering somebody's rent takes that line off the menu, which would otherwise
 	// slide a different option under the cursor. Follow the one the player was on, or the row above it.
 	const std::vector<DialogueOption> After = Sim.TalkOptions(Who);
@@ -1158,8 +1201,14 @@ TArray<ADTGHud::FServiceRow> ADTGHud::ServiceRows() const
 	if (What == TEXT("Browse homes"))
 	{
 		const FVector2D Here = Game->ToSim(ADTGCharacter::InterestPointFor(GetOwningPawn()));
+		// The nearest twenty, because BuildingsNear answers nearest first and a state's worth of
+		// houses is a list nobody can read or scroll.
 		for (const BuildingPlan* Home : Sim.City.BuildingsNear(Here.X, Here.Y, 3000.0))
 		{
+			if (Rows.Num() >= 20)
+			{
+				break;
+			}
 			if (!Home || !IsResidential(Home->Role) || Sim.Homes.OwnsProperty(Sim.PropertyIdFor(Home->Id)))
 			{
 				continue;
@@ -1248,7 +1297,7 @@ TArray<ADTGHud::FServiceRow> ADTGHud::ServiceRows() const
 	// ---- Faith
 	if (What == TEXT("Ministry office"))
 	{
-		if (Sim.PlayerMinistry.Name.empty())
+		if (!Sim.PlayerMinistry.IsFounded())
 		{
 			Rows.Add({TEXT("Found a ministry here"), TEXT("found"), 0});
 			return Rows;
@@ -1325,10 +1374,13 @@ void ADTGHud::RunServiceOption(int32 Index)
 		// so it is not in the garage and cannot be driven away for good.
 		if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
 		{
-			// One at a time. The last demonstrator goes back to the showroom.
+			// One at a time, and only ours: a demonstrator carries a marker of its own, because
+			// "not owned and not parked" is also every piece of traffic, every police car and every
+			// car in a running event -- all of them held by directors that would not know they had
+			// gone.
 			for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
 			{
-				if (It->OwnedUid().IsEmpty() && It->ParkedCarId().IsEmpty() && *It != Player->DrivingNow())
+				if (It->bDemonstrator && *It != Player->DrivingNow())
 				{
 					It->Destroy();
 				}
@@ -1338,6 +1390,7 @@ void ADTGHud::RunServiceOption(int32 Index)
 			if (ADTGVehicle* Demo = GetWorld()->SpawnActor<ADTGVehicle>(ADTGVehicle::StaticClass(), FTransform::Identity, Params))
 			{
 				Demo->ConfigureFromModel(Row.Key);
+				Demo->bDemonstrator = true;
 				const FVector At = Player->GetActorLocation() + Player->GetActorForwardVector() * 450.0f;
 				Demo->PlaceAt(At, Player->GetActorRotation().Yaw);
 				OnNotice(FString::Printf(TEXT("They've brought the %s round. It's outside."), *Row.Label));

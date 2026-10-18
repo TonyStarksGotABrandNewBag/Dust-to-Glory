@@ -132,4 +132,21 @@ private:
 	mutable EDTGScreen CachedFor = EDTGScreen::None;
 	mutable int32 CachedContext = -1;
 	mutable FString CachedService;
+	mutable FString CachedTalkingTo;
+
+	/**
+	 * What the minimap draws, refreshed a few times a second rather than every frame. Finding it means
+	 * sweeping a grid, allocating, and sorting a few hundred buildings by distance -- and 400 metres of
+	 * South Carolina does not change in a fifth of a second.
+	 */
+	struct FMapDot
+	{
+		double X = 0.0;
+		double Y = 0.0;
+		bool bHome = false;
+		bool bRoad = false;
+	};
+	mutable TArray<FMapDot> MapDots;
+	mutable double MapUntil = 0.0;
+
 };

@@ -58,6 +58,14 @@ public:
 	const FString& ParkedCarId() const { return ParkedId; }
 	void SetParkedCarId(const FString& Id) { ParkedId = Id; }
 
+	/**
+	 * A car brought round from a showroom floor for a lap of the block. It is nobody's -- not in the
+	 * garage, not parked outside a house, not traffic -- so it needs saying, or the only way to find
+	 * it again is a test that also matches every car the directors own.
+	 */
+	UPROPERTY()
+	bool bDemonstrator = false;
+
 	/** True while the car is in water deep enough to drown it. */
 	bool IsSwamped() const { return bSwamped; }
 

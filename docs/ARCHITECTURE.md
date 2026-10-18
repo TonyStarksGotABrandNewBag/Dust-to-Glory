@@ -15,7 +15,7 @@ Content/Data/*.json ──► Sim (rules, state, maths) ◄── Tests (CMake, 
 
 Three things fall out of the split, and they're the reason for it:
 
-- **The game is testable without an engine.** 94 tests build in seconds with CMake and run anywhere,
+- **The game is testable without an engine.** 95 tests build in seconds with CMake and run anywhere,
   including CI on Linux, macOS and Windows. A physics change is a test, not a play session.
 - **The handling is identical everywhere.** The chassis integrates at a fixed 240 Hz with its own rigid
   body; Unreal's physics never touches a car. The same inputs give the same lap on every machine.
@@ -107,13 +107,21 @@ any point, built from the coast, the rivers, the lakes, the mountains and the le
 
 ## Testing
 
-`Tests/` builds the core with the same flags Unreal uses and runs 94 tests: physics plausibility (a car
+`Tests/` builds the core with the same flags Unreal uses and runs 95 tests: physics plausibility (a car
 accelerates, stops, corners, lands and rolls the way one should), the car economy, both state maps'
 geography and road networks, private sales and messaging, careers, business, politics, courts and jail,
 the ways out of jail and life as a fugitive, the outbreak scheme and the investigation that unpicks it,
-fights and bounties, conversation and the way gossip crosses a town, rain and thunder, the spatial index against exhaustive
+fights and bounties, conversation and the way gossip crosses a town, rain and thunder, the
+ordinary things a town sells, the spatial index against exhaustive
 search, and a full save round trip. `Tests/check_content.py` parses every data file and
 fails on a real brand name slipping in.
+
+Three scripts cover what the tests cannot. `check_content.py` parses every data file. `check_services.py`
+checks that every service a building offers is handled by the interface, and that every service with a
+screen of its own actually builds one -- a service the interface does not recognise compiles, draws, and
+tells the player the name of the thing it just failed to do. `check_headers.py` looks for simulation
+names used unqualified in engine headers, where the `using namespace dtg::sim` at the top of the .cpp
+has not reached yet; that error cannot be caught by building, because there is no Unreal Engine in CI.
 
 The geometry has its own check outside the engine: `DTGMeshBuilder` compiles against a small stand-in for
 Unreal's types and renders to an image, which is how the triangle winding was settled against Unreal's

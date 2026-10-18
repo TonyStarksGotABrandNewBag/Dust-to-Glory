@@ -61,6 +61,13 @@ it is held back by how long the sound would really take to arrive -- a far strik
 after the flash. The rain and the thunder are synthesised sample by sample, like the engine note, so a
 downpour gets louder and lower rather than crossfading, and from inside a car you hear the roof.
 
+**The buildings work.** Every service a building's sign offers now reaches the system behind it: the
+job board lists what you qualify for, the showroom lists its own brands, the lot haggles, the stock
+desk trades, the legislature takes a lobbying cheque, the ministry can be founded. And the everyday
+ones -- a meal, a hotel room, an hour in the gym, a doctor, the window at the police station -- are a
+simulation of their own, so what they cost and what they give you is one set of numbers rather than
+two.
+
 ## Next
 
 In the order it's worth doing:
