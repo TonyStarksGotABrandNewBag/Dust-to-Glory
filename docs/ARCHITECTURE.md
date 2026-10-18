@@ -15,7 +15,7 @@ Content/Data/*.json ──► Sim (rules, state, maths) ◄── Tests (CMake, 
 
 Three things fall out of the split, and they're the reason for it:
 
-- **The game is testable without an engine.** 96 tests build in seconds with CMake and run anywhere,
+- **The game is testable without an engine.** 111 tests build in seconds with CMake and run anywhere,
   including CI on Linux, macOS and Windows. A physics change is a test, not a play session.
 - **The handling is identical everywhere.** The chassis integrates at a fixed 240 Hz with its own rigid
   body; Unreal's physics never touches a car. The same inputs give the same lap on every machine.
@@ -107,7 +107,7 @@ any point, built from the coast, the rivers, the lakes, the mountains and the le
 
 ## Testing
 
-`Tests/` builds the core with the same flags Unreal uses and runs 96 tests: physics plausibility (a car
+`Tests/` builds the core with the same flags Unreal uses and runs 111 tests: physics plausibility (a car
 accelerates, stops, corners, lands and rolls the way one should), the car economy, all three state maps'
 geography, mountains and road grades, private sales and messaging, careers, business, politics, courts and jail,
 the ways out of jail and life as a fugitive, the outbreak scheme and the investigation that unpicks it,
