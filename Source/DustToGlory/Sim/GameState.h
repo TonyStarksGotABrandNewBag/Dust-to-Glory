@@ -250,6 +250,17 @@ namespace dtg::sim
 		 */
 		PowerUse UsePower(int Slot, const std::vector<std::string>& Witnesses = std::vector<std::string>(), bool bInPublic = true);
 
+		// ---------------------------------------------------------------- Talking to people
+		/** The things the player can say to someone, with what each will cost. */
+		std::vector<DialogueOption> TalkOptions(const std::string& NpcId) const;
+		/**
+		 * Says one of them. Money changes hands here, and anything worth repeating is handed to the
+		 * people they know, so a kindness or a broken promise travels on its own.
+		 */
+		TalkTurn Talk(const std::string& NpcId, const std::string& OptionId);
+		/** Introduces a stranger to the game: names where they live and gives them people they know. */
+		NpcMind& Meet(const std::string& NpcId, double X, double Y);
+
 		// ---------------------------------------------------------------- Homes and furniture
 		ActionResult BuyHome(int BuildingId);
 		std::string PropertyIdFor(int BuildingId) const { return "bldg-" + std::to_string(BuildingId); }

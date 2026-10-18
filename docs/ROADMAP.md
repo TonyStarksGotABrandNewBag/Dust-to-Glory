@@ -45,6 +45,15 @@ bill rather than a game over.
 
 **Walking** — people are jointed and swing their legs and arms at the pace they are actually travelling.
 
+**Conversation** — a passer-by is from somewhere, carries a problem, knows something and knows people.
+You can ask about the town, their work, what they have been seeing and what is going around; ask twice and
+they answer shorter, a third time and they tell you they already did, and keep at it and they walk off.
+Somebody who trusts you tells you what is wrong in their life and you can put it right with money, which
+buys more than money usually does. What they know has a price, settled by splitting the gain from telling
+against the risk of telling, so a friend hands over what a stranger will not sell. And whatever you do in
+front of them, they repeat: word travels through the people they actually know, arriving attributed and
+losing a little conviction at every mouth, until the town has an opinion of you that nobody gave it.
+
 ## Next
 
 In the order it's worth doing:
@@ -52,10 +61,9 @@ In the order it's worth doing:
 1. **Art.** The generated shapes are a floor, not a ceiling: they are the right size, in the right place,
    with the right silhouette, which is exactly what makes them straightforward to replace with modelled
    meshes and proper materials. Vehicle models would change the look of the game on their own.
-2. **Deeper conversation.** The minds remember and wake up; what they can say back is still short.
-3. **Rain you can see.** Weather already darkens the sky and takes grip away; there are no particles.
-4. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
-5. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
+2. **Rain you can see.** Weather already darkens the sky and takes grip away; there are no particles.
+3. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
+4. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
    supports it yet either.
 
 ## Thin on purpose

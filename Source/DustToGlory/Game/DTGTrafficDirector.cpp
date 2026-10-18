@@ -368,6 +368,30 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSe
 		Person->Tags.Add(FName(*FString::Printf(TEXT("mind:%s"), *Walker.MindId)));
 		// Seeded from the id, and kept clear of 1 and 2, which dress a hero and a villain.
 		DTGMeshBuilder::DressPerson(Person, 3 + static_cast<int32>(GetTypeHash(Walker.MindId) % 1000u));
+		// A couple of the people already on this street know this one, which is how anything the
+		// player does in front of one of them reaches the rest without being broadcast. Only a
+		// couple: a town where everybody knows everybody carries a rumour everywhere in one hop.
+		const std::string MyMind = TCHAR_TO_UTF8(*Walker.MindId);
+		Game->Sim().Meet(MyMind, Block.CenterX(), Block.CenterY());
+		int32 Introduced = 0;
+		for (const FDTGWalker& Neighbour : Walkers)
+		{
+			if (Introduced >= 2)
+			{
+				break;
+			}
+			if (Neighbour.MindId.IsEmpty() || Neighbour.MindId == Walker.MindId || !Neighbour.Actor)
+			{
+				continue;
+			}
+			// Neighbours in the literal sense: people who share a stretch of street.
+			if (FVector::Dist2D(Neighbour.Actor->GetActorLocation(), Person->GetActorLocation()) > NeighbourRangeM * DTGMetresToUnreal)
+			{
+				continue;
+			}
+			Game->Sim().Npcs.Introduce(MyMind, TCHAR_TO_UTF8(*Neighbour.MindId), 0.4);
+			Introduced += 1;
+		}
 		Walker.Target = Person->GetActorLocation();
 		Walkers.Add(Walker);
 		return;

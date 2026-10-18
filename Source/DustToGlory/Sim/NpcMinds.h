@@ -91,11 +91,89 @@ namespace dtg::sim
 		std::string Thought;     // shown above their head
 	};
 
+	/** Something the player has raised with them, and how often. Asking twice is not the same as asking once. */
+	struct TopicRecord
+	{
+		std::string Id;
+		int Times = 0;
+		std::int64_t LastMinute = 0;
+	};
+
+	/** Somebody else in town they know, which is how word travels. */
+	struct Acquaintance
+	{
+		std::string Id;
+		std::string Name;
+		double Tie = 0.5;          // 0..1 how close they are
+	};
+
+	/** Something being said about the player, and who said it. */
+	struct Rumor
+	{
+		std::string Text;
+		std::string SourceId;      // who told them; empty means they saw it themselves
+		std::string SourceName;
+		double Weight = 0.5;       // 0..1 how much of it they believe
+		int Hops = 0;              // how many mouths it passed through to reach them
+		int Retold = 0;            // how many times they have passed it on; nobody repeats it forever
+		std::int64_t Minute = 0;
+	};
+
+	/** What is wrong in their life. The reason a conversation is worth having twice. */
+	enum class TroubleKind : int
+	{
+		None,
+		Debt,
+		Job,
+		Family,
+		Car,
+		Fear,
+		Faith,
+		Loneliness,
+		Count
+	};
+
+	const char* TroubleKindName(TroubleKind Value);
+
+	struct Trouble
+	{
+		TroubleKind Kind = TroubleKind::None;
+		std::string Text;
+		Money Cost = 0;            // what it takes to put right, when money puts it right
+		bool bShared = false;      // they have told the player about it
+		bool bHelped = false;      // the player did something about it
+	};
+
+	/** What they know that the player might want to know. */
+	enum class TipKind : int
+	{
+		None,
+		CarForSale,
+		Hiring,
+		PoliceWatch,
+		BusinessTrouble,
+		Shortcut,
+		Person,
+		Count
+	};
+
+	const char* TipKindName(TipKind Value);
+
+	struct Tip
+	{
+		TipKind Kind = TipKind::None;
+		std::string Text;
+		Money Ask = 0;             // what they want for it; 0 when they will just say
+		double Value = 0.0;        // what it is worth to the player, in dollars
+		bool bGiven = false;
+	};
+
 	struct NpcMind
 	{
 		std::string Id;
 		std::string Name;
 		std::string Occupation;    // scripted job, e.g. "Barista"
+		std::string Hometown;      // where they are from; empty until somebody asks around
 		Personality Traits;
 		double Awareness = 0.0;    // 0..1
 		AwarenessStage Stage = AwarenessStage::Scripted;
@@ -113,7 +191,25 @@ namespace dtg::sim
 		/** Favors and promises between this NPC and the player are a repeated prisoner's dilemma. */
 		RepeatedGameMemory Deal;
 
+		// -------------------------------------------------------------- Conversation
+		/**
+		 * The strangest thing they ever witnessed, kept outside the memory list. Memories are a short
+		 * FIFO and talking to somebody fills it, so without this a long conversation would make a
+		 * witness forget what they saw -- which is exactly backwards.
+		 */
+		bool bSawSomething = false;
+		Memory Witnessed;
+		std::vector<TopicRecord> Topics;
+		std::vector<Acquaintance> Knows;
+		std::vector<Rumor> Heard;
+		Trouble Burden;
+		Tip Knowledge;
+		double Patience = 1.0;     // 0..1; falls when the player goes over the same ground
+
 		int SkillLevel(Skill Value) const { return Profile::LevelForXp(SkillXp[static_cast<std::size_t>(Value)]); }
+		/** How many times the player has raised a topic. */
+		int TimesDiscussed(const std::string& TopicId) const;
+		const Acquaintance* FindKnown(const std::string& OtherId) const;
 	};
 
 	struct AwarenessChange
@@ -132,12 +228,27 @@ namespace dtg::sim
 	{
 		std::string Id;     // "chat", "ask", "teach:Driving", "encourage", "invite", "dismiss"
 		std::string Label;
+		Money Cost = 0;     // what choosing it will cost the player, when it costs anything
+	};
+
+	/** The outcome of one line of conversation. */
+	struct TalkTurn
+	{
+		std::string Reply;
+		Money Cost = 0;           // money the player owes for what they just got
+		bool bEnded = false;      // they walked off
+		bool bNewRumor = false;   // the town now has something to say
+		std::string Rumor;
 	};
 
 	class NpcPopulation
 	{
 	public:
 		static constexpr std::size_t MaxMemories = 16;
+		/** How long before a question counts as a fresh one again (a game day). */
+		static constexpr std::int64_t TopicForgetMinutes = 1440;
+		/** Nobody knows the whole town. Past this, meeting somebody new pushes out a weak tie. */
+		static constexpr std::size_t MaxAcquaintances = 8;
 
 		/** Returns the mind for an id, generating a deterministic new one the first time it is seen. */
 		NpcMind& GetOrCreate(const std::string& Id);
@@ -164,11 +275,53 @@ namespace dtg::sim
 		std::vector<DialogueOption> Options(const NpcMind& Mind) const;
 		/** Applies a dialogue choice; returns their reply. */
 		std::string Respond(NpcMind& Mind, const std::string& OptionId, std::int64_t Minute, Rng& Random, const CareerBook& Careers);
+		/** The same, with everything the choice did: what it costs, whether they walked off, what the town now knows. */
+		TalkTurn Say(NpcMind& Mind, const std::string& OptionId, std::int64_t Minute, Rng& Random, const CareerBook& Careers,
+			Money PlayerCash = 0);
+
+		// ------------------------------------------------------------------ A town that talks
+		/** Links two minds, so word can travel between them. Both ends remember. */
+		void Introduce(const std::string& AId, const std::string& BId, double Tie);
+		/** Gives a mind a handful of acquaintances drawn from whoever else exists. */
+		int Mingle(NpcMind& Mind, Rng& Random, int Want = 3);
+		/** Puts a line about the player into one mind's ears. */
+		bool Tell(NpcMind& Mind, const std::string& Text, const std::string& SourceId, double Weight, int Hops, std::int64_t Minute);
+		/**
+		 * Carries a line from one mind to the people it knows. Returns how many heard it. Hops is how
+		 * far along the chain the teller's own copy already was, so the listeners' copies count from there.
+		 */
+		int Spread(const std::string& FromId, const std::string& Text, double Weight, std::int64_t Minute, Rng& Random,
+			int Hops = 0);
+		/** Once a game day: rumours fade, and the strongest ones travel one more hop. */
+		int TownTalks(std::int64_t Minute, Rng& Random);
+		/** The rumour they would repeat if asked, or null. */
+		const Rumor* LoudestRumor(const NpcMind& Mind) const;
+		/** How many minds are carrying a line that mentions this text. */
+		int HowManyHeard(const std::string& Text) const;
+
+		// ------------------------------------------------------------------ Troubles and tips
+		/** Gives them a problem to carry, if they do not already have one. */
+		void GiveTrouble(NpcMind& Mind, Rng& Random) const;
+		/** What it would take from the player to put their trouble right. */
+		Money HelpCost(const NpcMind& Mind) const;
+		/** Something they know, generated from what they do and what they have seen. */
+		void GiveTip(NpcMind& Mind, Rng& Random) const;
+		/** What they will settle for, splitting the gain from telling against the risk of telling. */
+		Bargain PriceOfTip(const NpcMind& Mind) const;
+
+		/** Where they are from, which gives them something to say about the place. */
+		void Place(NpcMind& Mind, const std::string& TownName) const;
 
 		void Restore(std::vector<NpcMind> InMinds) { Minds = std::move(InMinds); }
 
 	private:
 		void PickGoal(NpcMind& Mind, Rng& Random, const CareerBook* Careers) const;
+		/** Keeps an acquaintance list down to a plausible size by dropping the weakest tie. */
+		void Thin(NpcMind& Mind) const;
+		/** Records that a topic was raised and returns how many times it had been raised before. */
+		int RaiseTopic(NpcMind& Mind, const std::string& TopicId, std::int64_t Minute) const;
+		/** Their account of the strangest thing they have witnessed. */
+		std::string Recount(const NpcMind& Mind) const;
 
 		std::vector<NpcMind> Minds;
 	};

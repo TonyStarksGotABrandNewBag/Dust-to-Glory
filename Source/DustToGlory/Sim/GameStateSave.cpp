@@ -432,8 +432,14 @@ namespace dtg::sim
 		JsonValue MindsJson = JsonValue::MakeArray();
 		for (const NpcMind& Mind : Npcs.All())
 		{
-			// Only minds that have experienced something are worth saving; the rest regenerate from their id.
-			if (Mind.Awareness <= 0.0 && Mind.Conversations == 0)
+			// Only minds that have experienced something are worth saving; the rest regenerate from
+			// their id. What the town has told them does not regenerate, though, and neither does who
+			// they know or where they are from -- so anybody the rumour mill has reached is kept,
+			// which is most of the point of having one.
+			const bool bBlank = Mind.Awareness <= 0.0 && Mind.Conversations == 0 && Mind.Knows.empty() &&
+				Mind.Heard.empty() && Mind.Hometown.empty() && !Mind.bSawSomething && !Mind.Burden.bShared &&
+				!Mind.Knowledge.bGiven;
+			if (bBlank)
 			{
 				continue;
 			}
@@ -456,6 +462,66 @@ namespace dtg::sim
 			Item.Set("dealTriggered", Bool(Mind.Deal.bTriggered));
 			Item.Set("dealRounds", Num(Mind.Deal.Rounds));
 			Item.Set("dealDefections", Num(Mind.Deal.OpponentDefections));
+			// What has been said between them and the player, and what the town has told them.
+			Item.Set("hometown", Str(Mind.Hometown));
+			Item.Set("patience", Num(Mind.Patience));
+			Item.Set("sawSomething", Bool(Mind.bSawSomething));
+			if (Mind.bSawSomething)
+			{
+				JsonValue SawJson = JsonValue::MakeObject();
+				SawJson.Set("kind", Num(static_cast<int>(Mind.Witnessed.Kind)));
+				SawJson.Set("detail", Str(Mind.Witnessed.Detail));
+				SawJson.Set("minute", Num(static_cast<double>(Mind.Witnessed.Minute)));
+				Item.Set("witnessed", SawJson);
+			}
+			JsonValue TopicsJson = JsonValue::MakeArray();
+			for (const TopicRecord& Record : Mind.Topics)
+			{
+				JsonValue One = JsonValue::MakeObject();
+				One.Set("id", Str(Record.Id));
+				One.Set("times", Num(Record.Times));
+				One.Set("minute", Num(static_cast<double>(Record.LastMinute)));
+				TopicsJson.Push(One);
+			}
+			Item.Set("topics", TopicsJson);
+			JsonValue KnowsJson = JsonValue::MakeArray();
+			for (const Acquaintance& Known : Mind.Knows)
+			{
+				JsonValue One = JsonValue::MakeObject();
+				One.Set("id", Str(Known.Id));
+				One.Set("name", Str(Known.Name));
+				One.Set("tie", Num(Known.Tie));
+				KnowsJson.Push(One);
+			}
+			Item.Set("knows", KnowsJson);
+			JsonValue HeardJson = JsonValue::MakeArray();
+			for (const Rumor& Known : Mind.Heard)
+			{
+				JsonValue One = JsonValue::MakeObject();
+				One.Set("text", Str(Known.Text));
+				One.Set("source", Str(Known.SourceId));
+				One.Set("sourceName", Str(Known.SourceName));
+				One.Set("weight", Num(Known.Weight));
+				One.Set("hops", Num(Known.Hops));
+				One.Set("retold", Num(Known.Retold));
+				One.Set("minute", Num(static_cast<double>(Known.Minute)));
+				HeardJson.Push(One);
+			}
+			Item.Set("heard", HeardJson);
+			JsonValue BurdenJson = JsonValue::MakeObject();
+			BurdenJson.Set("kind", Num(static_cast<int>(Mind.Burden.Kind)));
+			BurdenJson.Set("text", Str(Mind.Burden.Text));
+			BurdenJson.Set("cost", Num(static_cast<double>(Mind.Burden.Cost)));
+			BurdenJson.Set("shared", Bool(Mind.Burden.bShared));
+			BurdenJson.Set("helped", Bool(Mind.Burden.bHelped));
+			Item.Set("burden", BurdenJson);
+			JsonValue TipJson = JsonValue::MakeObject();
+			TipJson.Set("kind", Num(static_cast<int>(Mind.Knowledge.Kind)));
+			TipJson.Set("text", Str(Mind.Knowledge.Text));
+			TipJson.Set("ask", Num(static_cast<double>(Mind.Knowledge.Ask)));
+			TipJson.Set("value", Num(Mind.Knowledge.Value));
+			TipJson.Set("given", Bool(Mind.Knowledge.bGiven));
+			Item.Set("tip", TipJson);
 			MindsJson.Push(Item);
 		}
 		Root.Set("minds", MindsJson);
@@ -966,6 +1032,57 @@ namespace dtg::sim
 			Mind.Deal.bTriggered = Item.GetBool("dealTriggered");
 			Mind.Deal.Rounds = Item.GetInt("dealRounds");
 			Mind.Deal.OpponentDefections = Item.GetInt("dealDefections");
+			Mind.Hometown = Item.GetString("hometown");
+			Mind.Patience = Item.GetNumber("patience", 1.0);
+			Mind.bSawSomething = Item.GetBool("sawSomething");
+			if (Mind.bSawSomething)
+			{
+				const JsonValue& SawJson = Item.Get("witnessed");
+				Mind.Witnessed.Kind = static_cast<Stimulus>(Clamp(SawJson.GetInt("kind"), 0, static_cast<int>(Stimulus::Count) - 1));
+				Mind.Witnessed.Detail = SawJson.GetString("detail");
+				Mind.Witnessed.Minute = SawJson.GetInt64("minute");
+			}
+			Mind.Topics.clear();
+			const JsonValue& TopicsJson = Item.Get("topics");
+			for (std::size_t Which = 0; Which < TopicsJson.Size(); ++Which)
+			{
+				const JsonValue& One = TopicsJson.At(Which);
+				Mind.Topics.push_back({One.GetString("id"), One.GetInt("times"), One.GetInt64("minute")});
+			}
+			Mind.Knows.clear();
+			const JsonValue& KnowsJson = Item.Get("knows");
+			for (std::size_t Which = 0; Which < KnowsJson.Size(); ++Which)
+			{
+				const JsonValue& One = KnowsJson.At(Which);
+				Mind.Knows.push_back({One.GetString("id"), One.GetString("name"), One.GetNumber("tie", 0.5)});
+			}
+			Mind.Heard.clear();
+			const JsonValue& HeardJson = Item.Get("heard");
+			for (std::size_t Which = 0; Which < HeardJson.Size(); ++Which)
+			{
+				const JsonValue& One = HeardJson.At(Which);
+				Rumor Known;
+				Known.Text = One.GetString("text");
+				Known.SourceId = One.GetString("source");
+				Known.SourceName = One.GetString("sourceName");
+				Known.Weight = One.GetNumber("weight", 0.5);
+				Known.Hops = One.GetInt("hops");
+				Known.Retold = One.GetInt("retold");
+				Known.Minute = One.GetInt64("minute");
+				Mind.Heard.push_back(Known);
+			}
+			const JsonValue& BurdenJson = Item.Get("burden");
+			Mind.Burden.Kind = static_cast<TroubleKind>(Clamp(BurdenJson.GetInt("kind"), 0, static_cast<int>(TroubleKind::Count) - 1));
+			Mind.Burden.Text = BurdenJson.GetString("text");
+			Mind.Burden.Cost = BurdenJson.GetInt64("cost");
+			Mind.Burden.bShared = BurdenJson.GetBool("shared");
+			Mind.Burden.bHelped = BurdenJson.GetBool("helped");
+			const JsonValue& TipJson = Item.Get("tip");
+			Mind.Knowledge.Kind = static_cast<TipKind>(Clamp(TipJson.GetInt("kind"), 0, static_cast<int>(TipKind::Count) - 1));
+			Mind.Knowledge.Text = TipJson.GetString("text");
+			Mind.Knowledge.Ask = TipJson.GetInt64("ask");
+			Mind.Knowledge.Value = TipJson.GetNumber("value");
+			Mind.Knowledge.bGiven = TipJson.GetBool("given");
 		}
 
 		const JsonValue& PoliticsJson = Root.Get("politics");

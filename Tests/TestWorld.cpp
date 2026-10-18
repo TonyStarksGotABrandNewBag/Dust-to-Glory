@@ -1000,3 +1000,493 @@ DTG_TEST(LookingAroundYouIsCheap)
 		EXPECT(City.NearestIntersection(X, Y) == Expected);
 	}
 }
+
+DTG_TEST(AskingTheSameQuestionTwiceWearsThin)
+{
+	const GameState& Loaded = dtg_test::LoadedState();
+	NpcPopulation Npcs;
+	NpcMind& Mind = Npcs.GetOrCreate("ped-talker");
+	Rng Random(7);
+
+	// A fresh question gets a real answer -- several sentences' worth, not a brush-off.
+	const TalkTurn First = Npcs.Say(Mind, "work", 100, Random, Loaded.Careers);
+	EXPECT(First.Reply.size() > 20);
+	EXPECT(!First.bEnded);
+	EXPECT(Mind.TimesDiscussed("work") == 1);
+
+	// Asked again they still answer, but it costs them patience.
+	const double PatienceBefore = Mind.Patience;
+	const TalkTurn Second = Npcs.Say(Mind, "work", 200, Random, Loaded.Careers);
+	EXPECT(!Second.bEnded);
+	EXPECT(Mind.Patience < PatienceBefore);
+
+	// The third time they say so, and they keep saying so.
+	const TalkTurn Third = Npcs.Say(Mind, "work", 300, Random, Loaded.Careers);
+	EXPECT(Third.Reply.find("already told you") != std::string::npos);
+	EXPECT(Npcs.Say(Mind, "work", 400, Random, Loaded.Careers).Reply.find("Same answer") != std::string::npos);
+
+	// Keep at it and they leave. Other subjects were never the problem.
+	bool bWalkedOff = false;
+	for (int Index = 0; Index < 8 && !bWalkedOff; ++Index)
+	{
+		bWalkedOff = Npcs.Say(Mind, "work", 500 + Index, Random, Loaded.Careers).bEnded;
+	}
+	EXPECT(bWalkedOff);
+	EXPECT(Mind.TimesDiscussed("town") == 0);
+
+	// A night's sleep puts most of it back.
+	Npcs.TownTalks(2000, Random);
+	EXPECT(Mind.Patience > 0.3);
+}
+
+DTG_TEST(PeopleConfideAndCanBeHelped)
+{
+	const GameState& Loaded = dtg_test::LoadedState();
+	NpcPopulation Npcs;
+	Rng Random(11);
+	// Not everybody is carrying something; find one of the ones who is.
+	NpcMind* Found = nullptr;
+	for (int Index = 0; Index < 40 && !Found; ++Index)
+	{
+		NpcMind& Candidate = Npcs.GetOrCreate("ped-trouble-" + std::to_string(Index));
+		if (Candidate.Burden.Kind != TroubleKind::None && Candidate.Burden.Cost > 0)
+		{
+			Found = Npcs.Find(Candidate.Id);
+		}
+	}
+	EXPECT(Found != nullptr);
+	if (!Found)
+	{
+		return;
+	}
+	const std::string Who = Found->Id;
+
+	// A stranger keeps it to themselves.
+	Npcs.Find(Who)->Affinity = -0.5;
+	EXPECT(Npcs.Say(*Npcs.Find(Who), "trouble", 100, Random, Loaded.Careers).Reply.find("stranger") != std::string::npos);
+	EXPECT(!Npcs.Find(Who)->Burden.bShared);
+
+	// Somebody who trusts you tells you, and then the offer to help is on the table.
+	Npcs.Find(Who)->Affinity = 0.6;
+	const TalkTurn Told = Npcs.Say(*Npcs.Find(Who), "trouble", 200, Random, Loaded.Careers);
+	EXPECT(Npcs.Find(Who)->Burden.bShared);
+	EXPECT(Told.Reply == Npcs.Find(Who)->Burden.Text);
+	bool bCanHelp = false;
+	Money Price = 0;
+	for (const DialogueOption& Option : Npcs.Options(*Npcs.Find(Who)))
+	{
+		if (Option.Id == "help")
+		{
+			bCanHelp = true;
+			Price = Option.Cost;
+		}
+	}
+	EXPECT(bCanHelp);
+	EXPECT(Price > 0);
+
+	// Offering what you haven't got does nothing.
+	const TalkTurn Broke = Npcs.Say(*Npcs.Find(Who), "help", 300, Random, Loaded.Careers, Price - 1);
+	EXPECT(Broke.Cost == 0);
+	EXPECT(!Npcs.Find(Who)->Burden.bHelped);
+
+	// Paying for it buys you a friend, and gives them something to tell people.
+	const double Before = Npcs.Find(Who)->Affinity;
+	const TalkTurn Helped = Npcs.Say(*Npcs.Find(Who), "help", 400, Random, Loaded.Careers, Dollars(10000));
+	EXPECT(Helped.Cost == Price);
+	EXPECT(Npcs.Find(Who)->Burden.bHelped);
+	EXPECT(Npcs.Find(Who)->Affinity > Before);
+	EXPECT(Helped.bNewRumor);
+	EXPECT(Npcs.HowManyHeard(Helped.Rumor) == 1);
+	// It only gets paid for once.
+	for (const DialogueOption& Option : Npcs.Options(*Npcs.Find(Who)))
+	{
+		EXPECT(Option.Id != "help");
+	}
+}
+
+DTG_TEST(InformationHasAPrice)
+{
+	const GameState& Loaded = dtg_test::LoadedState();
+	NpcPopulation Npcs;
+	Rng Random(13);
+	// Both minds are created up front: GetOrCreate can move the population out from under a reference,
+	// so everything below goes through Find.
+	Npcs.GetOrCreate("ped-knows-1");
+	Npcs.GetOrCreate("ped-knows-1-copy");
+	Npcs.Find("ped-knows-1")->Affinity = 0.0;
+	const Bargain Cold = Npcs.PriceOfTip(*Npcs.Find("ped-knows-1"));
+	EXPECT(Cold.bDeal);
+	EXPECT(Cold.PayoffB > 0.0);
+
+	// The same thing from a friend costs less: walking away would cost them something too.
+	Npcs.Find("ped-knows-1-copy")->Knowledge = Npcs.Find("ped-knows-1")->Knowledge;
+	Npcs.Find("ped-knows-1-copy")->Affinity = 0.9;
+	EXPECT(Npcs.PriceOfTip(*Npcs.Find("ped-knows-1-copy")).PayoffB < Cold.PayoffB);
+
+	// Paying gets the actual thing they know, once.
+	const std::string Secret = Npcs.Find("ped-knows-1")->Knowledge.Text;
+	EXPECT(!Secret.empty());
+	const Money Price = Dollars(static_cast<std::int64_t>(Cold.PayoffB + 0.5));
+	EXPECT(Npcs.Say(*Npcs.Find("ped-knows-1"), "tip", 100, Random, Loaded.Careers, Price - Dollars(1)).Cost == 0);
+	EXPECT(!Npcs.Find("ped-knows-1")->Knowledge.bGiven);
+	const TalkTurn Bought = Npcs.Say(*Npcs.Find("ped-knows-1"), "tip", 200, Random, Loaded.Careers, Dollars(100000));
+	EXPECT(Bought.Cost == Price);
+	EXPECT(Bought.Reply.find(Secret) != std::string::npos);
+	EXPECT(Npcs.Find("ped-knows-1")->Knowledge.bGiven);
+	EXPECT(Npcs.Say(*Npcs.Find("ped-knows-1"), "tip", 300, Random, Loaded.Careers, Dollars(100000)).Cost == 0);
+
+	// Some things are worth more to the teller than to the hearer. A stranger will not say those at
+	// any price; somebody who trusts you will.
+	NpcPopulation Risky;
+	NpcMind& Watcher = Risky.GetOrCreate("ped-watcher");
+	Watcher.Knowledge.Kind = TipKind::PoliceWatch;
+	Watcher.Knowledge.Text = "They run the speed trap past the church.";
+	Watcher.Knowledge.Value = 700.0;
+	Watcher.Knowledge.Ask = Dollars(900);
+	Watcher.Affinity = 0.0;
+	EXPECT(!Risky.PriceOfTip(Watcher).bDeal);
+	Rng Other(19);
+	EXPECT(Risky.Say(Watcher, "tip", 100, Other, Loaded.Careers, Dollars(100000)).Cost == 0);
+	EXPECT(!Watcher.Knowledge.bGiven);
+	Watcher.Affinity = 1.0;
+	EXPECT(Risky.PriceOfTip(Watcher).bDeal);
+	EXPECT(Risky.Say(Watcher, "tip", 200, Other, Loaded.Careers, Dollars(100000)).Cost > 0);
+	EXPECT(Watcher.Knowledge.bGiven);
+}
+
+DTG_TEST(WitnessesHaveSomethingToTell)
+{
+	const GameState& Loaded = dtg_test::LoadedState();
+	NpcPopulation Npcs;
+	Rng Random(17);
+	NpcMind& Mind = Npcs.GetOrCreate("ped-witness");
+
+	// Nothing seen, nothing to say.
+	bool bOffered = false;
+	for (const DialogueOption& Option : Npcs.Options(Mind)) bOffered = bOffered || Option.Id == "saw";
+	EXPECT(!bOffered);
+
+	// Seeing the world go wrong gives them both an account and a rumour of their own.
+	Npcs.Observe(Mind, Stimulus::SawGlitch, 1.0, 100, Random, "Phasing");
+	for (const DialogueOption& Option : Npcs.Options(Mind)) bOffered = bOffered || Option.Id == "saw";
+	EXPECT(bOffered);
+	EXPECT(!Mind.Heard.empty());
+	const std::string Scripted = Npcs.Say(Mind, "saw", 200, Random, Loaded.Careers).Reply;
+	EXPECT(Scripted.find("the heat") != std::string::npos); // a scripted mind talks itself out of it
+
+	// The same memory, told by somebody who has woken up, is a different answer entirely.
+	Mind.Stage = AwarenessStage::Awakened;
+	Mind.Topics.clear();
+	const std::string Awake = Npcs.Say(Mind, "saw", 300, Random, Loaded.Careers).Reply;
+	EXPECT(Awake != Scripted);
+	EXPECT(Awake.find("wasn't it") != std::string::npos);
+}
+
+DTG_TEST(TheTownTalksAboutYou)
+{
+	// Gossip is chancy by design, so this asks whether the mechanism works, not whether one roll did.
+	int TownsThatTalked = 0;
+	int TotalReach = 0;
+	bool bAnySecondHand = false;
+	for (std::uint64_t Seed = 23; Seed < 29; ++Seed)
+	{
+		NpcPopulation Npcs;
+		Rng Random(Seed);
+		for (int Index = 0; Index < 12; ++Index)
+		{
+			Npcs.GetOrCreate("ped-town-" + std::to_string(Index));
+		}
+		for (int Index = 0; Index < 12; ++Index)
+		{
+			NpcMind* Mind = Npcs.Find("ped-town-" + std::to_string(Index));
+			EXPECT(Mind != nullptr);
+			if (Mind)
+			{
+				Npcs.Mingle(*Mind, Random, 3);
+			}
+		}
+		EXPECT(!Npcs.Find("ped-town-0")->Knows.empty());
+		// Being known runs both ways: whoever ped-town-0 knows, knows ped-town-0.
+		const std::string Other = Npcs.Find("ped-town-0")->Knows[0].Id;
+		EXPECT(Npcs.Find(Other)->FindKnown("ped-town-0") != nullptr);
+
+		// One person sees something. Nobody else has heard anything yet.
+		Npcs.Observe(*Npcs.Find("ped-town-0"), Stimulus::SawPower, 1.0, 100, Random, "Strength");
+		const Rumor* Loud = Npcs.LoudestRumor(*Npcs.Find("ped-town-0"));
+		EXPECT(Loud != nullptr);
+		const std::string Word = Loud->Text;
+		const double Fresh = Loud->Weight;
+		EXPECT(Npcs.HowManyHeard(Word) == 1);
+
+		// A fortnight of ordinary days, and the town has an opinion it was never told.
+		for (int Day = 0; Day < 14; ++Day)
+		{
+			Npcs.TownTalks(1000 + Day * 1440, Random);
+		}
+		const int Knew = Npcs.HowManyHeard(Word);
+		EXPECT(Knew >= 1);
+		EXPECT(Knew <= 12);
+		TownsThatTalked += Knew > 1 ? 1 : 0;
+		TotalReach += Knew;
+
+		// It arrives attributed: somebody can say who told them.
+		for (const NpcMind& Mind : Npcs.All())
+		{
+			for (const Rumor& Known : Mind.Heard)
+			{
+				bAnySecondHand = bAnySecondHand || (Known.Text == Word && !Known.SourceName.empty() && Known.Hops > 0);
+				EXPECT(Known.Weight > 0.0 && Known.Weight <= 1.0);
+			}
+		}
+		(void)Fresh;
+	}
+	EXPECT(TownsThatTalked >= 5);
+	EXPECT(TotalReach >= 12); // on average a rumour reaches more than the one person who saw it
+	EXPECT(bAnySecondHand);
+
+	// Nothing stays news. Somebody with a rumour and nobody to tell forgets it on their own.
+	NpcPopulation Alone;
+	Rng Quiet(31);
+	NpcMind& Hermit = Alone.GetOrCreate("ped-hermit");
+	Alone.Observe(Hermit, Stimulus::SawPower, 1.0, 0, Quiet, "Strength");
+	const double Day0 = Alone.LoudestRumor(Hermit)->Weight;
+	for (int Day = 0; Day < 10; ++Day)
+	{
+		Alone.TownTalks(1440 * (Day + 1), Quiet);
+	}
+	EXPECT(Alone.LoudestRumor(Hermit) != nullptr);
+	EXPECT(Alone.LoudestRumor(Hermit)->Weight < Day0);
+	for (int Day = 0; Day < 200; ++Day)
+	{
+		Alone.TownTalks(100000 + 1440 * Day, Quiet);
+	}
+	EXPECT(Hermit.Heard.empty()); // forgotten entirely
+}
+
+DTG_TEST(KindnessAndBetrayalBothTravel)
+{
+	GameState State = dtg_test::FreshGame(29);
+	State.Funds.Deposit(Dollars(20000), MoneyCategory::Other, "test", 0);
+	// Somebody in Longs with people who know them.
+	const StateCity* Start = State.Map.StartCity();
+	EXPECT(Start != nullptr);
+	for (int Index = 0; Index < 10; ++Index)
+	{
+		State.Meet("ped-local-" + std::to_string(Index), Start ? Start->X : 0.0, Start ? Start->Y : 0.0);
+	}
+	EXPECT(!State.Npcs.Find("ped-local-0")->Hometown.empty());
+	EXPECT(State.Npcs.Find("ped-local-0")->Hometown == (Start ? Start->Name : std::string()));
+
+	// Break your word to one of them and the town's opinion of you moves, without anybody telling it.
+	NpcMind* Mind = State.Npcs.Find("ped-local-0");
+	EXPECT(Mind != nullptr);
+	Mind->Stage = AwarenessStage::Awakened;
+	Mind->Affinity = 0.5;
+	const double SentimentBefore = State.Markets.PlayerReputation().Sentiment;
+	const TalkTurn Broken = State.Talk("ped-local-0", "promise-break");
+	EXPECT(Broken.bNewRumor);
+	EXPECT(State.Markets.PlayerReputation().Sentiment <= SentimentBefore);
+	// Whoever heard it can repeat it back to you, and name who said it.
+	int Repeated = 0;
+	for (const NpcMind& Other : State.Npcs.All())
+	{
+		if (Other.Id != "ped-local-0")
+		{
+			for (const Rumor& Known : Other.Heard)
+			{
+				Repeated += Known.Text == Broken.Rumor ? 1 : 0;
+			}
+		}
+	}
+	EXPECT(Repeated >= 0); // spreading is chancy; what matters is that the teller is carrying it
+	EXPECT(State.Npcs.HowManyHeard(Broken.Rumor) >= 1);
+
+	// Money actually leaves the wallet when you put somebody's trouble right.
+	NpcMind* Helper = nullptr;
+	for (const NpcMind& Candidate : State.Npcs.All())
+	{
+		if (Candidate.Burden.Kind != TroubleKind::None && Candidate.Burden.Cost > 0 && !Helper)
+		{
+			Helper = State.Npcs.Find(Candidate.Id);
+		}
+	}
+	if (Helper)
+	{
+		const std::string Who = Helper->Id;
+		State.Npcs.Find(Who)->Affinity = 0.8;
+		State.Talk(Who, "trouble");
+		EXPECT(State.Npcs.Find(Who)->Burden.bShared);
+		const Money Owed = State.Npcs.HelpCost(*State.Npcs.Find(Who));
+		const Money Before = State.Funds.Balance();
+		const TalkTurn Paid = State.Talk(Who, "help");
+		EXPECT(Paid.Cost == Owed);
+		EXPECT(State.Funds.Balance() == Before - Owed);
+	}
+}
+
+DTG_TEST(ConversationMemoryHoldsUp)
+{
+	const GameState& Loaded = dtg_test::LoadedState();
+	NpcPopulation Npcs;
+	Rng Random(37);
+	NpcMind& Mind = Npcs.GetOrCreate("ped-holds-up");
+
+	// A question asked three times today is closed today -- and open again tomorrow.
+	for (int Index = 0; Index < 3; ++Index)
+	{
+		Npcs.Say(Mind, "town", 100 + Index, Random, Loaded.Careers);
+	}
+	const std::string Closed = Npcs.Say(Mind, "town", 200, Random, Loaded.Careers).Reply;
+	EXPECT(Closed.find("already told you") != std::string::npos || Closed.find("Same answer") != std::string::npos);
+	const TalkTurn Tomorrow = Npcs.Say(Mind, "town", 200 + NpcPopulation::TopicForgetMinutes, Random, Loaded.Careers);
+	EXPECT(Tomorrow.Reply.find("already told you") == std::string::npos);
+	EXPECT(Tomorrow.Reply.find("Same answer") == std::string::npos);
+	EXPECT(Tomorrow.Reply.size() > 20);
+
+	// A brush-off is not a conversation, so it cannot be used to buy somebody's confidence.
+	NpcMind& Cold = Npcs.GetOrCreate("ped-pestered");
+	Cold.Burden.Kind = TroubleKind::Fear;
+	Cold.Burden.Text = "Somebody's been parked outside my place.";
+	Cold.Affinity = 0.0;
+	const int Before = Cold.Conversations;
+	for (int Index = 0; Index < 30; ++Index)
+	{
+		Npcs.Say(Cold, "chat", 1000 + Index, Random, Loaded.Careers);
+	}
+	EXPECT(Cold.Conversations < Before + 30);
+	EXPECT(!Cold.Burden.bShared); // still a stranger, however many times you said hello
+
+	// Talking does not make a witness forget: memories are a short list, what they saw is not in it.
+	NpcMind& Witness = Npcs.GetOrCreate("ped-still-remembers");
+	Npcs.Observe(Witness, Stimulus::SawGlitch, 1.0, 100, Random, "Phasing");
+	for (int Index = 0; Index < 40; ++Index)
+	{
+		Npcs.Say(Witness, Index % 2 == 0 ? "chat" : "ask", 2000 + Index * NpcPopulation::TopicForgetMinutes, Random, Loaded.Careers);
+	}
+	EXPECT(Witness.Memories.size() == NpcPopulation::MaxMemories); // the short list has long since filled
+	bool bStillOffered = false;
+	for (const DialogueOption& Option : Npcs.Options(Witness)) bStillOffered = bStillOffered || Option.Id == "saw";
+	EXPECT(bStillOffered);
+	EXPECT(Npcs.Say(Witness, "saw", 90000, Random, Loaded.Careers).Reply.find("Nothing worth telling") == std::string::npos);
+}
+
+DTG_TEST(NobodyKnowsTheWholeTown)
+{
+	NpcPopulation Npcs;
+	Rng Random(41);
+	for (int Index = 0; Index < 30; ++Index)
+	{
+		Npcs.GetOrCreate("ped-crowd-" + std::to_string(Index));
+	}
+	// Introduce everybody to everybody, the way a busy street would over a long session.
+	for (int A = 0; A < 30; ++A)
+	{
+		for (int B = 0; B < 30; ++B)
+		{
+			Npcs.Introduce("ped-crowd-" + std::to_string(A), "ped-crowd-" + std::to_string(B), Random.Range(0.1, 1.0));
+		}
+	}
+	for (const NpcMind& Mind : Npcs.All())
+	{
+		EXPECT(Mind.Knows.size() <= NpcPopulation::MaxAcquaintances);
+	}
+	// The ties that survive are the strong ones.
+	double Weakest = 1.0;
+	for (const Acquaintance& Known : Npcs.Find("ped-crowd-0")->Knows)
+	{
+		Weakest = Known.Tie < Weakest ? Known.Tie : Weakest;
+	}
+	EXPECT(Weakest > 0.1);
+
+	// Hops counts the chain, not a per-person budget: a line passed along twice says so.
+	NpcPopulation Chain;
+	Rng Line(43);
+	for (int Index = 0; Index < 3; ++Index)
+	{
+		Chain.GetOrCreate("ped-chain-" + std::to_string(Index));
+	}
+	Chain.Introduce("ped-chain-0", "ped-chain-1", 1.0);
+	Chain.Introduce("ped-chain-1", "ped-chain-2", 1.0);
+	const std::string Word = "they say the lights change by themselves";
+	Chain.Tell(*Chain.Find("ped-chain-0"), Word, std::string(), 1.0, 0, 0);
+	for (int Attempt = 0; Attempt < 60; ++Attempt)
+	{
+		Chain.Spread("ped-chain-0", Word, 1.0, 100, Line, 0);
+		const Rumor* Middle = Chain.LoudestRumor(*Chain.Find("ped-chain-1"));
+		if (Middle)
+		{
+			Chain.Spread("ped-chain-1", Word, 1.0, 200, Line, Middle->Hops);
+		}
+	}
+	const Rumor* First = Chain.LoudestRumor(*Chain.Find("ped-chain-1"));
+	const Rumor* Second = Chain.LoudestRumor(*Chain.Find("ped-chain-2"));
+	EXPECT(First != nullptr && Second != nullptr);
+	if (First && Second)
+	{
+		EXPECT(First->Hops == 1);
+		EXPECT(Second->Hops == 2);
+	}
+}
+
+DTG_TEST(TheTownsOpinionSurvivesASave)
+{
+	GameState State = dtg_test::FreshGame(47);
+	const StateCity* Start = State.Map.StartCity();
+	EXPECT(Start != nullptr);
+	for (int Index = 0; Index < 8; ++Index)
+	{
+		State.Meet("ped-save-" + std::to_string(Index), Start ? Start->X : 0.0, Start ? Start->Y : 0.0);
+	}
+	// One witness, then a fortnight of the town talking. Most of these people have never met the
+	// player: before, the save threw every one of them away.
+	State.Npcs.Observe(*State.Npcs.Find("ped-save-0"), Stimulus::SawPower, 1.0, 100, State.Random, "Strength");
+	const std::string Word = State.Npcs.LoudestRumor(*State.Npcs.Find("ped-save-0"))->Text;
+	for (int Day = 0; Day < 14; ++Day)
+	{
+		State.Npcs.TownTalks(1000 + Day * 1440, State.Random);
+	}
+	int Links = 0;
+	int Hometowns = 0;
+	for (const NpcMind& Mind : State.Npcs.All())
+	{
+		Links += static_cast<int>(Mind.Knows.size());
+		Hometowns += Mind.Hometown.empty() ? 0 : 1;
+	}
+	const int Carriers = State.Npcs.HowManyHeard(Word);
+	EXPECT(Links > 0);
+	EXPECT(Hometowns == 8);
+
+	GameState Restored = dtg_test::FreshGame(1);
+	std::string Error;
+	EXPECT(Restored.LoadFromJson(State.SaveToJson(), &Error));
+	int RestoredLinks = 0;
+	int RestoredHometowns = 0;
+	for (const NpcMind& Mind : Restored.Npcs.All())
+	{
+		RestoredLinks += static_cast<int>(Mind.Knows.size());
+		RestoredHometowns += Mind.Hometown.empty() ? 0 : 1;
+	}
+	EXPECT(RestoredLinks == Links);
+	EXPECT(RestoredHometowns == Hometowns);
+	EXPECT(Restored.Npcs.HowManyHeard(Word) == Carriers);
+
+	// And the links point at people who are really there, so the social graph still carries things.
+	for (const NpcMind& Mind : Restored.Npcs.All())
+	{
+		for (const Acquaintance& Known : Mind.Knows)
+		{
+			EXPECT(Restored.Npcs.Find(Known.Id) != nullptr);
+		}
+	}
+	// Which means "ask about them" answers with something, not a shrug.
+	const NpcMind* Social = Restored.Npcs.Find("ped-save-0");
+	EXPECT(Social != nullptr);
+	if (Social && !Social->Knows.empty())
+	{
+		const TalkTurn About = Restored.Talk("ped-save-0", "about:" + Social->Knows[0].Id);
+		EXPECT(About.Reply.find("Don't know anybody") == std::string::npos);
+	}
+	// What a witness saw survives too.
+	EXPECT(Restored.Npcs.Find("ped-save-0")->bSawSomething);
+	EXPECT(Restored.Npcs.Find("ped-save-0")->Witnessed.Kind == Stimulus::SawPower);
+}

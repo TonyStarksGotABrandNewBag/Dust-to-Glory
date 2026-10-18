@@ -1258,6 +1258,9 @@ namespace dtg::sim
 	void GameState::RunDay(std::int64_t Minute, TickReport& Report)
 	{
 		SyncMinistryBusiness();
+		// Overnight the town talks: what people heard yesterday fades a little and the parts worth
+		// repeating reach somebody new. Patience with the player's questions comes back too.
+		Npcs.TownTalks(Minute, Random);
 		const int OutbreakChange = Outbreak.DailyUpdate(Random);
 		if (OutbreakChange > 0)
 		{
@@ -1789,6 +1792,82 @@ namespace dtg::sim
 			}
 		}
 		return Result;
+	}
+
+	// ==================================================================================== Talking
+
+	NpcMind& GameState::Meet(const std::string& NpcId, double X, double Y)
+	{
+		NpcMind& Mind = Npcs.GetOrCreate(NpcId);
+		if (Mind.Hometown.empty())
+		{
+			// Whoever you are standing next to is from the nearest town, which gives them a place to
+			// have an opinion about.
+			const StateCity* Closest = nullptr;
+			double Best = 0.0;
+			for (const StateCity& Town : Map.Cities)
+			{
+				const double Dx = Town.X - X;
+				const double Dy = Town.Y - Y;
+				const double Distance = Dx * Dx + Dy * Dy;
+				if (!Closest || Distance < Best)
+				{
+					Best = Distance;
+					Closest = &Town;
+				}
+			}
+			Npcs.Place(Mind, Closest ? Closest->Name : Map.Name);
+		}
+		if (Mind.Knows.empty())
+		{
+			Rng Local(HashString("circle:" + NpcId));
+			Npcs.Mingle(Mind, Local, 3);
+		}
+		// Mingle can move the vector out from under an old reference, so look it up again.
+		return Npcs.GetOrCreate(NpcId);
+	}
+
+	std::vector<DialogueOption> GameState::TalkOptions(const std::string& NpcId) const
+	{
+		if (const NpcMind* Mind = Npcs.Find(NpcId))
+		{
+			return Npcs.Options(*Mind);
+		}
+		return std::vector<DialogueOption>();
+	}
+
+	TalkTurn GameState::Talk(const std::string& NpcId, const std::string& OptionId)
+	{
+		TalkTurn Turn;
+		NpcMind* Mind = Npcs.Find(NpcId);
+		if (!Mind)
+		{
+			Turn.Reply = "There's nobody there.";
+			Turn.bEnded = true;
+			return Turn;
+		}
+		const std::int64_t Minute = Clock.TotalMinutes();
+		// Say is told what is in the wallet and declines anything the player cannot pay for, so by the
+		// time it reports a cost the money is known to be there and TrySpend cannot fail.
+		Turn = Npcs.Say(*Mind, OptionId, Minute, Random, Careers, Funds.Balance());
+		if (Turn.Cost > 0)
+		{
+			const std::string Note = OptionId == "help" ? "Helped " + Mind->Name : "Paid " + Mind->Name + " for information";
+			Funds.TrySpend(Turn.Cost, MoneyCategory::Other, Note, Minute);
+		}
+		// Word travels on its own. The name is the player's, so the town's opinion is about them.
+		if (Turn.bNewRumor && !Turn.Rumor.empty())
+		{
+			const int Heard = Npcs.Spread(NpcId, Turn.Rumor, 0.9, Minute, Random);
+			if (Heard > 0)
+			{
+				const bool bGood = OptionId == "help" || OptionId.rfind("teach:", 0) == 0;
+				Markets.PlayerReputation().Followers += Heard * (bGood ? 3 : -2);
+				Markets.PlayerReputation().Sentiment =
+					Clamp(Markets.PlayerReputation().Sentiment + (bGood ? 0.01 : -0.02) * static_cast<double>(Heard), -1.0, 1.0);
+			}
+		}
+		return Turn;
 	}
 
 	// ==================================================================================== Homes

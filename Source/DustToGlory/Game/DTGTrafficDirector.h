@@ -66,6 +66,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
 	float SpawnRadiusM = 220.0f;
 
+	/** How close two people have to be for one to count as somebody the other knows. */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
+	float NeighbourRangeM = 60.0f;
+
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Traffic")
 	float DespawnRadiusM = 420.0f;
 

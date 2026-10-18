@@ -15,7 +15,7 @@ Content/Data/*.json ──► Sim (rules, state, maths) ◄── Tests (CMake, 
 
 Three things fall out of the split, and they're the reason for it:
 
-- **The game is testable without an engine.** 81 tests build in seconds with CMake and run anywhere,
+- **The game is testable without an engine.** 91 tests build in seconds with CMake and run anywhere,
   including CI on Linux, macOS and Windows. A physics change is a test, not a play session.
 - **The handling is identical everywhere.** The chassis integrates at a fixed 240 Hz with its own rigid
   body; Unreal's physics never touches a car. The same inputs give the same lap on every machine.
@@ -33,7 +33,7 @@ RTTI, warnings as errors.
 | Driving | `Tuning`, `Dynamics`, `ChassisSim`, `EngineAudio` | Vehicle setups and parts, the powertrain and tires at 500 Hz, the 240 Hz rigid body, and the exhaust synthesiser. |
 | Cars as things you own | `Vehicles`, `Garage` | The catalog (brands, nameplates, generations, models), dealers, used lots, classics, restorations, valuations. |
 | The world | `CityLayout`, `StatePlan` | How one town is laid out, and how twenty-one of them plus highways, rivers, lakes, mountains and venues make a state. |
-| People | `NpcMinds`, `PrivateSales`, `Messages` | Minds that remember and can wake up; cars parked at houses; calls, texts and email. |
+| People | `NpcMinds`, `PrivateSales`, `Messages` | Minds that remember, hold a conversation, carry troubles and gossip, and can wake up; cars parked at houses; calls, texts and email. |
 | Making a living | `Careers`, `Market`, `Hacking`, `Furniture` | Jobs and shifts, businesses, stocks, reputation, IP and royalties, hacking contracts, homes and furniture. |
 | Belief and power | `Ministry`, `Politics`, `Powers` | Tithes, sermons, integrity and scandal; campaigns, offices and laws; three mutating powers. |
 | Trouble | `Wanted`, `Justice`, `Conspiracy`, `Outbreak`, `Combat` | Police heat; courts, jail and the ways out; the engineered-outbreak scheme; illness as an SIR model; fights, health and bounties. |
@@ -107,11 +107,12 @@ any point, built from the coast, the rivers, the lakes, the mountains and the le
 
 ## Testing
 
-`Tests/` builds the core with the same flags Unreal uses and runs 81 tests: physics plausibility (a car
+`Tests/` builds the core with the same flags Unreal uses and runs 91 tests: physics plausibility (a car
 accelerates, stops, corners, lands and rolls the way one should), the car economy, both state maps'
 geography and road networks, private sales and messaging, careers, business, politics, courts and jail,
 the ways out of jail and life as a fugitive, the outbreak scheme and the investigation that unpicks it,
-fights and bounties, and a full save round trip. `Tests/check_content.py` parses every data file and
+fights and bounties, conversation and the way gossip crosses a town, the spatial index against exhaustive
+search, and a full save round trip. `Tests/check_content.py` parses every data file and
 fails on a real brand name slipping in.
 
 The geometry has its own check outside the engine: `DTGMeshBuilder` compiles against a small stand-in for

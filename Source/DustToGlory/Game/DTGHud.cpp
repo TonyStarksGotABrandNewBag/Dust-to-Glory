@@ -419,12 +419,11 @@ TArray<FString> ADTGHud::BuildOptions() const
 		break;
 	case EDTGScreen::Talk:
 	{
-		if (const NpcMind* Mind = Sim.Npcs.Find(TCHAR_TO_UTF8(*TalkingTo)))
+		for (const DialogueOption& Option : Sim.TalkOptions(TCHAR_TO_UTF8(*TalkingTo)))
 		{
-			for (const DialogueOption& Option : Sim.Npcs.Options(*Mind))
-			{
-				Options.Add(Utf8(Option.Label));
-			}
+			Options.Add(Option.Cost > 0
+				? FString::Printf(TEXT("%s  (%s)"), *Utf8(Option.Label), *Cash(Option.Cost))
+				: Utf8(Option.Label));
 		}
 		Options.Add(TEXT("Walk away"));
 		break;
@@ -512,6 +511,17 @@ void ADTGHud::DrawMenu()
 			Title = Utf8(Mind->Name);
 			Subtitle = FString::Printf(TEXT("%s  --  %s"), *Utf8(Mind->Occupation),
 				*Utf8(AwarenessStageName(Mind->Stage)));
+			if (!Mind->Hometown.empty())
+			{
+				Subtitle += FString::Printf(TEXT("  --  %s"), *Utf8(Mind->Hometown));
+			}
+			// How they are taking the conversation: warmth first, then whether you are wearing on them.
+			const TCHAR* Mood = Mind->Affinity > 0.4 ? TEXT("warm") : (Mind->Affinity < -0.2 ? TEXT("cold") : TEXT("polite"));
+			Subtitle += FString::Printf(TEXT("  --  %s"), Mood);
+			if (Mind->Patience < 0.5)
+			{
+				Subtitle += TEXT(", losing patience");
+			}
 		}
 		break;
 	case EDTGScreen::Events:
@@ -687,8 +697,14 @@ void ADTGHud::OpenTalk(const FString& MindId)
 	TalkingTo = MindId;
 	LastReply.Reset();
 	GameState& Sim = Game->Sim();
-	// Opening a conversation is itself something they remember.
-	NpcMind& Mind = Sim.Npcs.GetOrCreate(TCHAR_TO_UTF8(*MindId));
+	// Meeting somebody properly settles where they are from and who they know, which is what gives
+	// them a town to have an opinion about and people to carry what you say to them.
+	FVector2D Where(0.0, 0.0);
+	if (PlayerOwner && PlayerOwner->GetPawn())
+	{
+		Where = Game->ToSim(PlayerOwner->GetPawn()->GetActorLocation());
+	}
+	NpcMind& Mind = Sim.Meet(TCHAR_TO_UTF8(*MindId), Where.X, Where.Y);
 	LastReply = Utf8(Sim.Npcs.Line(Mind, Sim.Random));
 	Open(EDTGScreen::Talk);
 }
@@ -696,19 +712,39 @@ void ADTGHud::OpenTalk(const FString& MindId)
 void ADTGHud::RunTalkOption(int32 Index)
 {
 	GameState& Sim = Game->Sim();
-	NpcMind* Mind = Sim.Npcs.Find(TCHAR_TO_UTF8(*TalkingTo));
-	if (!Mind)
-	{
-		Close();
-		return;
-	}
-	const std::vector<DialogueOption> Choices = Sim.Npcs.Options(*Mind);
+	const std::string Who = TCHAR_TO_UTF8(*TalkingTo);
+	const std::vector<DialogueOption> Choices = Sim.TalkOptions(Who);
 	if (Index < 0 || Index >= static_cast<int32>(Choices.size()))
 	{
 		Close(); // "Walk away"
 		return;
 	}
-	LastReply = Utf8(Sim.Npcs.Respond(*Mind, Choices[static_cast<std::size_t>(Index)].Id, Sim.Clock.TotalMinutes(), Sim.Random, Sim.Careers));
+	const std::string Chosen = Choices[static_cast<std::size_t>(Index)].Id;
+	const TalkTurn Turn = Sim.Talk(Who, Chosen);
+	LastReply = Utf8(Turn.Reply);
+	// Paying for a tip or covering somebody's rent takes that line off the menu, which would otherwise
+	// slide a different option under the cursor. Follow the one the player was on, or the row above it.
+	const std::vector<DialogueOption> After = Sim.TalkOptions(Who);
+	int32 Moved = FMath::Min(Index, FMath::Max(0, static_cast<int32>(After.size()) - 1));
+	for (int32 Row = 0; Row < static_cast<int32>(After.size()); ++Row)
+	{
+		if (After[static_cast<std::size_t>(Row)].Id == Chosen)
+		{
+			Moved = Row;
+			break;
+		}
+	}
+	Selection = Moved;
+	if (Turn.Cost > 0)
+	{
+		OnNotice(FString::Printf(TEXT("-%s"), *Cash(Turn.Cost)));
+	}
+	if (Turn.bEnded)
+	{
+		// They have walked off. The last thing they said is worth showing on the way out.
+		OnNotice(LastReply);
+		Close();
+	}
 }
 
 void ADTGHud::RunTitleOption(int32 Index)
