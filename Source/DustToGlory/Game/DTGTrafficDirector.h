@@ -79,7 +79,8 @@ public:
 private:
 	void UpdateTraffic(const FVector& Around, float DeltaSeconds);
 	void UpdatePolice(const FVector& Around);
-	void UpdatePedestrians(const FVector& Around, float DeltaSeconds);
+	/** Walkers think on world time rather than frame delta, so this needs no DeltaSeconds. */
+	void UpdatePedestrians(const FVector& Around);
 	void UpdateParkedCars(const FVector& Around);
 
 public:

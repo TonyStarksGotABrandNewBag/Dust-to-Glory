@@ -131,3 +131,5 @@ are real — that's the point of a map of South Carolina — but nothing in them
 - [docs/AUDIO.md](docs/AUDIO.md) — how the engine sound is made
 - [docs/REALISM.md](docs/REALISM.md) — the honest ledger against the photoreal target: what the code
   reaches on its own, and what needs the editor and art
+- `python3 Tests/check_engine.py` — compiles the Unreal layer against a stand-in for the engine
+  API, so a compiler checks it rather than a reviewer

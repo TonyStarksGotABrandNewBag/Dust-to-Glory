@@ -25,6 +25,14 @@ using namespace dtg::sim;
 
 namespace
 {
+	/**
+	 * The canvas size as floats. Every measurement below this line is in float pixels while the
+	 * canvas reports int32, so the conversion happens here once rather than implicitly in fifteen
+	 * expressions -- which is also what keeps the engine-layer compile check free of noise.
+	 */
+	float ScreenW(const UCanvas* Canvas) { return static_cast<float>(Canvas->SizeX); }
+	float ScreenH(const UCanvas* Canvas) { return static_cast<float>(Canvas->SizeY); }
+
 	const FLinearColor PanelColour(0.02f, 0.02f, 0.03f, 0.82f);
 	const FLinearColor Accent(0.95f, 0.72f, 0.25f);
 	const FLinearColor Dim(0.65f, 0.66f, 0.7f);
@@ -126,7 +134,7 @@ void ADTGHud::DrawHUD()
 void ADTGHud::DrawStatusBar()
 {
 	const GameState& Sim = Game->Sim();
-	Panel(0.0f, 0.0f, Canvas->SizeX, 34.0f, PanelColour);
+	Panel(0.0f, 0.0f, ScreenW(Canvas), 34.0f, PanelColour);
 	const FString Clock = FString::Printf(TEXT("Day %d  %02d:%02d"), Sim.Clock.Day() + 1, Sim.Clock.Hour(), Sim.Clock.Minute());
 	Text(Clock, 16.0f, 8.0f, Dim);
 	Text(Cash(Sim.Funds.Balance()), 170.0f, 8.0f, Accent);
@@ -145,11 +153,11 @@ void ADTGHud::DrawStatusBar()
 		{
 			Stars += TEXT("*");
 		}
-		Text(Stars, Canvas->SizeX - 220.0f, 8.0f, FLinearColor(0.95f, 0.3f, 0.25f), 1.4f);
+		Text(Stars, ScreenW(Canvas) - 220.0f, 8.0f, FLinearColor(0.95f, 0.3f, 0.25f), 1.4f);
 	}
 	if (Sim.Justice.IsFugitive())
 	{
-		Text(TEXT("WANTED: ESCAPEE"), Canvas->SizeX - 420.0f, 8.0f, FLinearColor(0.95f, 0.3f, 0.25f));
+		Text(TEXT("WANTED: ESCAPEE"), ScreenW(Canvas) - 420.0f, 8.0f, FLinearColor(0.95f, 0.3f, 0.25f));
 	}
 	// Health, but only once something has happened to it.
 	if (Sim.Health() < CombatSystem::PlayerMaxHealth - 0.5)
@@ -172,15 +180,15 @@ void ADTGHud::DrawStatusBar()
 	const int Unread = Sim.Phone.Unread();
 	if (Unread > 0)
 	{
-		Text(FString::Printf(TEXT("%d new message(s)  [Tab]"), Unread), Canvas->SizeX - 640.0f, 8.0f, Accent);
+		Text(FString::Printf(TEXT("%d new message(s)  [Tab]"), Unread), ScreenW(Canvas) - 640.0f, 8.0f, Accent);
 	}
 }
 
 void ADTGHud::DrawDriving(const ADTGVehicle& Car)
 {
 	const DynamicsTelemetry& Telemetry = Car.Chassis().Dynamics().Telemetry();
-	const float X = Canvas->SizeX - 290.0f;
-	const float Y = Canvas->SizeY - 150.0f;
+	const float X = ScreenW(Canvas) - 290.0f;
+	const float Y = ScreenH(Canvas) - 150.0f;
 	Panel(X - 14.0f, Y - 14.0f, 280.0f, 136.0f, PanelColour);
 	Text(FString::Printf(TEXT("%3.0f km/h"), Car.SpeedKph()), X, Y, FLinearColor::White, 2.0f);
 	Text(FString::Printf(TEXT("%5.0f rpm"), Telemetry.EngineRpm), X, Y + 52.0f, Telemetry.bRevLimiter ? FLinearColor::Red : Dim);
@@ -210,7 +218,7 @@ void ADTGHud::DrawDriving(const ADTGVehicle& Car)
 	}
 	if (Car.IsSwamped())
 	{
-		Text(TEXT("The engine is drowning -- get out of the water."), 40.0f, Canvas->SizeY * 0.5f, FLinearColor(0.95f, 0.4f, 0.3f));
+		Text(TEXT("The engine is drowning -- get out of the water."), 40.0f, ScreenH(Canvas) * 0.5f, FLinearColor(0.95f, 0.4f, 0.3f));
 	}
 }
 
@@ -221,8 +229,8 @@ void ADTGHud::DrawOnFoot(const ADTGCharacter& Player)
 	{
 		return;
 	}
-	const float X = Canvas->SizeX * 0.5f - 200.0f;
-	const float Y = Canvas->SizeY - 160.0f;
+	const float X = ScreenW(Canvas) * 0.5f - 200.0f;
+	const float Y = ScreenH(Canvas) - 160.0f;
 	Panel(X - 12.0f, Y - 10.0f, 420.0f, 60.0f, PanelColour);
 	Text(Focus.Title, X, Y, FLinearColor::White);
 	Text(FString::Printf(TEXT("[E] %s"), *Focus.Prompt), X, Y + 24.0f, Accent);
@@ -236,7 +244,7 @@ void ADTGHud::DrawMinimap()
 
 	const float Size = 190.0f;
 	const float X = 16.0f;
-	const float Y = Canvas->SizeY - Size - 16.0f;
+	const float Y = ScreenH(Canvas) - Size - 16.0f;
 	Panel(X, Y, Size, Size, PanelColour);
 	// 400 m of ground across the map, north up (the simulation's Y points south, so screen Y matches).
 	const double Span = 400.0;
@@ -302,8 +310,8 @@ void ADTGHud::DrawFight()
 		return;
 	}
 	// Who you are up against, and how they are doing.
-	float Y = Canvas->SizeY * 0.3f;
-	const float X = Canvas->SizeX - 290.0f;
+	float Y = ScreenH(Canvas) * 0.3f;
+	const float X = ScreenW(Canvas) - 290.0f;
 	for (const Fighter& Who : Sim.Fights.Fighters())
 	{
 		if (Who.IsDown())
@@ -528,11 +536,11 @@ void ADTGHud::DrawMenu()
 	// How many rows actually fit between the title and the footer. A long list -- an inbox can hold a
 	// hundred messages -- scrolls inside that window rather than running off the bottom of the screen
 	// with the cursor somewhere nobody can see.
-	const int32 Fits = FMath::Max(1, FMath::FloorToInt32((Canvas->SizeY - 260.0f) / 30.0f));
+	const int32 Fits = FMath::Max(1, FMath::FloorToInt32((ScreenH(Canvas) - 260.0f) / 30.0f));
 	const int32 Shown = FMath::Min(Rows.Num(), Fits);
-	const float H = 120.0f + Shown * 30.0f + (Rows.Num() > Fits ? 26.0f : 0.0f);
-	const float X = (Canvas->SizeX - W) * 0.5f;
-	const float Y = (Canvas->SizeY - H) * 0.5f;
+	const float H = 120.0f + static_cast<float>(Shown) * 30.0f + (Rows.Num() > Fits ? 26.0f : 0.0f);
+	const float X = (ScreenW(Canvas) - W) * 0.5f;
+	const float Y = (ScreenH(Canvas) - H) * 0.5f;
 	Panel(X, Y, W, H, FLinearColor(0.02f, 0.02f, 0.03f, 0.93f));
 
 	FString Title = TEXT("Menu");

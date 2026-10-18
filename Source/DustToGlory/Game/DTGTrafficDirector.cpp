@@ -124,7 +124,7 @@ void ADTGTrafficDirector::Tick(float DeltaSeconds)
 	const FVector Around = ADTGCharacter::InterestPointFor(Pawn);
 	UpdateTraffic(Around, DeltaSeconds);
 	UpdatePolice(Around);
-	UpdatePedestrians(Around, DeltaSeconds);
+	UpdatePedestrians(Around);
 	UpdateParkedCars(Around);
 }
 
@@ -288,7 +288,7 @@ void ADTGTrafficDirector::DriveToward(FDTGDriver& Driver, const FVector& Target,
 	Driver.Patience = FMath::Max(0.0, Driver.Patience - DeltaSeconds * 0.01);
 }
 
-void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSeconds)
+void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 {
 	const double Despawn = DespawnRadiusM * DTGMetresToUnreal;
 	const double Now = GetWorld()->GetTimeSeconds();

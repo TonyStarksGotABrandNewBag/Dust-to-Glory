@@ -77,7 +77,7 @@ void ADTGGameMode::StartPlay()
 	}
 }
 
-AActor* ADTGGameMode::ChoosePlayerStart_Implementation(AController* Player)
+AActor* ADTGGameMode::ChoosePlayerStart_Implementation(AController* /*Player*/)
 {
 	// No map assets, so the start is a spot the simulation chose; make a PlayerStart there on the fly.
 	if (AActor* Existing = UGameplayStatics::GetActorOfClass(GetWorld(), APlayerStart::StaticClass()))
@@ -90,7 +90,7 @@ AActor* ADTGGameMode::ChoosePlayerStart_Implementation(AController* Player)
 	return GetWorld()->SpawnActor<APlayerStart>(APlayerStart::StaticClass(), FTransform(FRotator::ZeroRotator, SpawnPoint), Params);
 }
 
-UClass* ADTGGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
+UClass* ADTGGameMode::GetDefaultPawnClassForController_Implementation(AController* /*InController*/)
 {
 	return ADTGCharacter::StaticClass();
 }

@@ -15,6 +15,9 @@ Content/Data/*.json ──► Sim (rules, state, maths) ◄── Tests (CMake, 
 
 Three things fall out of the split, and they're the reason for it:
 
+- **The engine layer is compilable without an engine.** `Tests/check_engine.py` builds all of
+  `Game/` against a stand-in for Unreal's API, so a compiler reads it rather than a reviewer. It
+  proves nothing about behaviour — only that the code is well-formed against those declarations.
 - **The game is testable without an engine.** 111 tests build in seconds with CMake and run anywhere,
   including CI on Linux, macOS and Windows. A physics change is a test, not a play session.
 - **The handling is identical everywhere.** The chassis integrates at a fixed 240 Hz with its own rigid

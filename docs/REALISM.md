@@ -104,6 +104,21 @@ Three things, in increasing cost:
 3. **Mutation testing.** Every new test above was confirmed by breaking the thing it guards and watching
    it fail. A test that has never been seen to fail is not evidence of anything.
 
-What none of this checks is how the world looks *in Unreal*, because the engine layer has never been
-compiled by an engine. `Tests/check_headers.py` catches the one class of error that bit repeatedly —
-unqualified `dtg::sim` names in engine headers — but the first real build will find more.
+4. **A compiler reading the engine layer.** `Tests/check_engine.py` compiles all 6,800 lines of
+   `Source/DustToGlory/Game` against `Tests/UnrealStub` — a stand-in for Unreal's API, just large
+   enough to parse the project — with `-Wall -Wextra -Wshadow -Wconversion`. Every compile error
+   found in the engine layer before this existed was found by a person reading the code, which is
+   the wrong tool for the job: four got through and were only caught on a later pass.
+
+   It is a syntax and type check and nothing more. It does not run, it draws nothing, and where the
+   stub's declarations are wrong it will disagree with the real engine in both directions. A clean
+   run is necessary, not sufficient.
+
+   It was verified by planting each of the historical failures and confirming it catches them: a
+   misspelled member, an unqualified `dtg::sim` name in an engine header, `FMath::Max(1,
+   FMath::CeilToInt(SomeDouble))` (which fails because the double overload returns `int64`), an
+   `int64` → `int32` narrowing, and a `Super::` call that the real base class does not have.
+
+What none of this checks is how the world looks *in Unreal*, or whether the stand-in's declarations
+match the real engine. The first real build will still find things — it just will not be spending
+its time on typos.

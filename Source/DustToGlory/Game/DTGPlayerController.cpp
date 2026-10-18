@@ -8,6 +8,7 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Math/RotationMatrix.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
@@ -268,15 +269,15 @@ void ADTGPlayerController::OnMove(const FInputActionValue& Value)
 	{
 		return;
 	}
-	APawn* Pawn = GetPawn();
-	if (!Pawn)
+	APawn* Possessed = GetPawn();
+	if (!Possessed)
 	{
 		return;
 	}
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const FRotator YawOnly(0.0, GetControlRotation().Yaw, 0.0);
-	Pawn->AddMovementInput(FRotationMatrix(YawOnly).GetUnitAxis(EAxis::X), Axis.X);
-	Pawn->AddMovementInput(FRotationMatrix(YawOnly).GetUnitAxis(EAxis::Y), Axis.Y);
+	Possessed->AddMovementInput(FRotationMatrix(YawOnly).GetUnitAxis(EAxis::X), Axis.X);
+	Possessed->AddMovementInput(FRotationMatrix(YawOnly).GetUnitAxis(EAxis::Y), Axis.Y);
 }
 
 void ADTGPlayerController::OnMoveReleased()
