@@ -11,7 +11,6 @@
 #include "Math/RandomStream.h"
 #include "Math/RotationMatrix.h"
 #include "ProceduralMeshComponent.h"
-#include "UObject/UObjectGlobals.h"
 
 #include "EngineUtils.h"
 
@@ -28,12 +27,6 @@ using namespace dtg::sim;
 
 namespace
 {
-	UMaterialInterface* RainMaterial()
-	{
-		return Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr,
-			TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial")));
-	}
-
 	/**
 	 * One segment of a streak: a closed four-sided tube down the local Z.
 	 *
@@ -166,7 +159,7 @@ void ADTGWeatherFx::BuildLayer(int32 Index, double Scale, const FLinearColor& Co
 	}
 	Layers[Index]->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors,
 		Mesh.Tangents, /*bCreateCollision*/ false);
-	if (UMaterialInterface* Material = RainMaterial())
+	if (UMaterialInterface* Material = DTGMeshBuilder::VertexColorMaterial())
 	{
 		Layers[Index]->SetMaterial(0, Material);
 	}

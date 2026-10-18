@@ -31,11 +31,6 @@ namespace
 		OutSkin = Skins[FMath::Abs(Seed / 7) % UE_ARRAY_COUNT(Skins)];
 	}
 
-	UMaterialInterface* Painted()
-	{
-		return Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr,
-			TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial")));
-	}
 }
 
 UDTGBody::UDTGBody()
@@ -50,7 +45,7 @@ void UDTGBody::Build(int32 Seed)
 	FLinearColor Skin;
 	PaletteFor(Seed, Clothes, Skin);
 	Limbs.Reset();
-	UMaterialInterface* const Material = Painted();
+	UMaterialInterface* const Material = DTGMeshBuilder::VertexColorMaterial();
 	constexpr double S = 100.0;
 	// Parts are built around their own pivot -- a hip for a leg, a shoulder for an arm -- so swinging one
 	// is a rotation rather than a translation.

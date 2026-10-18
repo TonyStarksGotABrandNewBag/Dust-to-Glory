@@ -13,13 +13,6 @@
 
 using namespace dtg::sim;
 
-namespace
-{
-	// Everything is drawn with the engine's vertex-colour material, so the colour baked into each vertex
-	// is what shows: no textures to ship and no materials to author.
-	const TCHAR* const VertexColorMaterialPath = TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial");
-}
-
 ADTGWorldBuilder::ADTGWorldBuilder()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -64,11 +57,8 @@ UMaterialInterface* ADTGWorldBuilder::SurfaceMaterial()
 {
 	if (!Painted)
 	{
-		Painted = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, VertexColorMaterialPath));
-		if (!Painted)
-		{
-			UE_LOG(LogDTG, Warning, TEXT("No vertex-colour material at %s; the world will be untextured grey."), VertexColorMaterialPath);
-		}
+		// Shared with everything else that draws generated geometry, and warns once if it is missing.
+		Painted = DTGMeshBuilder::VertexColorMaterial();
 	}
 	return Painted;
 }

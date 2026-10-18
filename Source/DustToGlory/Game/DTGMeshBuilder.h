@@ -17,6 +17,7 @@
 
 class AActor;
 class UDTGBody;
+class UMaterialInterface;
 
 /** A mesh under construction, in Unreal units and world space. */
 struct FDTGMesh
@@ -94,4 +95,14 @@ namespace DTGMeshBuilder
 	 * the same each time; 1 and 2 are reserved for a hero and a villain, who are supposed to stand out.
 	 */
 	UDTGBody* DressPerson(AActor* Person, int32 Seed);
+
+	/**
+	 * The material every generated mesh is drawn with: the engine's own vertex-colour material, which
+	 * turns the colours baked into the geometry into what you see, with no textures anywhere.
+	 *
+	 * Loaded by path, because nothing in the project references it as an asset -- which is exactly why
+	 * Config/DefaultGame.ini has to tell the cooker to keep it. Found once and kept; warns once if it
+	 * is missing, because the symptom otherwise is a whole world of untextured grey with no clue why.
+	 */
+	UMaterialInterface* VertexColorMaterial();
 }

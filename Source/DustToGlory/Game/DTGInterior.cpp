@@ -79,8 +79,7 @@ FVector ADTGInterior::Open(int32 InBuildingId)
 	}
 
 	Room->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
-	if (UMaterialInterface* Painted = Cast<UMaterialInterface>(StaticLoadObject(
-			UMaterialInterface::StaticClass(), nullptr, TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial"))))
+	if (UMaterialInterface* Painted = DTGMeshBuilder::VertexColorMaterial())
 	{
 		Room->SetMaterial(0, Painted);
 	}

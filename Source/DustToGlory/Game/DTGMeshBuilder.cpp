@@ -4,6 +4,9 @@
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
 
+#include "DustToGlory.h"
+#include "UObject/UObjectGlobals.h"
+
 #include "Game/DTGBody.h"
 
 using namespace dtg::sim;
@@ -587,5 +590,33 @@ namespace DTGMeshBuilder
 		Body->RegisterComponent();
 		Body->Build(Seed);
 		return Body;
+	}
+
+	UMaterialInterface* VertexColorMaterial()
+	{
+		static const TCHAR* const Path = TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial");
+		// Found once. StaticLoadObject hits the asset registry, and this is asked for by every building,
+		// every car and every person in the world.
+		static TWeakObjectPtr<UMaterialInterface> Cached;
+		static bool bWarned = false;
+		if (Cached.IsValid())
+		{
+			return Cached.Get();
+		}
+		UMaterialInterface* Found = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, Path));
+		if (!Found)
+		{
+			if (!bWarned)
+			{
+				bWarned = true;
+				UE_LOG(LogDTG, Warning,
+					TEXT("No vertex-colour material at %s, so the world will draw untextured. In a packaged build this "
+						 "means /Engine/EngineMaterials was not cooked; see DirectoriesToAlwaysCook in Config/DefaultGame.ini."),
+					Path);
+			}
+			return nullptr;
+		}
+		Cached = Found;
+		return Found;
 	}
 }

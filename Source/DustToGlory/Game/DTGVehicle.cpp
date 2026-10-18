@@ -7,6 +7,7 @@
 #include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include "Game/DTGEngineAudio.h"
@@ -182,8 +183,7 @@ void ADTGVehicle::ApplyVisuals()
 	const double S = DTGMetresToUnreal;
 	Body->SetBoxExtent(FVector(0.5 * LengthM * S, 0.5 * WidthM * S, 0.5 * HeightM * S), false);
 
-	UMaterialInterface* const Painted = Cast<UMaterialInterface>(
-		StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial")));
+	UMaterialInterface* const Painted = DTGMeshBuilder::VertexColorMaterial();
 
 	if (Shell)
 	{
