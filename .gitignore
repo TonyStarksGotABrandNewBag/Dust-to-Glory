@@ -1,0 +1,32 @@
+# Unreal Engine generated folders
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+Platforms/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# IDE / project files (regenerate with "Generate Visual Studio project files")
+.vs/
+.vscode/
+.idea/
+*.sln
+*.slnx
+*.xcworkspace
+*.xcodeproj
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+compile_commands.json
+
+# Core test build output
+Tests/build/
+build/
+
+# OS clutter
+.DS_Store
+Thumbs.db
