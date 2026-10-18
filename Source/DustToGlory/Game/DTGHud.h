@@ -101,7 +101,7 @@ private:
 	{
 		FString Label;
 		FString Key;        // a model id, a career id, a ticker, a law id -- whatever the action needs
-		Money Cost = 0;
+		dtg::sim::Money Cost = 0;
 	};
 	/** The rows of the service currently open. */
 	TArray<FServiceRow> ServiceRows() const;
@@ -126,7 +126,10 @@ private:
 	int32 Selection = 0;
 	TArray<FNotice> Notices;
 	mutable TArray<FString> CachedOptions;
+	/** The service rows behind CachedOptions, so acting on a row cannot rebuild a different list. */
+	mutable TArray<FServiceRow> CachedRows;
 	mutable double OptionsUntil = 0.0;
 	mutable EDTGScreen CachedFor = EDTGScreen::None;
 	mutable int32 CachedContext = -1;
+	mutable FString CachedService;
 };

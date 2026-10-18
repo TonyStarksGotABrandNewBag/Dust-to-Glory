@@ -11,7 +11,7 @@
 
 #include "DTGInterior.generated.h"
 
-class UBoxComponent;
+class UPointLightComponent;
 class UDTGGameSubsystem;
 class UProceduralMeshComponent;
 
@@ -41,6 +41,9 @@ public:
 private:
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Room;
+
+	UPROPERTY()
+	TObjectPtr<UPointLightComponent> Lamp;
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;

@@ -2,7 +2,6 @@
 
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
-#include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -324,7 +323,7 @@ void ADTGEventDirector::UpdateRace(float DeltaSeconds)
 		}
 		if (!Racer.bPlayer)
 		{
-			DriveRacer(Racer, DeltaSeconds);
+			DriveRacer(Racer);
 		}
 	}
 	const FDTGRacer* Player = Racers.FindByPredicate([](const FDTGRacer& Racer) { return Racer.bPlayer; });
@@ -338,7 +337,7 @@ void ADTGEventDirector::UpdateRace(float DeltaSeconds)
 	}
 }
 
-void ADTGEventDirector::DriveRacer(FDTGRacer& Racer, float DeltaSeconds)
+void ADTGEventDirector::DriveRacer(FDTGRacer& Racer)
 {
 	const FVector Target = CheckpointLocation(Racer.Checkpoint);
 	if (Target.IsNearlyZero() || !Racer.Car)
@@ -355,7 +354,6 @@ void ADTGEventDirector::DriveRacer(FDTGRacer& Racer, float DeltaSeconds)
 	Input.Throttle = FMath::Clamp(Commitment - FMath::Abs(Turn) * 0.7, 0.0, 1.0);
 	Input.Brake = FMath::Abs(Turn) > 0.8 && Racer.Car->SpeedKph() > 60.0 ? 0.4 : 0.0;
 	Racer.Car->SetDriverInput(Input);
-	(void)DeltaSeconds;
 }
 
 void ADTGEventDirector::Finish()

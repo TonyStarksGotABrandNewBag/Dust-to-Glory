@@ -310,12 +310,12 @@ void ADTGWorldBuilder::BuildWater()
 		constexpr int32 Sides = 24;
 		for (int32 Side = 0; Side < Sides; ++Side)
 		{
-			const double A0 = 2.0 * PI * Side / Sides;
-			const double A1 = 2.0 * PI * (Side + 1) / Sides;
-			Mesh.AddQuad(FVector(Lake.X * S, Lake.Y * S, Lake.LevelM * S),
+			const double A0 = 2.0 * UE_PI * Side / Sides;
+			const double A1 = 2.0 * UE_PI * (Side + 1) / Sides;
+			Mesh.AddTri(FVector(Lake.X * S, Lake.Y * S, Lake.LevelM * S),
 				FVector((Lake.X + Lake.RadiusM * FMath::Cos(A0)) * S, (Lake.Y + Lake.RadiusM * FMath::Sin(A0)) * S, Lake.LevelM * S),
 				FVector((Lake.X + Lake.RadiusM * FMath::Cos(A1)) * S, (Lake.Y + Lake.RadiusM * FMath::Sin(A1)) * S, Lake.LevelM * S),
-				FVector(Lake.X * S, Lake.Y * S, Lake.LevelM * S), FVector::UpVector, Fresh);
+				FVector::UpVector, Fresh);
 		}
 	}
 	for (const StateRiver& River : Map.Rivers)

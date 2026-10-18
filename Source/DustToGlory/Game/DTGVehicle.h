@@ -31,7 +31,7 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
-	virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	/** Builds this pawn from a car in the player's garage (or any model id for traffic). */
 	void ConfigureFromOwned(const dtg::sim::OwnedVehicle& Car);

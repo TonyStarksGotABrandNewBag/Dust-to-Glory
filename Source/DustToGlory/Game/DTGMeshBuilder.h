@@ -40,6 +40,8 @@ struct FDTGMesh
 	 */
 	void AddQuad(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
 		const FLinearColor& Colour, double UvScale = 0.01);
+	/** One triangle, wound to match the normal given. For fans and gables, where a quad would be half empty. */
+	void AddTri(const FVector& A, const FVector& B, const FVector& C, const FVector& Normal, const FLinearColor& Colour);
 	/** An axis-aligned box between two corners. */
 	void AddBox(const FVector& Min, const FVector& Max, const FLinearColor& Colour, bool bSkipBottom = true);
 	/**

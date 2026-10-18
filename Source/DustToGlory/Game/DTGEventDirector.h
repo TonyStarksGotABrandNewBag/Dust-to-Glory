@@ -83,7 +83,7 @@ public:
 private:
 	void Stage(const dtg::sim::VenuePlan& Venue, int32 Tier);
 	void UpdateRace(float DeltaSeconds);
-	void DriveRacer(FDTGRacer& Racer, float DeltaSeconds);
+	void DriveRacer(FDTGRacer& Racer);
 	void Finish();
 	void UpdateSuperhumans(const FVector& Around);
 	FVector CheckpointLocation(int32 Index) const;

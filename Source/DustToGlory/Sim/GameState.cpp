@@ -1464,25 +1464,39 @@ namespace dtg::sim
 		return ActionResult::Success("Congratulations on your new " + Model->DisplayName + "! Three-year warranty included. It's parked out front.");
 	}
 
+	Money GameState::TradeInPrice(const std::string& Uid) const
+	{
+		for (const OwnedVehicle& Car : Garage)
+		{
+			if (Car.Uid != Uid)
+			{
+				continue;
+			}
+			const VehicleModel* Model = Vehicles.FindModel(Car.ModelId);
+			Money Value = Model ? TradeInOffer(*Model, Car) : 0;
+			// Installed parts add a little resale value.
+			for (const std::string& PartId : Car.Build.Parts)
+			{
+				if (const PartDef* Part = Parts.Find(PartId))
+				{
+					if (Model)
+					{
+						Value += PartPrice(*Part, *Model) / 4;
+					}
+				}
+			}
+			return Value;
+		}
+		return 0;
+	}
+
 	ActionResult GameState::SellVehicle(const std::string& Uid)
 	{
 		for (auto It = Garage.begin(); It != Garage.end(); ++It)
 		{
 			if (It->Uid == Uid)
 			{
-				const VehicleModel* Model = Vehicles.FindModel(It->ModelId);
-				Money Value = Model ? TradeInOffer(*Model, *It) : 0;
-				// Installed parts add a little resale value.
-				for (const std::string& PartId : It->Build.Parts)
-				{
-					if (const PartDef* Part = Parts.Find(PartId))
-					{
-						if (Model)
-						{
-							Value += PartPrice(*Part, *Model) / 4;
-						}
-					}
-				}
+				const Money Value = TradeInPrice(Uid);
 				Funds.Deposit(Value, MoneyCategory::Vehicle, "Sold car", Clock.TotalMinutes());
 				if (ActiveVehicleUid == Uid)
 				{
@@ -1566,6 +1580,11 @@ namespace dtg::sim
 		return ActionResult::Success("Tune saved.");
 	}
 
+	Money GameState::PaintPrice(int Finish) const
+	{
+		return static_cast<Money>(std::llround(Dollars(800) * (1.0 + 0.5 * Clamp(Finish, 0, 4)) * Economy.Goods / 0.55));
+	}
+
 	ActionResult GameState::Paint(const std::string& Uid, std::uint32_t Rgb, int Finish)
 	{
 		OwnedVehicle* Car = FindOwned(Uid);
@@ -1573,7 +1592,7 @@ namespace dtg::sim
 		{
 			return ActionResult::Failure("Unknown car.");
 		}
-		const Money Price = static_cast<Money>(std::llround(Dollars(800) * (1.0 + 0.5 * Clamp(Finish, 0, 4)) * Economy.Goods / 0.55));
+		const Money Price = PaintPrice(Finish);
 		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Paint job", Clock.TotalMinutes()))
 		{
 			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
@@ -1878,8 +1897,13 @@ namespace dtg::sim
 		AmenityOffer Offer;
 		Offer.bAvailable = true;
 		// Prices are in 1990s money like everything else the player buys, and scale with the economy.
-		const double Index = Economy.Goods;
-		auto Price = [Index](int Dollars1990) { return Dollars(static_cast<std::int64_t>(Dollars1990 * Index)); };
+		// These are already written in era dollars, so they take the same correction the rest of the
+		// era-priced things take rather than the modern-to-era discount, which would halve them twice.
+		const double Index = Economy.Goods / 0.55;
+		auto Price = [Index](int EraDollars)
+		{
+			return static_cast<Money>(std::llround(static_cast<double>(Dollars(EraDollars)) * Index));
+		};
 		switch (Kind)
 		{
 		case Amenity::Meal:
@@ -1962,7 +1986,19 @@ namespace dtg::sim
 		{
 			return ActionResult::Failure(Offer.Reason.empty() ? std::string("Not now.") : Offer.Reason);
 		}
-		if (Offer.Cost > 0 && !Funds.TrySpend(Offer.Cost, MoneyCategory::Other, "Spent in town", Clock.TotalMinutes()))
+		// Booked where it belongs, so the ledger says what the money went on.
+		MoneyCategory Ledger = MoneyCategory::Other;
+		std::string Note = "Spent in town";
+		switch (Kind)
+		{
+		case Amenity::Treatment: Ledger = MoneyCategory::Medical; Note = "Treatment"; break;
+		case Amenity::Fines: Ledger = MoneyCategory::Fine; Note = "Paid a fine"; break;
+		case Amenity::Lodging: Note = "A room for the night"; break;
+		case Amenity::Meal: Note = "A meal"; break;
+		case Amenity::Gym: Note = "The gym"; break;
+		default: break;
+		}
+		if (Offer.Cost > 0 && !Funds.TrySpend(Offer.Cost, Ledger, Note, Clock.TotalMinutes()))
 		{
 			return ActionResult::Failure("You can't afford it.");
 		}
@@ -1973,8 +2009,8 @@ namespace dtg::sim
 			Said = "A plate of something hot and a cup of coffee.";
 			break;
 		case Amenity::Lodging:
+			// The time skip below recovers the hours; doing it here as well would heal them twice.
 			Said = "A room for the night. You sleep properly for once.";
-			Fights.Recover(Offer.Minutes, Player.SkillLevel(Skill::Fitness));
 			break;
 		case Amenity::Treatment:
 			Fights.ReviveAtHospital();
@@ -1997,7 +2033,8 @@ namespace dtg::sim
 			// An hour of honest practice. What it is worth falls off as the skill gets high, which is
 			// what makes a career or a course the way up from here.
 			const int Level = Player.SkillLevel(Offer.Trains);
-			const int Xp = static_cast<int>(std::lround(40.0 / (1.0 + 0.35 * Level)));
+			// Less than an hour of a class is worth, so a course or a career stays the way up from here.
+			const int Xp = static_cast<int>(std::lround(4.0 / (1.0 + 0.35 * Level))) + 1;
 			const int Gained = Player.AddSkillXp(Offer.Trains, Xp);
 			Said = std::string("An hour of ") + SkillName(Offer.Trains) + ".";
 			if (Gained > 0)
@@ -2726,8 +2763,16 @@ namespace dtg::sim
 		OpenCharges.clear();
 		if (!Justice.Arrest(Charges, Evidence, CoDefendantId, CoName, Funds.Balance()))
 		{
-			const Money Taken = Funds.Charge(Justice.Case().Fine, MoneyCategory::Fine, "Police fine", Clock.TotalMinutes());
-			Notify("Busted. You paid " + FormatMoney(Taken) + " in fines.");
+			const Money Owed = Justice.Case().Fine;
+			const Money Taken = Funds.Charge(Owed, MoneyCategory::Fine, "Police fine", Clock.TotalMinutes());
+			// What was taken is settled. What was not -- a player with less in their pocket than the
+			// fine -- stays owed, to be paid at the station window; without this the whole fine stayed
+			// on the record and could be collected a second time.
+			Justice.ReduceFine(Taken);
+			Notify(Taken >= Owed
+				? "Busted. You paid " + FormatMoney(Taken) + " in fines."
+				: "Busted. You paid " + FormatMoney(Taken) + "; " + FormatMoney(Owed - Taken) +
+					  " is still owed at the station.");
 			return Taken;
 		}
 		Notify("Busted. You're booked and arraigned: " + std::to_string(Charges.size()) + " charge(s). Talk to a lawyer before you decide how to plead.");

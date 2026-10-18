@@ -173,6 +173,10 @@ namespace dtg::sim
 		ActionResult RemovePart(const std::string& Uid, PartCategory Category);
 		ActionResult SetTuning(const std::string& Uid, const TuningSheet& Sheet);
 		ActionResult Paint(const std::string& Uid, std::uint32_t Rgb, int Finish);
+		/** What a paint job costs, so a menu can quote the price it is about to charge. */
+		Money PaintPrice(int Finish) const;
+		/** What the trade-in desk will give for a car, parts and all. */
+		Money TradeInPrice(const std::string& Uid) const;
 		ActionResult Repair(const std::string& Uid);
 		OwnedVehicle* FindOwned(const std::string& Uid);
 		const OwnedVehicle* FindOwned(const std::string& Uid) const;

@@ -38,14 +38,21 @@ std::string UDTGGameSubsystem::ReadData(const FString& Name)
 	// A mod is a folder of data files. Several can be installed at once; later folders win, so a mod that
 	// only replaces vehicles.json leaves everything else alone.
 	FString Path = FPaths::Combine(DataDir(), Name);
+	// Later mods win, so the one that wins is the one worth naming -- logging inside the loop claimed
+	// every mod that happened to contain the file had supplied it.
+	FString FromMod;
 	for (const FString& Mod : Mods)
 	{
 		const FString Candidate = FPaths::Combine(ModsDir(), Mod, Name);
 		if (FPlatformFileManager::Get().GetPlatformFile().FileExists(*Candidate))
 		{
-			UE_LOG(LogDTG, Log, TEXT("%s comes from the mod '%s'"), *Name, *Mod);
 			Path = Candidate;
+			FromMod = Mod;
 		}
+	}
+	if (!FromMod.IsEmpty())
+	{
+		UE_LOG(LogDTG, Log, TEXT("%s comes from the mod '%s'"), *Name, *FromMod);
 	}
 	FString Text;
 	if (!FFileHelper::LoadFileToString(Text, *Path))

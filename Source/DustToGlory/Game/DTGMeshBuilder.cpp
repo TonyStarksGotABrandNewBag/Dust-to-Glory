@@ -38,6 +38,30 @@ void FDTGMesh::Append(const FDTGMesh& Other)
 	}
 }
 
+
+void FDTGMesh::AddTri(const FVector& A, const FVector& B, const FVector& C, const FVector& Normal, const FLinearColor& Colour)
+{
+	// For fans and gables, where passing a quad with two corners in the same place leaves a zero-area
+	// triangle in the buffer for every real one -- half the lake and half of every roof.
+	const int32 Base = Verts.Num();
+	Verts.Append({A, B, C});
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		Normals.Add(Normal);
+		Colors.Add(Colour);
+	}
+	Uvs.Append({FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(0.0, 1.0)});
+	const bool bForward = FVector::DotProduct(FVector::CrossProduct(C - A, B - A), Normal) >= 0.0;
+	if (bForward)
+	{
+		Tris.Append({Base, Base + 1, Base + 2});
+	}
+	else
+	{
+		Tris.Append({Base, Base + 2, Base + 1});
+	}
+}
+
 void FDTGMesh::AddQuad(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
 	const FLinearColor& Colour, double UvScale)
 {
@@ -126,8 +150,8 @@ void FDTGMesh::AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, 
 	const double Half = 0.5 * WidthUu;
 	for (int32 Side = 0; Side < Sides; ++Side)
 	{
-		const double A0 = 2.0 * PI * Side / Sides;
-		const double A1 = 2.0 * PI * (Side + 1) / Sides;
+		const double A0 = 2.0 * UE_PI * Side / Sides;
+		const double A1 = 2.0 * UE_PI * (Side + 1) / Sides;
 		const FVector P0(Centre.X + RadiusUu * FMath::Cos(A0), Centre.Y, Centre.Z + RadiusUu * FMath::Sin(A0));
 		const FVector P1(Centre.X + RadiusUu * FMath::Cos(A1), Centre.Y, Centre.Z + RadiusUu * FMath::Sin(A1));
 		const FVector Out0 = (P0 - Centre).GetSafeNormal();
@@ -136,8 +160,8 @@ void FDTGMesh::AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, 
 		// The two faces, as a fan to the hub.
 		const FVector HubIn = Centre - FVector(0, Half, 0);
 		const FVector HubOut = Centre + FVector(0, Half, 0);
-		AddQuad(HubIn, P0 - FVector(0, Half, 0), P1 - FVector(0, Half, 0), HubIn, FVector(0, -1, 0), Rim);
-		AddQuad(HubOut, P1 + FVector(0, Half, 0), P0 + FVector(0, Half, 0), HubOut, FVector(0, 1, 0), Rim);
+		AddTri(HubIn, P0 - FVector(0, Half, 0), P1 - FVector(0, Half, 0), FVector(0, -1, 0), Rim);
+		AddTri(HubOut, P1 + FVector(0, Half, 0), P0 + FVector(0, Half, 0), FVector(0, 1, 0), Rim);
 	}
 }
 
@@ -157,8 +181,8 @@ void FDTGMesh::AddRoof(const FVector& Min, const FVector& Max, double RidgeHeigh
 		AddQuad(FVector(Max.X, Max.Y, Min.Z), FVector(Min.X, Max.Y, Min.Z), R0, R1,
 			FVector::CrossProduct(FVector(Min.X, Max.Y, Min.Z) - FVector(Max.X, Max.Y, Min.Z), R1 - FVector(Max.X, Max.Y, Min.Z)).GetSafeNormal(), Colour);
 		// Gable ends.
-		AddQuad(FVector(Min.X, Min.Y, Min.Z), R0, FVector(Min.X, Max.Y, Min.Z), FVector(Min.X, Min.Y, Min.Z), FVector(-1, 0, 0), Colour);
-		AddQuad(FVector(Max.X, Max.Y, Min.Z), R1, FVector(Max.X, Min.Y, Min.Z), FVector(Max.X, Max.Y, Min.Z), FVector(1, 0, 0), Colour);
+		AddTri(FVector(Min.X, Min.Y, Min.Z), R0, FVector(Min.X, Max.Y, Min.Z), FVector(-1, 0, 0), Colour);
+		AddTri(FVector(Max.X, Max.Y, Min.Z), R1, FVector(Max.X, Min.Y, Min.Z), FVector(1, 0, 0), Colour);
 	}
 	else
 	{
@@ -166,8 +190,8 @@ void FDTGMesh::AddRoof(const FVector& Min, const FVector& Max, double RidgeHeigh
 		const FVector R1(MidX, Max.Y, Top);
 		AddQuad(FVector(Min.X, Min.Y, Min.Z), R0, R1, FVector(Min.X, Max.Y, Min.Z), FVector(-1, 0, 1).GetSafeNormal(), Colour);
 		AddQuad(FVector(Max.X, Max.Y, Min.Z), R1, R0, FVector(Max.X, Min.Y, Min.Z), FVector(1, 0, 1).GetSafeNormal(), Colour);
-		AddQuad(FVector(Min.X, Min.Y, Min.Z), FVector(Max.X, Min.Y, Min.Z), R0, FVector(Min.X, Min.Y, Min.Z), FVector(0, -1, 0), Colour);
-		AddQuad(FVector(Max.X, Max.Y, Min.Z), FVector(Min.X, Max.Y, Min.Z), R1, FVector(Max.X, Max.Y, Min.Z), FVector(0, 1, 0), Colour);
+		AddTri(FVector(Min.X, Min.Y, Min.Z), FVector(Max.X, Min.Y, Min.Z), R0, FVector(0, -1, 0), Colour);
+		AddTri(FVector(Max.X, Max.Y, Min.Z), FVector(Min.X, Max.Y, Min.Z), R1, FVector(0, 1, 0), Colour);
 	}
 }
 
@@ -585,7 +609,7 @@ namespace DTGMeshBuilder
 		{
 			return nullptr;
 		}
-		UDTGBody* Body = NewObject<UDTGBody>(Person, TEXT("Body"));
+		UDTGBody* Body = NewObject<UDTGBody>(Person);
 		Body->SetupAttachment(Person->GetRootComponent());
 		Body->RegisterComponent();
 		Body->Build(Seed);

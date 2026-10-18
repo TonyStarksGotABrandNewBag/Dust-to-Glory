@@ -8,7 +8,6 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
-#include "UObject/ConstructorHelpers.h"
 
 #include "Game/DTGEngineAudio.h"
 #include "Game/DTGGameSubsystem.h"
@@ -221,9 +220,9 @@ void ADTGVehicle::ApplyVisuals()
 	}
 }
 
-void ADTGVehicle::PlaceAt(const FVector& World2, double YawDegrees)
+void ADTGVehicle::PlaceAt(const FVector& WorldLocation, double YawDegrees)
 {
-	const Vec3 Ground(World2.X / DTGMetresToUnreal, World2.Y / DTGMetresToUnreal, World2.Z / DTGMetresToUnreal);
+	const Vec3 Ground(WorldLocation.X / DTGMetresToUnreal, WorldLocation.Y / DTGMetresToUnreal, WorldLocation.Z / DTGMetresToUnreal);
 	Sim.Teleport(Ground, FMath::DegreesToRadians(YawDegrees));
 	SetActorLocationAndRotation(ToUnrealVector(Sim.State.Position), ToUnrealQuat(Sim.State.Orientation));
 }
@@ -238,10 +237,10 @@ int ADTGVehicle::CurrentGear() const
 	return Sim.Dynamics().Telemetry().Gear;
 }
 
-void ADTGVehicle::SetupPlayerInputComponent(UInputComponent* InputComponent)
+void ADTGVehicle::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	// The player controller owns the bindings (Enhanced Input, created in code) and calls SetDriverInput.
-	Super::SetupPlayerInputComponent(InputComponent);
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
 }
 
 void ADTGVehicle::Tick(float DeltaSeconds)
@@ -358,7 +357,7 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 	{
 		return;
 	}
-	if (Hit.bStartPenetrating && Hit.PenetrationDepth <= KINDA_SMALL_NUMBER)
+	if (Hit.bStartPenetrating && Hit.PenetrationDepth <= UE_KINDA_SMALL_NUMBER)
 	{
 		return; // already touching and not pressing in: nothing new happened
 	}

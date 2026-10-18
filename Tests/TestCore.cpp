@@ -347,6 +347,31 @@ DTG_TEST(TheOrdinaryThingsCostTimeAndMoney)
 	// And you cannot pay a fine you do not owe.
 	EXPECT(!State.QuoteAmenity(GameState::Amenity::Fines).bAvailable);
 
+	// A fine the police collected at the roadside is settled. It used to stay on the record, so the
+	// station window would happily take it a second time.
+	GameState Caught = dtg_test::FreshGame(79);
+	Caught.Funds.Deposit(Dollars(5000), MoneyCategory::Other, "test", 0);
+	const Money Pocket = Caught.Funds.Balance();
+	Caught.ReportCrime(Crime::Speeding, true, false);
+	const Money Paid = Caught.Busted();
+	EXPECT(Paid > 0);
+	EXPECT(Caught.Funds.Balance() == Pocket - Paid);
+	EXPECT(!Caught.QuoteAmenity(GameState::Amenity::Fines).bAvailable);
+	EXPECT(!Caught.UseAmenity(GameState::Amenity::Fines).bOk);
+	EXPECT(Caught.Funds.Balance() == Pocket - Paid); // and nothing left the wallet for trying
+
+	// Someone who could not pay it all still owes the rest, and can settle it at the window.
+	GameState Broke2 = dtg_test::FreshGame(80);
+	Broke2.Funds.Charge(Broke2.Funds.Balance() - Dollars(20), MoneyCategory::Other, "test", 0);
+	Broke2.ReportCrime(Crime::Speeding, true, false);
+	Broke2.Busted();
+	EXPECT(Broke2.QuoteAmenity(GameState::Amenity::Fines).Cost > 0);
+	EXPECT(!Broke2.QuoteAmenity(GameState::Amenity::Fines).bAvailable); // no money for it yet
+	Broke2.Funds.Deposit(Dollars(5000), MoneyCategory::Other, "test", 0);
+	EXPECT(Broke2.QuoteAmenity(GameState::Amenity::Fines).bAvailable);
+	EXPECT(Broke2.UseAmenity(GameState::Amenity::Fines).bOk);
+	EXPECT(!Broke2.QuoteAmenity(GameState::Amenity::Fines).bAvailable);
+
 	// Nothing is on offer with no money for it.
 	GameState Broke = dtg_test::FreshGame(78);
 	Broke.Funds.Charge(Broke.Funds.Balance(), MoneyCategory::Other, "test", 0);

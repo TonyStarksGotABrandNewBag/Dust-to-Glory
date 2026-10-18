@@ -44,6 +44,14 @@ void UDTGBody::Build(int32 Seed)
 	FLinearColor Clothes;
 	FLinearColor Skin;
 	PaletteFor(Seed, Clothes, Skin);
+	// Whatever was built before has to go, or a rebuilt body leaves its old limbs standing.
+	for (const TObjectPtr<UProceduralMeshComponent>& Old : Limbs)
+	{
+		if (Old)
+		{
+			Old->DestroyComponent();
+		}
+	}
 	Limbs.Reset();
 	UMaterialInterface* const Material = DTGMeshBuilder::VertexColorMaterial();
 	constexpr double S = 100.0;
@@ -122,7 +130,7 @@ void UDTGBody::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompone
 		// A punch overrides the right arm until it has landed.
 		Punching = FMath::Max(0.0f, Punching - DeltaTime);
 		const float Through = 1.0f - Punching / 0.35f;
-		Limbs[3]->SetRelativeRotation(FRotator(-100.0f * FMath::Sin(Through * PI), 0.0f, 0.0f));
+		Limbs[3]->SetRelativeRotation(FRotator(-100.0f * FMath::Sin(Through * UE_PI), 0.0f, 0.0f));
 		Limbs[2]->SetRelativeRotation(FRotator(-Swing * 0.6f, 0.0f, 0.0f));
 	}
 	else

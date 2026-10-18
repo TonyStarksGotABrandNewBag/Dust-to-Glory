@@ -1,7 +1,7 @@
 #include "Game/DTGInterior.h"
 
 #include "DustToGlory.h"
-#include "Components/BoxComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Engine/GameInstance.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
@@ -79,6 +79,26 @@ FVector ADTGInterior::Open(int32 InBuildingId)
 	}
 
 	Room->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
+	// A closed box five kilometres under the sky sees none of it, so the room brings its own light.
+	if (!Lamp)
+	{
+		Lamp = NewObject<UPointLightComponent>(this);
+		if (Lamp)
+		{
+			Lamp->SetupAttachment(GetRootComponent());
+			Lamp->RegisterComponent();
+			Lamp->SetMobility(EComponentMobility::Movable);
+			Lamp->SetCastShadows(false);
+		}
+	}
+	if (Lamp)
+	{
+		const double Ceiling = 2.6 * DTGMetresToUnreal;
+		Lamp->SetRelativeLocation(FVector(0.0, 0.0, Ceiling));
+		Lamp->SetAttenuationRadius(static_cast<float>(32.0 * DTGMetresToUnreal));
+		Lamp->SetIntensity(14000.0f);
+		Lamp->SetLightColor(FLinearColor(1.0f, 0.95f, 0.86f)); // warm, like a room light
+	}
 	if (UMaterialInterface* Painted = DTGMeshBuilder::VertexColorMaterial())
 	{
 		Room->SetMaterial(0, Painted);

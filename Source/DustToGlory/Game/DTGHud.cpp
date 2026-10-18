@@ -10,6 +10,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/ScopeExit.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
@@ -342,12 +343,18 @@ const TArray<FString>& ADTGHud::Options() const
 {
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	// Rebuilt when the screen changes, when something told it to, or a few times a second anyway so a
-	// menu still reflects the world moving underneath it.
-	if (Now >= OptionsUntil || CachedFor != Current || CachedContext != ContextId)
+	// menu still reflects the world moving underneath it. The service rows are built in the same pass
+	// and kept: the simulation runs on with a menu open, and the used-car lot and the hacking board
+	// are replaced wholesale at six in the morning. Rebuilding the rows again when the player presses
+	// a key would let the list shift under the cursor between the draw and the act, and buy them a
+	// different car than the one they were looking at.
+	if (Now >= OptionsUntil || CachedFor != Current || CachedContext != ContextId || CachedService != ServiceName)
 	{
+		CachedRows = Current == EDTGScreen::Service ? ServiceRows() : TArray<FServiceRow>();
 		CachedOptions = BuildOptions();
 		CachedFor = Current;
 		CachedContext = ContextId;
+		CachedService = ServiceName;
 		OptionsUntil = Now + 0.2;
 	}
 	return CachedOptions;
@@ -446,7 +453,8 @@ TArray<FString> ADTGHud::BuildOptions() const
 		break;
 	}
 	case EDTGScreen::Service:
-		for (const FServiceRow& Row : ServiceRows())
+		// From the rows the cache just built, so the labels and the actions cannot disagree.
+		for (const FServiceRow& Row : CachedRows)
 		{
 			Options.Add(Row.Label);
 		}
@@ -761,7 +769,8 @@ void ADTGHud::RunBuildingService(int32 Index)
 	}
 	// The everyday reasons to walk in somewhere. The simulation owns what each costs and gives.
 	using Amenity = GameState::Amenity;
-	static const TMap<FString, Amenity> Amenities = {
+	struct FAmenityName { const TCHAR* Service; Amenity Kind; };
+	static constexpr FAmenityName Amenities[] = {
 		{TEXT("Eat"), Amenity::Meal},
 		{TEXT("Rent a room"), Amenity::Lodging},
 		{TEXT("Get treated"), Amenity::Treatment},
@@ -777,10 +786,13 @@ void ADTGHud::RunBuildingService(int32 Index)
 		{TEXT("Shop plants"), Amenity::Leisure},
 		{TEXT("Gadgets"), Amenity::Leisure},
 	};
-	if (const Amenity* Kind = Amenities.Find(Service))
+	for (const FAmenityName& Known : Amenities)
 	{
-		OnNotice(Utf8(Sim.UseAmenity(*Kind).Message));
-		return;
+		if (Service == Known.Service)
+		{
+			OnNotice(Utf8(Sim.UseAmenity(Known.Kind).Message));
+			return;
+		}
 	}
 	if (Service == TEXT("Attend class"))
 	{
@@ -816,7 +828,9 @@ void ADTGHud::RunBuildingService(int32 Index)
 	if (Service == TEXT("Dyno"))
 	{
 		const OwnedVehicle* Car = Sim.ActiveVehicle();
-		const VehicleSetup Setup = Car ? Sim.SetupFor(Car->Uid) : VehicleSetup();
+		// SetupForOwned, not SetupFor: the latter takes a model id, so a uid found nothing and every
+		// car on the rollers read the same default numbers.
+		const VehicleSetup Setup = Car ? Sim.SetupForOwned(*Car) : VehicleSetup();
 		OnNotice(Car ? FString::Printf(TEXT("%.0f hp at the wheels, %.0f Nm, redline %.0f."),
 			Setup.Engine.PeakPowerKw * 1.341, Setup.Engine.PeakTorqueNm, Setup.Engine.RedlineRpm)
 			: FString(TEXT("Nothing on the rollers.")));
@@ -1067,8 +1081,8 @@ TArray<ADTGHud::FServiceRow> ADTGHud::ServiceRows() const
 		{
 			const VehicleModel* Model = Sim.Vehicles.FindModel(Car.ModelId);
 			Rows.Add({FString::Printf(TEXT("%s  --  they'll give you %s"),
-				Model ? *Utf8(Model->DisplayName) : *Utf8(Car.ModelId),
-				Model ? *Cash(TradeInOffer(*Model, Car)) : TEXT("an offer")), Utf8(Car.Uid), 0});
+				Model ? *Utf8(Model->DisplayName) : *Utf8(Car.ModelId), *Cash(Sim.TradeInPrice(Car.Uid))),
+				Utf8(Car.Uid), 0});
 		}
 		if (Rows.IsEmpty())
 		{
@@ -1101,9 +1115,11 @@ TArray<ADTGHud::FServiceRow> ADTGHud::ServiceRows() const
 	{
 		static const TCHAR* const Names[] = {TEXT("Black"), TEXT("White"), TEXT("Red"), TEXT("Blue"), TEXT("Silver"), TEXT("Green")};
 		static const uint32 Colours[] = {0x101014u, 0xe8e8e8u, 0xa8171cu, 0x1b3f8bu, 0xb4b8bcu, 0x1d5c36u};
+		const Money Quote = Sim.PaintPrice(0);
 		for (int32 Index = 0; Index < static_cast<int32>(UE_ARRAY_COUNT(Names)); ++Index)
 		{
-			Rows.Add({Names[Index], FString::Printf(TEXT("%u"), Colours[Index]), Dollars(400)});
+			Rows.Add({FString::Printf(TEXT("%s  --  %s"), Names[Index], *Cash(Quote)),
+				FString::Printf(TEXT("%u"), Colours[Index]), Quote});
 		}
 		return Rows;
 	}
@@ -1253,7 +1269,8 @@ TArray<ADTGHud::FServiceRow> ADTGHud::ServiceRows() const
 void ADTGHud::RunServiceOption(int32 Index)
 {
 	GameState& Sim = Game->Sim();
-	const TArray<FServiceRow> Rows = ServiceRows();
+	// The rows the player was shown, not a fresh list that may have moved under them.
+	const TArray<FServiceRow> Rows = CachedRows;
 	if (Index < 0 || Index >= Rows.Num())
 	{
 		// The row past the end is "Back".
@@ -1267,7 +1284,25 @@ void ADTGHud::RunServiceOption(int32 Index)
 	}
 	const std::string Key = TCHAR_TO_UTF8(*Row.Key);
 	const FString& What = ServiceName;
+	const FString Chosen = Row.Key;
 	InvalidateOptions();
+	// Applying for a job takes it off the board, buying a house takes it off the list. Follow the row
+	// that was chosen to wherever it ends up, or to the one above it when it is gone, so the next
+	// press does not land on something else entirely.
+	ON_SCOPE_EXIT
+	{
+		const TArray<FServiceRow> After = ServiceRows();
+		int32 Moved = FMath::Min(Index, FMath::Max(0, After.Num() - 1));
+		for (int32 At = 0; At < After.Num(); ++At)
+		{
+			if (After[At].Key == Chosen)
+			{
+				Moved = At;
+				break;
+			}
+		}
+		Selection = Moved;
+	};
 
 	if (What == TEXT("Job board"))
 	{
@@ -1290,6 +1325,14 @@ void ADTGHud::RunServiceOption(int32 Index)
 		// so it is not in the garage and cannot be driven away for good.
 		if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
 		{
+			// One at a time. The last demonstrator goes back to the showroom.
+			for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+			{
+				if (It->OwnedUid().IsEmpty() && It->ParkedCarId().IsEmpty() && *It != Player->DrivingNow())
+				{
+					It->Destroy();
+				}
+			}
 			FActorSpawnParameters Params;
 			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 			if (ADTGVehicle* Demo = GetWorld()->SpawnActor<ADTGVehicle>(ADTGVehicle::StaticClass(), FTransform::Identity, Params))
@@ -1307,8 +1350,14 @@ void ADTGHud::RunServiceOption(int32 Index)
 	}
 	if (What == TEXT("Browse used cars") || What == TEXT("Browse classics") || What == TEXT("Used car lot"))
 	{
-		// Offer nine tenths of the asking price: the simulation decides whether they take it.
-		const HaggleResult Haggled = Sim.HaggleUsed(Key, (Row.Cost * 9) / 10);
+		// Nine tenths of the asking price, unless the lot does not haggle -- certified cars are sold at
+		// the posted price, and offering under it is refusing to buy the car.
+		bool bPosted = false;
+		for (const UsedListing& Listing : Sim.UsedCars.Listings())
+		{
+			bPosted = bPosted || (Listing.Id == Key && Listing.bNoHaggle);
+		}
+		const HaggleResult Haggled = Sim.HaggleUsed(Key, bPosted ? Row.Cost : (Row.Cost * 9) / 10);
 		OnNotice(Utf8(Haggled.Reply));
 		// A counter is a price they named, so taking it is the sale; walking away is not.
 		if (Haggled.Outcome != HaggleOutcome::WalkedAway)
@@ -1357,7 +1406,14 @@ void ADTGHud::RunServiceOption(int32 Index)
 	}
 	if (What == TEXT("Shop furniture"))
 	{
-		const int32 HomeId = Sim.Homes.OwnedProperties().empty() ? -1 : ContextId;
+		// Delivered to a home the player owns, not to the shop they are standing in.
+		if (Sim.Homes.OwnedProperties().empty())
+		{
+			OnNotice(TEXT("They'll need somewhere to deliver it. Buy a place first."));
+			return;
+		}
+		const std::string& Property = Sim.Homes.OwnedProperties().front();
+		const int32 HomeId = FCString::Atoi(*Utf8(Property).RightChop(5)); // "bldg-<id>"
 		OnNotice(Utf8(Sim.OrderFurniture({Key}, HomeId, DeliverySpeed::Standard).Message));
 		return;
 	}

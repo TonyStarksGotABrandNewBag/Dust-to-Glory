@@ -148,6 +148,15 @@ namespace dtg::sim
 		void HireLawyer() { OpenCase.bLawyer = true; }
 		/** Settles a fine-only matter at the window: it is paid, so there is nothing left to answer. */
 		void PayFine() { OpenCase = CourtCase(); }
+		/** Takes what was collected off what is owed; a fine paid in full leaves nothing behind. */
+		void ReduceFine(Money Paid)
+		{
+			OpenCase.Fine = OpenCase.Fine > Paid ? OpenCase.Fine - Paid : 0;
+			if (OpenCase.Fine <= 0)
+			{
+				OpenCase = CourtCase();
+			}
+		}
 		static Money LawyerFee(int TrialDays);
 		double ConvictionChance(int PeopleSkill) const;
 		/** The prosecutor's offer: the Nash bargain between the expected trial sentence, its cost and its risk. */

@@ -68,14 +68,14 @@ void ADTGSky::Tick(float DeltaSeconds)
 	if (Fraction > Sunrise && Fraction < Sunset)
 	{
 		const double Through = (Fraction - Sunrise) / (Sunset - Sunrise);
-		SunPitch = 72.0 * FMath::Sin(Through * PI);
+		SunPitch = 72.0 * FMath::Sin(Through * UE_PI);
 	}
 	else
 	{
 		// Below the horizon; the night side carries on so the moonless small hours are the darkest.
 		const double Through = Fraction >= Sunset ? (Fraction - Sunset) / (1.0 - Sunset + Sunrise)
 												  : (Fraction + 1.0 - Sunset) / (1.0 - Sunset + Sunrise);
-		SunPitch = -40.0 * FMath::Sin(Through * PI);
+		SunPitch = -40.0 * FMath::Sin(Through * UE_PI);
 	}
 	// South Carolina and Florida both face east, so the sun comes up over the Atlantic.
 	Sun->SetWorldRotation(FRotator(-SunPitch, 100.0 + Fraction * 200.0, 0.0));
