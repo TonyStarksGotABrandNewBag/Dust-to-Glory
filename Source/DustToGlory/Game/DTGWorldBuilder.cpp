@@ -8,6 +8,7 @@
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 
+#include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 
@@ -18,24 +19,23 @@ ADTGWorldBuilder::ADTGWorldBuilder()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 
-	Terrain = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Terrain"));
-	SetRootComponent(Terrain);
-	Terrain->bUseAsyncCooking = true;
-	Terrain->SetCollisionProfileName(TEXT("BlockAll"));
-	Terrain->SetCastShadow(true);
+	// The terrain is a pool of components created as chunks are needed (see TakeTerrainPart), so the
+	// root is a plain scene component and everything hangs off it.
+	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	SetRootComponent(Root);
 
 	Surfaces = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Surfaces"));
-	Surfaces->SetupAttachment(Terrain);
+	Surfaces->SetupAttachment(Root);
 	Surfaces->bUseAsyncCooking = true;
 	Surfaces->SetCollisionProfileName(TEXT("BlockAll"));
 
 	Buildings = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Buildings"));
-	Buildings->SetupAttachment(Terrain);
+	Buildings->SetupAttachment(Root);
 	Buildings->bUseAsyncCooking = true;
 	Buildings->SetCollisionProfileName(TEXT("BlockAll"));
 
 	Water = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Water"));
-	Water->SetupAttachment(Terrain);
+	Water->SetupAttachment(Root);
 	// Water is see-through and swum through, not stood on; vehicles test for it through the world builder.
 	Water->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
@@ -75,14 +75,16 @@ void ADTGWorldBuilder::AddSlab(FDTGMesh& Mesh, double MinX, double MinY, double 
 void ADTGWorldBuilder::Rebuild()
 {
 	// Switching states replaces the whole world, so everything standing has to go first.
-	Terrain->ClearAllMeshSections();
+	for (int32 Index = Chunks.Num() - 1; Index >= 0; --Index)
+	{
+		ReleaseChunk(Index);
+	}
 	Surfaces->ClearAllMeshSections();
 	Buildings->ClearAllMeshSections();
 	Water->ClearAllMeshSections();
 	Chunks.Reset();
-	FreeSections.Reset();
+	ChunkAt.Reset();
 	Pending.Reset();
-	NextSection = 0;
 	bBuilt = false;
 	if (Game && Game->IsContentLoaded())
 	{
@@ -353,7 +355,9 @@ void ADTGWorldBuilder::Tick(float DeltaSeconds)
 	{
 		if (const APawn* Pawn = Controller->GetPawn())
 		{
-			Around = Pawn->GetActorLocation();
+			// The car while driving, and the street outside while indoors -- interiors are a pocket
+			// far below the map, and streaming the ground around *that* would unload the whole state.
+			Around = ADTGCharacter::InterestPointFor(Pawn);
 		}
 		else
 		{
@@ -382,20 +386,15 @@ void ADTGWorldBuilder::UpdateChunks(const FVector& Around)
 			{
 				continue;
 			}
-			bool bHave = false;
-			for (FDTGTerrainChunk& Chunk : Chunks)
+			if (const int32* Found = ChunkAt.Find(FIntPoint(X, Y)))
 			{
-				if (Chunk.X == X && Chunk.Y == Y)
+				if (Chunks.IsValidIndex(*Found))
 				{
-					Chunk.LastSeen = Now;
-					bHave = true;
-					break;
+					Chunks[*Found].LastSeen = Now;
+					continue;
 				}
 			}
-			if (!bHave)
-			{
-				Pending.Add(FIntPoint(X, Y));
-			}
+			Pending.Add(FIntPoint(X, Y));
 		}
 	}
 	Pending.Sort([CentreX, CentreY](const FIntPoint& A, const FIntPoint& B)
@@ -472,46 +471,106 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 			Tris.Append({A, C, D, A, D, B});
 		}
 	}
-	// Normals from central differences of the heights already sampled above: evaluating the terrain again
-	// per vertex would cost four more full surface queries each.
+	// Normals from central differences, including one ring of heights outside the chunk. Clamping at the
+	// edge instead would give this chunk a one-sided difference and its neighbour the opposite one, and
+	// the same vertex would end up with two different normals: a lit crease along every chunk boundary.
 	Normals.Reserve(Verts.Num());
-	auto HeightOf = [&Verts, Cells, S](int32 I, int32 J)
+	TArray<double> Skirt;
+	Skirt.SetNumUninitialized((Cells + 3) * (Cells + 3));
+	for (int32 J = -1; J <= Cells + 1; ++J)
 	{
-		const int32 Ci = FMath::Clamp(I, 0, Cells);
-		const int32 Cj = FMath::Clamp(J, 0, Cells);
-		return Verts[Cj * (Cells + 1) + Ci].Z / S;
-	};
+		for (int32 I = -1; I <= Cells + 1; ++I)
+		{
+			const bool bInside = I >= 0 && I <= Cells && J >= 0 && J <= Cells;
+			Skirt[(J + 1) * (Cells + 3) + (I + 1)] = bInside
+				? Verts[J * (Cells + 1) + I].Z / S
+				: Map.SurfaceAt(OriginX + I * Spacing, OriginY + J * Spacing).GroundM;
+		}
+	}
+	const double Span = 2.0 * Spacing;
 	for (int32 J = 0; J <= Cells; ++J)
 	{
 		for (int32 I = 0; I <= Cells; ++I)
 		{
-			const double Dx = HeightOf(I + 1, J) - HeightOf(I - 1, J);
-			const double Dy = HeightOf(I, J + 1) - HeightOf(I, J - 1);
-			// At the chunk edge the clamp halves the span, so scale the step to match.
-			const double SpanX = (I == 0 || I == Cells) ? Spacing : 2.0 * Spacing;
-			const double SpanY = (J == 0 || J == Cells) ? Spacing : 2.0 * Spacing;
-			Normals.Add(FVector(-Dx * SpanY, -Dy * SpanX, SpanX * SpanY).GetSafeNormal());
+			const double Dx = Skirt[(J + 1) * (Cells + 3) + (I + 2)] - Skirt[(J + 1) * (Cells + 3) + I];
+			const double Dy = Skirt[(J + 2) * (Cells + 3) + (I + 1)] - Skirt[J * (Cells + 3) + (I + 1)];
+			Normals.Add(FVector(-Dx * Span, -Dy * Span, Span * Span).GetSafeNormal());
 		}
 	}
 
-	int32 Section = NextSection;
-	if (FreeSections.Num() > 0)
+	int32 Part = -1;
+	UProceduralMeshComponent* Mesh = TakeTerrainPart(Part);
+	if (!Mesh)
 	{
-		Section = FreeSections.Pop();
+		return;
 	}
-	else
-	{
-		++NextSection;
-	}
-	Terrain->CreateMeshSection_LinearColor(Section, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
-	Terrain->SetMaterial(Section, SurfaceMaterial());
+	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
+	Mesh->SetMaterial(0, SurfaceMaterial());
+	Mesh->SetVisibility(true);
 
 	FDTGTerrainChunk Chunk;
 	Chunk.X = ChunkX;
 	Chunk.Y = ChunkY;
-	Chunk.Section = Section;
+	Chunk.Part = Part;
 	Chunk.LastSeen = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	ChunkAt.Add(FIntPoint(ChunkX, ChunkY), Chunks.Num());
 	Chunks.Add(Chunk);
+}
+
+bool ADTGWorldBuilder::HasChunk(int32 ChunkX, int32 ChunkY) const
+{
+	return ChunkAt.Contains(FIntPoint(ChunkX, ChunkY));
+}
+
+UProceduralMeshComponent* ADTGWorldBuilder::TakeTerrainPart(int32& OutIndex)
+{
+	if (FreeParts.Num() > 0)
+	{
+		OutIndex = FreeParts.Pop();
+		return TerrainParts.IsValidIndex(OutIndex) ? TerrainParts[OutIndex].Get() : nullptr;
+	}
+	UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this);
+	if (!Mesh)
+	{
+		return nullptr;
+	}
+	Mesh->SetupAttachment(GetRootComponent());
+	Mesh->RegisterComponent();
+	Mesh->SetMobility(EComponentMobility::Movable);
+	// Cooked on the spot. A chunk is a few thousand triangles of its own now rather than a slice of the
+	// whole world, so this is cheap -- and async cooking would serve the *old* body setup for several
+	// frames, which means driving onto ground that is drawn but cannot be stood on.
+	Mesh->bUseAsyncCooking = false;
+	Mesh->SetCollisionProfileName(TEXT("BlockAll"));
+	// Wheels ride on the ground; car bodies are not supposed to crash into it. The body sweep uses its
+	// own channel so it can pass through terrain while still hitting walls, people and other cars.
+	Mesh->SetCollisionResponseToChannel(DTGBodySweepChannel, ECR_Ignore);
+	Mesh->SetCastShadow(true);
+	OutIndex = TerrainParts.Add(Mesh);
+	return Mesh;
+}
+
+void ADTGWorldBuilder::EnsureGroundAt(const FVector& Where)
+{
+	if (!Game || !Game->IsContentLoaded())
+	{
+		return;
+	}
+	const double ChunkUu = ChunkSizeM * DTGMetresToUnreal;
+	const int32 CentreX = FMath::FloorToInt(Where.X / ChunkUu);
+	const int32 CentreY = FMath::FloorToInt(Where.Y / ChunkUu);
+	// The chunk under the point and the eight around it, so walking a few paces in the first second
+	// does not walk off the edge of the only piece of ground that exists.
+	for (int32 Y = CentreY - 1; Y <= CentreY + 1; ++Y)
+	{
+		for (int32 X = CentreX - 1; X <= CentreX + 1; ++X)
+		{
+			if (!HasChunk(X, Y))
+			{
+				BuildChunk(X, Y);
+			}
+		}
+	}
 }
 
 void ADTGWorldBuilder::ReleaseChunk(int32 Index)
@@ -520,9 +579,21 @@ void ADTGWorldBuilder::ReleaseChunk(int32 Index)
 	{
 		return;
 	}
-	Terrain->ClearMeshSection(Chunks[Index].Section);
-	FreeSections.Add(Chunks[Index].Section);
+	if (TerrainParts.IsValidIndex(Chunks[Index].Part) && TerrainParts[Chunks[Index].Part])
+	{
+		// Kept and reused rather than destroyed: creating and registering a component is the expensive
+		// part, and the player will want this many again as soon as they turn round.
+		TerrainParts[Chunks[Index].Part]->ClearMeshSection(0);
+		TerrainParts[Chunks[Index].Part]->SetVisibility(false);
+		FreeParts.Add(Chunks[Index].Part);
+	}
+	ChunkAt.Remove(FIntPoint(Chunks[Index].X, Chunks[Index].Y));
 	Chunks.RemoveAtSwap(Index);
+	// RemoveAtSwap moved the last chunk into this slot, so its index in the map is now wrong.
+	if (Chunks.IsValidIndex(Index))
+	{
+		ChunkAt.Add(FIntPoint(Chunks[Index].X, Chunks[Index].Y), Index);
+	}
 }
 
 // ============================================================================================ Queries

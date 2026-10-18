@@ -72,6 +72,15 @@ private:
 	void DrawNotices();
 	void DrawMenu();
 	TArray<FString> BuildOptions() const;
+	/**
+	 * The option list, rebuilt at a few times a second rather than every frame.
+	 *
+	 * Building it is not free: a Jail screen quotes five escape plans, a Phone screen formats every
+	 * message in the inbox, and a Building screen looks the building up. None of that changes between
+	 * frames, and the player cannot act on it faster than this either.
+	 */
+	const TArray<FString>& Options() const;
+	void InvalidateOptions() { OptionsUntil = 0.0; }
 	void RunBuildingService(int32 Index);
 	void RunJailOption(int32 Index);
 	void RunCourtOption(int32 Index);
@@ -96,4 +105,8 @@ private:
 	FString LastReply;
 	int32 Selection = 0;
 	TArray<FNotice> Notices;
+	mutable TArray<FString> CachedOptions;
+	mutable double OptionsUntil = 0.0;
+	mutable EDTGScreen CachedFor = EDTGScreen::None;
+	mutable int32 CachedContext = -1;
 };

@@ -59,10 +59,13 @@ std::string UDTGGameSubsystem::ReadData(const FString& Name)
 const TArray<FString>& UDTGGameSubsystem::AvailableStates() const
 {
 	// Read from disk once: the front end asks for this every frame it is open.
-	if (!StateList.IsEmpty())
+	if (bStatesScanned)
 	{
 		return StateList;
 	}
+	// Keyed on having looked rather than on having found: an install with no state files would
+	// otherwise re-scan the data folder and every mod folder on every frame of the title screen.
+	bStatesScanned = true;
 	TArray<FString>& Found = StateList;
 	IPlatformFile& Platform = FPlatformFileManager::Get().GetPlatformFile();
 	auto Collect = [&Found, &Platform](const FString& Dir)
@@ -98,7 +101,9 @@ bool UDTGGameSubsystem::SwitchState(const FString& FileName, const FString& Play
 	}
 	bContentLoaded = true;
 	CurrentState = FileName;
-	StateList.Reset();
+	// Deliberately not clearing StateList here: callers pass a reference into it (the title screen
+	// picks a row out of the list the subsystem owns), and emptying it would free the string this
+	// call is still holding. The list is a directory listing, and switching state does not change it.
 	return StartNewGame(PlayerName);
 }
 

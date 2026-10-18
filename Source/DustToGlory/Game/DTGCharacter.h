@@ -80,16 +80,38 @@ public:
 	bool IsIndoors() const { return InsideBuildingId >= 0; }
 	int32 IndoorBuildingId() const { return InsideBuildingId; }
 
+	/**
+	 * Where the world should be built and populated around. That is wherever the player is, except
+	 * while they are indoors: interiors sit in a pocket half a million units below the map, so using
+	 * the raw location there would stream the whole state out, build a ring of empty chunks around the
+	 * pocket, and destroy every car and pedestrian in town -- all for stepping through a door.
+	 */
+	FVector InterestPoint() const { return InsideBuildingId >= 0 ? OutsideLocation : GetActorLocation(); }
+
+	/** The same, for whoever is holding the camera: the car when driving, otherwise the player. */
+	static FVector InterestPointFor(const APawn* Pawn);
+
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Interaction")
 	float ReachM = 3.0f;
 
+	/** How far the camera sits behind the player on foot, and behind the car when driving. */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Camera")
+	float WalkingBoomLength = 320.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Camera")
+	float DrivingBoomLength = 780.0f;
+
+	/** Ordinary walking speed, which super-speed goes back to when it runs out. */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Movement")
+	float WalkSpeed = 420.0f;
+
+private:
 	UPROPERTY()
 	TObjectPtr<USpringArmComponent> CameraBoom;
 
 	UPROPERTY()
 	TObjectPtr<UCameraComponent> Camera;
 
-private:
 	void UpdateFocus();
 
 	UPROPERTY()
@@ -104,6 +126,7 @@ private:
 	UPROPERTY()
 	TObjectPtr<UDTGBody> Body;
 
+	UPROPERTY()
 	FDTGInteraction Current;
 	int32 InsideBuildingId = -1;
 	double NextSwing = 0.0;

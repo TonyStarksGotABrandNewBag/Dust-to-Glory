@@ -217,6 +217,14 @@ namespace dtg::sim
 
 	const BuildingPlan* CityPlan::FindBuilding(int Id) const
 	{
+		// Through the id table when the plan has been indexed, which it has from the moment it is
+		// generated. The engine layer asks this several times a frame while a menu is open, and a
+		// state has tens of thousands of buildings.
+		if (Id >= 0 && Id < static_cast<int>(BuildingById.size()))
+		{
+			const int At = BuildingById[static_cast<std::size_t>(Id)];
+			return At >= 0 && At < static_cast<int>(Buildings.size()) ? &Buildings[static_cast<std::size_t>(At)] : nullptr;
+		}
 		for (const BuildingPlan& Building : Buildings)
 		{
 			if (Building.Id == Id)
@@ -307,7 +315,28 @@ namespace dtg::sim
 
 	void CityPlan::Index()
 	{
-		// One pass over everything, so the thousands of "what's near me?" questions after it are cheap.
+		// One pass over everything, so the thousands of "what's near me?" and "which one is id 4812?"
+		// questions after it are cheap.
+		auto ById = [](const auto& Items, std::vector<int>& Table, auto GetId)
+		{
+			int Highest = -1;
+			for (const auto& Item : Items)
+			{
+				Highest = GetId(Item) > Highest ? GetId(Item) : Highest;
+			}
+			Table.assign(static_cast<std::size_t>(Highest + 1), -1);
+			for (std::size_t Which = 0; Which < Items.size(); ++Which)
+			{
+				const int Id = GetId(Items[Which]);
+				if (Id >= 0)
+				{
+					Table[static_cast<std::size_t>(Id)] = static_cast<int>(Which);
+				}
+			}
+		};
+		ById(Buildings, BuildingById, [](const BuildingPlan& Building) { return Building.Id; });
+		ById(Intersections, NodeById, [](const Intersection& Node) { return Node.Id; });
+
 		auto Setup = [this](Grid& Target)
 		{
 			Target.OriginX = Bounds.MinX - CellSizeM;
@@ -435,8 +464,49 @@ namespace dtg::sim
 		return Best;
 	}
 
+	std::vector<const Intersection*> CityPlan::NodesNear(double X, double Y, double RadiusM) const
+	{
+		std::vector<const Intersection*> Found;
+		const double RadiusSq = RadiusM * RadiusM;
+		if (!NodeGrid.Ready())
+		{
+			for (const Intersection& Node : Intersections)
+			{
+				const double Dx = Node.X - X;
+				const double Dy = Node.Y - Y;
+				if (Dx * Dx + Dy * Dy <= RadiusSq)
+				{
+					Found.push_back(&Node);
+				}
+			}
+			return Found;
+		}
+		std::vector<int> Cells;
+		NodeGrid.CellsNear(X, Y, RadiusM, Cells);
+		for (const int Cell : Cells)
+		{
+			for (const int Which : NodeGrid.Cells[static_cast<std::size_t>(Cell)])
+			{
+				const Intersection& Node = Intersections[static_cast<std::size_t>(Which)];
+				const double Dx = Node.X - X;
+				const double Dy = Node.Y - Y;
+				if (Dx * Dx + Dy * Dy <= RadiusSq)
+				{
+					Found.push_back(&Node);
+				}
+			}
+		}
+		return Found;
+	}
+
 	const Intersection* CityPlan::FindIntersection(int Id) const
 	{
+		// Likewise: every car asks where it is driving to twice a frame.
+		if (Id >= 0 && Id < static_cast<int>(NodeById.size()))
+		{
+			const int At = NodeById[static_cast<std::size_t>(Id)];
+			return At >= 0 && At < static_cast<int>(Intersections.size()) ? &Intersections[static_cast<std::size_t>(At)] : nullptr;
+		}
 		for (const Intersection& Node : Intersections)
 		{
 			if (Node.Id == Id)

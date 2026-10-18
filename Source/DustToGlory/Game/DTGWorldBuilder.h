@@ -18,12 +18,21 @@ class UDTGGameSubsystem;
 class UMaterialInterface;
 class UProceduralMeshComponent;
 
-/** One streamed square of ground. Plain data: it holds nothing the garbage collector needs to see. */
+/**
+ * One streamed square of ground, and which of the terrain components is currently drawing it.
+ *
+ * Each chunk gets a component of its own rather than a section of one big one. A procedural mesh
+ * component re-cooks the collision for *all* of its sections and recreates its whole scene proxy every
+ * time any one section changes, so with one component a single arriving chunk paid for the entire
+ * streamed world -- twice a frame, every frame, for as long as the player kept moving.
+ *
+ * Plain data: the components are held in a UPROPERTY array, which is what the collector follows.
+ */
 struct FDTGTerrainChunk
 {
 	int32 X = 0;
 	int32 Y = 0;
-	int32 Section = -1;
+	int32 Part = -1;      // index into TerrainParts
 	double LastSeen = 0.0;
 };
 
@@ -38,8 +47,12 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** The streamed ground, which vehicles exclude from their body sweeps (their wheels ride on it). */
-	UProceduralMeshComponent* TerrainComponent() const { return Terrain; }
+	/**
+	 * Builds the ground under a point and its neighbours right now, rather than waiting for the streamer.
+	 * Used before the player is placed: a pawn spawned a metre above ground that has not arrived yet
+	 * falls through the world while it waits.
+	 */
+	void EnsureGroundAt(const FVector& Where);
 	/** Streets, highway decks and venue aprons: driven on, not driven into. */
 	UProceduralMeshComponent* SurfacesComponent() const { return Surfaces; }
 	/** Throws away everything built and builds it again: the state changed under us. */
@@ -76,13 +89,18 @@ private:
 	void UpdateChunks(const FVector& Around);
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);
+	/** True when that square of ground is already built. */
+	bool HasChunk(int32 ChunkX, int32 ChunkY) const;
+	/** A spare terrain component from the pool, or a new one. */
+	UProceduralMeshComponent* TakeTerrainPart(int32& OutIndex);
 	/** A flat, axis-aligned slab (streets, parking, venue aprons). */
 	void AddSlab(struct FDTGMesh& Mesh, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color);
 	/** The engine's vertex-colour material: every surface here carries its colour in its vertices. */
 	UMaterialInterface* SurfaceMaterial();
 
+	/** One component per live chunk, reused as the player moves. */
 	UPROPERTY()
-	TObjectPtr<UProceduralMeshComponent> Terrain;
+	TArray<TObjectPtr<UProceduralMeshComponent>> TerrainParts;
 
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Surfaces; // streets, highways, venue slabs: built once
@@ -102,7 +120,8 @@ private:
 
 	TArray<FDTGTerrainChunk> Chunks;
 	TArray<FIntPoint> Pending;
-	TArray<int32> FreeSections;
-	int32 NextSection = 0;
+	TArray<int32> FreeParts;
+	/** Chunk coordinates to index in Chunks, so "do I have this one" is not a scan of the whole ring. */
+	TMap<FIntPoint, int32> ChunkAt;
 	bool bBuilt = false;
 };

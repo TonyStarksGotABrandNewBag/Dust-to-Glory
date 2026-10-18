@@ -29,7 +29,7 @@ ADTGCharacter::ADTGCharacter()
 	{
 		Movement->bOrientRotationToMovement = true;
 		Movement->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
-		Movement->MaxWalkSpeed = 420.0f;
+		Movement->MaxWalkSpeed = WalkSpeed;
 		Movement->JumpZVelocity = 480.0f;
 		Movement->AirControl = 0.25f;
 	}
@@ -79,23 +79,35 @@ void ADTGCharacter::UpdateFocus()
 	}
 	const CityPlan& City = Game->Sim().City;
 	const FVector2D Here = Game->ToSim(GetActorLocation());
+	const double ReachSq = FMath::Square(ReachM * DTGMetresToUnreal);
+	// All three candidates are measured and the nearest wins. Taking the building the moment one was
+	// in reach meant a parked car -- which the traffic director puts three metres from a door, the same
+	// as the reach -- was almost always further away than the door beside it, so "Make an offer" could
+	// not be chosen at all, and neither could anyone standing on a shop front.
+	double Best = ReachSq;
 
 	// Every building has a door and a service list, so any of them can be walked into. The plan's own
 	// index answers this, rather than walking a state's worth of buildings every frame.
-	const BuildingPlan* Nearest = City.NearestBuilding(Here.X, Here.Y, ReachM);
-	if (Nearest)
+	const BuildingPlan* NearestDoor = City.NearestBuilding(Here.X, Here.Y, ReachM);
+	if (NearestDoor)
 	{
-		Current.BuildingId = Nearest->Id;
-		Current.Title = UTF8_TO_TCHAR(Nearest->Name.c_str());
-		const std::vector<std::string> Services = ServicesForRole(Nearest->Role);
-		Current.Prompt = Services.empty() ? TEXT("Enter") : UTF8_TO_TCHAR(Services.front().c_str());
-		return;
+		const FVector Door = Game->ToUnreal(NearestDoor->DoorX, NearestDoor->DoorY, 0.0);
+		const double Flat = FVector2D::DistSquared(FVector2D(Door.X, Door.Y),
+			FVector2D(GetActorLocation().X, GetActorLocation().Y));
+		if (Flat < Best)
+		{
+			Best = Flat;
+			Current.BuildingId = NearestDoor->Id;
+			Current.Title = UTF8_TO_TCHAR(NearestDoor->Name.c_str());
+			const std::vector<std::string> Services = ServicesForRole(NearestDoor->Role);
+			Current.Prompt = Services.empty() ? TEXT("Enter") : UTF8_TO_TCHAR(Services.front().c_str());
+		}
 	}
 
-	// A person, if one is closer than any car. Their mind id is on the actor as a tag.
+	// A person. Their mind id is on the actor as a tag.
 	ACharacter* NearestPerson = nullptr;
 	FString NearestMind;
-	double PersonBest = FMath::Square(ReachM * DTGMetresToUnreal);
+	double PersonBest = Best;
 	for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
 	{
 		if (*It == this || It->IsPlayerControlled())
@@ -120,17 +132,18 @@ void ADTGCharacter::UpdateFocus()
 	}
 	if (NearestPerson)
 	{
+		Best = PersonBest;
 		const NpcMind& Mind = Game->Sim().Npcs.GetOrCreate(TCHAR_TO_UTF8(*NearestMind));
+		Current = FDTGInteraction();
 		Current.Actor = NearestPerson;
 		Current.MindId = NearestMind;
 		Current.Title = UTF8_TO_TCHAR(Mind.Name.c_str());
 		Current.Prompt = TEXT("Talk");
-		return;
 	}
 
-	// Otherwise: a car parked at a house. Any of them can be asked after.
+	// A car: one parked at a house to ask after, or one of your own to get into.
 	ADTGVehicle* NearestCar = nullptr;
-	double CarBest = FMath::Square(ReachM * DTGMetresToUnreal);
+	double CarBest = Best;
 	for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
 	{
 		if (*It == Driving)
@@ -146,12 +159,28 @@ void ADTGCharacter::UpdateFocus()
 	}
 	if (NearestCar)
 	{
+		Current = FDTGInteraction();
 		Current.Actor = NearestCar;
 		Current.CarId = NearestCar->ParkedCarId();
 		const VehicleModel* Model = Game->Sim().Vehicles.FindModel(TCHAR_TO_UTF8(*NearestCar->ModelId()));
 		Current.Title = Model ? UTF8_TO_TCHAR(Model->DisplayName.c_str()) : NearestCar->ModelId();
 		Current.Prompt = NearestCar->OwnedUid().IsEmpty() ? TEXT("Make an offer") : TEXT("Get in");
 	}
+}
+
+FVector ADTGCharacter::InterestPointFor(const APawn* Pawn)
+{
+	if (const ADTGCharacter* Player = Cast<ADTGCharacter>(Pawn))
+	{
+		// While driving the character is hidden and left where they got in, so the car is the one that
+		// has actually moved; the world has to be built around it rather than around the kerb.
+		if (const ADTGVehicle* Car = Player->DrivingNow())
+		{
+			return Car->GetActorLocation();
+		}
+		return Player->InterestPoint();
+	}
+	return Pawn ? Pawn->GetActorLocation() : FVector::ZeroVector;
 }
 
 ADTGVehicle* ADTGCharacter::ToggleVehicle()
@@ -163,6 +192,10 @@ ADTGVehicle* ADTGCharacter::ToggleVehicle()
 		SetActorLocation(Driving->GetActorLocation() + Side + FVector(0.0f, 0.0f, 100.0f));
 		SetActorHiddenInGame(false);
 		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		// Back to a walking camera: close in, over the shoulder.
+		CameraBoom->TargetArmLength = WalkingBoomLength;
+		CameraBoom->SocketOffset = FVector(0.0f, 40.0f, 60.0f);
+		CameraBoom->bEnableCameraLag = false;
 		Driving->bPlayerDriven = false;
 		ADTGVehicle* Left = Driving;
 		Driving = nullptr;
@@ -178,6 +211,15 @@ ADTGVehicle* ADTGCharacter::ToggleVehicle()
 	Driving->bPlayerDriven = true;
 	SetActorHiddenInGame(true);
 	GetCharacterMovement()->SetMovementMode(MOVE_None);
+	// The hidden driver rides along inside the car and stays the view target, so the boom it already
+	// carries becomes the chase camera: pulled back behind the car, raised, and lagging a little so
+	// the view settles rather than snapping with every correction.
+	CameraBoom->TargetArmLength = DrivingBoomLength;
+	CameraBoom->SocketOffset = FVector(0.0f, 0.0f, 180.0f);
+	CameraBoom->bEnableCameraLag = true;
+	CameraBoom->CameraLagSpeed = 8.0f;
+	CameraBoom->bEnableCameraRotationLag = true;
+	CameraBoom->CameraRotationLagSpeed = 12.0f;
 	return Driving;
 }
 
@@ -368,12 +410,32 @@ void ADTGCharacter::UsePower(int32 Slot)
 	switch (Effect.Def->Effect)
 	{
 	case PowerEffect::Flight:
+	{
+		// Both of these change how the player moves and both have to be put back, or one keypress
+		// leaves them flying, or sprinting, for the rest of the game.
 		GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 		GetCharacterMovement()->MaxFlySpeed = static_cast<float>(600.0 * Effect.Potency);
+		FTimerHandle Landing;
+		GetWorldTimerManager().SetTimer(Landing, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			// Unless they are in a car by then, in which case the movement mode is not theirs to set.
+			if (!DrivingNow() && GetCharacterMovement()->MovementMode == MOVE_Flying)
+			{
+				GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+			}
+		}), static_cast<float>(FMath::Max(1.0, Effect.DurationS)), false);
 		break;
+	}
 	case PowerEffect::SuperSpeed:
-		GetCharacterMovement()->MaxWalkSpeed = static_cast<float>(420.0 * (1.0 + Effect.Potency));
+	{
+		GetCharacterMovement()->MaxWalkSpeed = WalkSpeed * static_cast<float>(1.0 + Effect.Potency);
+		FTimerHandle SlowDown;
+		GetWorldTimerManager().SetTimer(SlowDown, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+		}), static_cast<float>(FMath::Max(1.0, Effect.DurationS)), false);
 		break;
+	}
 	case PowerEffect::SuperStrength:
 	case PowerEffect::Telekinesis:
 	{

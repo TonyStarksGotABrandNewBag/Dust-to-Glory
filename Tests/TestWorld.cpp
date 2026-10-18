@@ -999,6 +999,37 @@ DTG_TEST(LookingAroundYouIsCheap)
 		}
 		EXPECT(City.NearestIntersection(X, Y) == Expected);
 	}
+
+	// And looking something up by id answers the same as walking the list, which is what the engine
+	// layer does several times a frame for every car on the road.
+	for (const BuildingPlan& Building : City.Buildings)
+	{
+		EXPECT(City.FindBuilding(Building.Id) == &Building);
+	}
+	for (const Intersection& Node : City.Intersections)
+	{
+		EXPECT(City.FindIntersection(Node.Id) == &Node);
+	}
+	EXPECT(City.FindBuilding(-1) == nullptr);
+	EXPECT(City.FindBuilding(999999) == nullptr);
+	EXPECT(City.FindIntersection(-5) == nullptr);
+	EXPECT(City.FindIntersection(999999) == nullptr);
+
+	// NodesNear, which the minimap draws from, against an exhaustive search.
+	for (int Probe = 0; Probe < 12; ++Probe)
+	{
+		const double X = Random.Range(City.Bounds.MinX, City.Bounds.MaxX);
+		const double Y = Random.Range(City.Bounds.MinY, City.Bounds.MaxY);
+		const double Radius = Random.Range(40.0, 400.0);
+		std::size_t Expected = 0;
+		for (const Intersection& Node : City.Intersections)
+		{
+			const double Dx = Node.X - X;
+			const double Dy = Node.Y - Y;
+			Expected += Dx * Dx + Dy * Dy <= Radius * Radius ? 1u : 0u;
+		}
+		EXPECT(City.NodesNear(X, Y, Radius).size() == Expected);
+	}
 }
 
 DTG_TEST(AskingTheSameQuestionTwiceWearsThin)

@@ -5,6 +5,7 @@
 #include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 
 #include "Game/DTGCharacter.h"
@@ -258,7 +259,12 @@ void ADTGEventDirector::UpdateRace(float DeltaSeconds)
 		// A derby is over for you when your car stops working, not when a lap ends.
 		if (Kind == EventKind::DemolitionDerby)
 		{
+			// Rolled over is finished, and so is being hit hard enough often enough -- a derby decided
+			// only by rollovers is a derby that never ends, because most hits do not roll a car.
 			Racer.Damage += Racer.Car->Chassis().IsCapsized() ? DeltaSeconds : 0.0;
+			const double Impact = Racer.Car->Chassis().State.Velocity.Length();
+			Racer.Damage += Racer.LastSpeed - Impact > 6.0 ? 1.2 : 0.0;
+			Racer.LastSpeed = Impact;
 			if (Racer.Damage > 4.0)
 			{
 				Racer.Finished = Now;
@@ -323,7 +329,10 @@ void ADTGEventDirector::UpdateRace(float DeltaSeconds)
 	}
 	const FDTGRacer* Player = Racers.FindByPredicate([](const FDTGRacer& Racer) { return Racer.bPlayer; });
 	const bool bPlayerDone = !Player || Player->Finished >= 0.0;
-	if (bPlayerDone || Running == 0 || (Kind == EventKind::DemolitionDerby && Running <= 1))
+	// Every event has an outside limit, so nothing can leave the player stuck in one: a derby where
+	// nobody manages to put anybody out, a racer wedged against a wall, a checkpoint never reached.
+	const bool bTimedOut = StartedAt > 0.0 && Now - StartedAt > EventLimitSeconds;
+	if (bPlayerDone || Running == 0 || bTimedOut || (Kind == EventKind::DemolitionDerby && Running <= 1))
 	{
 		Finish();
 	}
@@ -400,6 +409,13 @@ void ADTGEventDirector::UpdateSuperhumans(const FVector& Around)
 	if (!Person)
 	{
 		return;
+	}
+	// Nobody is controlling them, and an uncontrolled character's movement component does not run at
+	// all -- so without this they would hang in the air two metres above the road for as long as they
+	// existed, which is where they are spawned.
+	if (UCharacterMovementComponent* Legs = Person->GetCharacterMovement())
+	{
+		Legs->bRunPhysicsWithNoController = true;
 	}
 	// Registered only once they are standing somewhere, so a failed spawn leaves no ghost in the fight
 	// list. The simulation keeps them, so a fight uses their real codename, threat and bounty.

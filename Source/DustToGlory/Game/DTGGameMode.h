@@ -10,6 +10,7 @@
 class ADTGEventDirector;
 class ADTGTrafficDirector;
 class ADTGSky;
+class ADTGVehicle;
 class ADTGWeatherFx;
 class ADTGWorldBuilder;
 class UDTGGameSubsystem;
@@ -22,10 +23,18 @@ class DUSTTOGLORY_API ADTGGameMode : public AGameModeBase
 public:
 	ADTGGameMode();
 
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void StartPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
+
+	/**
+	 * Puts one of the player's own cars on the kerb at a spot, replacing whatever of theirs was already
+	 * standing there. An empty uid places the first car in the garage. This is what makes the garage
+	 * menu mean something: picking a car there brings that car to you.
+	 */
+	ADTGVehicle* PlaceOwnedCar(const FString& Uid, const FVector& Near);
 
 	/** Loads the named save instead of starting fresh. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dust to Glory")
@@ -43,7 +52,7 @@ private:
 	TObjectPtr<UDTGGameSubsystem> Game;
 
 	UPROPERTY()
-	TObjectPtr<ADTGWorldBuilder> World;
+	TObjectPtr<ADTGWorldBuilder> Builder;
 
 	UPROPERTY()
 	TObjectPtr<ADTGTrafficDirector> Traffic;

@@ -107,4 +107,5 @@ private:
 	TObjectPtr<UDTGGameSubsystem> Game;
 
 	double NextSpawn = 0.0;
+	double NextPoliceSpawn = 0.0;
 };

@@ -3,6 +3,7 @@
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
 #include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -121,14 +122,8 @@ void ADTGTrafficDirector::Tick(float DeltaSeconds)
 	}
 	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
 	const APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-	FVector Around = Pawn ? Pawn->GetActorLocation() : FVector::ZeroVector;
-	if (const ADTGCharacter* Player = Cast<ADTGCharacter>(Pawn))
-	{
-		if (const ADTGVehicle* Driving = Player->DrivingNow())
-		{
-			Around = Driving->GetActorLocation();
-		}
-	}
+	// The car while driving, the street outside while indoors, the player otherwise.
+	const FVector Around = ADTGCharacter::InterestPointFor(Pawn);
 	UpdateTraffic(Around, DeltaSeconds);
 	UpdatePolice(Around);
 	UpdatePedestrians(Around, DeltaSeconds);
@@ -146,7 +141,10 @@ void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSecond
 			Drivers.RemoveAtSwap(Index);
 			continue;
 		}
-		if (!Driver.bPolice && FVector::Dist(Driver.Car->GetActorLocation(), Around) > Despawn)
+		// Police hang on further than traffic -- a chase that unloads its pursuers is no chase -- but
+		// they do not hang on for ever, which is what kept every unit ever dispatched alive and ticking.
+		const double Keep = Driver.bPolice ? Despawn * 2.5 : Despawn;
+		if (FVector::Dist(Driver.Car->GetActorLocation(), Around) > Keep)
 		{
 			Driver.Car->Destroy();
 			Drivers.RemoveAtSwap(Index);
@@ -220,6 +218,15 @@ void ADTGTrafficDirector::UpdatePolice(const FVector& Around)
 	{
 		return;
 	}
+	// One unit at a time, like ordinary traffic. Without this the whole response arrives inside a few
+	// frames -- each one picking a model, building a chassis and generating a mesh -- which is both a
+	// visible hitch and a police force that teleports in rather than converging.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now < NextPoliceSpawn)
+	{
+		return;
+	}
+	NextPoliceSpawn = Now + 0.7;
 	if (ADTGVehicle* Car = SpawnCar(At + FVector(0.0f, 0.0f, 60.0f), 0.0, /*bPolice*/ true))
 	{
 		FDTGDriver Driver;
@@ -358,6 +365,15 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSe
 		if (!Person)
 		{
 			return;
+		}
+		// A character with no controller does not move: the movement component only runs for a locally
+		// controlled pawn, so AddMovementInput would be swallowed and gravity would never be applied --
+		// pedestrians frozen mid-stride and anything spawned above the ground left hanging there.
+		if (UCharacterMovementComponent* Legs = Person->GetCharacterMovement())
+		{
+			Legs->bRunPhysicsWithNoController = true;
+			Legs->MaxWalkSpeed = 160.0f;
+			Legs->bOrientRotationToMovement = false;
 		}
 		// Dressed after the mind id is known, so the same passer-by looks the same every time.
 		FDTGWalker Walker;

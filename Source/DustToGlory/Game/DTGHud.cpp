@@ -14,6 +14,7 @@
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGEventDirector.h"
+#include "Game/DTGGameMode.h"
 #include "Game/DTGInterior.h"
 #include "Game/DTGTrafficDirector.h"
 #include "Game/DTGVehicle.h"
@@ -130,10 +131,10 @@ void ADTGHud::DrawStatusBar()
 	Text(Clock, 16.0f, 8.0f, Dim);
 	Text(Cash(Sim.Funds.Balance()), 170.0f, 8.0f, Accent);
 	{
-		// Which town the player is actually standing in, not where they started.
+		// Which town the player is actually in, not where they started. While driving that is the
+		// car: the character is hidden back at the kerb they got in at and never moves.
 		const ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn());
-		const FVector At = Player ? Player->GetActorLocation() : FVector::ZeroVector;
-		const FVector2D Where = Game->ToSim(At);
+		const FVector2D Where = Game->ToSim(ADTGCharacter::InterestPointFor(Player));
 		const CityInfo* Here = Sim.City.CityAt(Where.X, Where.Y);
 		Text(Utf8(Here ? Here->Name : std::string("open country")), 320.0f, 8.0f, Dim);
 	}
@@ -231,8 +232,7 @@ void ADTGHud::DrawMinimap()
 {
 	const GameState& Sim = Game->Sim();
 	const ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn());
-	const FVector At = Player ? (Player->DrivingNow() ? Player->DrivingNow()->GetActorLocation() : Player->GetActorLocation()) : FVector::ZeroVector;
-	const FVector2D Here = Game->ToSim(At);
+	const FVector2D Here = Game->ToSim(ADTGCharacter::InterestPointFor(Player));
 
 	const float Size = 190.0f;
 	const float X = 16.0f;
@@ -251,20 +251,22 @@ void ADTGHud::DrawMinimap()
 		Out = FVector2D(X + Size * (0.5 + Dx), Y + Size * (0.5 + Dy));
 		return true;
 	};
-	for (const RoadPlan& Road : Sim.City.Roads)
+	// Only what is on the map. Walking the whole state's roads and buildings to draw two hundred
+	// metres of them was the most expensive thing the HUD did, every frame, for a 190-pixel square.
+	for (const Intersection* Node : Sim.City.NodesNear(Here.X, Here.Y, Span))
 	{
 		FVector2D Point;
-		if (Project(Road.Area.CenterX(), Road.Area.CenterY(), Point))
+		if (Node && Project(Node->X, Node->Y, Point))
 		{
 			Panel(Point.X - 1.0f, Point.Y - 1.0f, 3.0f, 3.0f, FLinearColor(0.45f, 0.45f, 0.5f, 0.9f));
 		}
 	}
-	for (const BuildingPlan& Building : Sim.City.Buildings)
+	for (const BuildingPlan* Building : Sim.City.BuildingsNear(Here.X, Here.Y, Span))
 	{
 		FVector2D Point;
-		if (Project(Building.DoorX, Building.DoorY, Point))
+		if (Building && Project(Building->DoorX, Building->DoorY, Point))
 		{
-			const FLinearColor Colour = IsResidential(Building.Role) ? FLinearColor(0.4f, 0.6f, 0.9f, 0.9f) : FLinearColor(0.8f, 0.75f, 0.6f, 0.9f);
+			const FLinearColor Colour = IsResidential(Building->Role) ? FLinearColor(0.4f, 0.6f, 0.9f, 0.9f) : FLinearColor(0.8f, 0.75f, 0.6f, 0.9f);
 			Panel(Point.X - 2.0f, Point.Y - 2.0f, 4.0f, 4.0f, Colour);
 		}
 	}
@@ -329,11 +331,26 @@ void ADTGHud::Close()
 
 void ADTGHud::MoveSelection(int32 Delta)
 {
-	const int32 Count = BuildOptions().Num();
+	const int32 Count = Options().Num();
 	if (Count > 0)
 	{
 		Selection = (Selection + Delta + Count) % Count;
 	}
+}
+
+const TArray<FString>& ADTGHud::Options() const
+{
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	// Rebuilt when the screen changes, when something told it to, or a few times a second anyway so a
+	// menu still reflects the world moving underneath it.
+	if (Now >= OptionsUntil || CachedFor != Current || CachedContext != ContextId)
+	{
+		CachedOptions = BuildOptions();
+		CachedFor = Current;
+		CachedContext = ContextId;
+		OptionsUntil = Now + 0.2;
+	}
+	return CachedOptions;
 }
 
 TArray<FString> ADTGHud::BuildOptions() const
@@ -469,9 +486,14 @@ TArray<FString> ADTGHud::BuildOptions() const
 
 void ADTGHud::DrawMenu()
 {
-	const TArray<FString> Options = BuildOptions();
+	const TArray<FString>& Rows = Options();
 	const float W = 720.0f;
-	const float H = FMath::Min(Canvas->SizeY - 120.0f, 120.0f + Options.Num() * 30.0f);
+	// How many rows actually fit between the title and the footer. A long list -- an inbox can hold a
+	// hundred messages -- scrolls inside that window rather than running off the bottom of the screen
+	// with the cursor somewhere nobody can see.
+	const int32 Fits = FMath::Max(1, FMath::FloorToInt32((Canvas->SizeY - 260.0f) / 30.0f));
+	const int32 Shown = FMath::Min(Rows.Num(), Fits);
+	const float H = 120.0f + Shown * 30.0f + (Rows.Num() > Fits ? 26.0f : 0.0f);
 	const float X = (Canvas->SizeX - W) * 0.5f;
 	const float Y = (Canvas->SizeY - H) * 0.5f;
 	Panel(X, Y, W, H, FLinearColor(0.02f, 0.02f, 0.03f, 0.93f));
@@ -547,16 +569,22 @@ void ADTGHud::DrawMenu()
 	{
 		Text(Subtitle, X + 24.0f, Y + 54.0f, Dim);
 	}
+	// The window follows the cursor, keeping it off the very edge where there is nothing to read ahead.
+	const int32 First = FMath::Clamp(Selection - Fits / 2, 0, FMath::Max(0, Rows.Num() - Fits));
 	float Row = Y + 90.0f;
-	for (int32 Index = 0; Index < Options.Num(); ++Index)
+	for (int32 Index = First; Index < FMath::Min(Rows.Num(), First + Fits); ++Index)
 	{
 		const bool bSelected = Index == Selection;
 		if (bSelected)
 		{
 			Panel(X + 16.0f, Row - 4.0f, W - 32.0f, 28.0f, FLinearColor(0.16f, 0.15f, 0.1f, 0.9f));
 		}
-		Text(Options[Index], X + 28.0f, Row, bSelected ? FLinearColor::White : Dim);
+		Text(Rows[Index], X + 28.0f, Row, bSelected ? FLinearColor::White : Dim);
 		Row += 30.0f;
+	}
+	if (Rows.Num() > Fits)
+	{
+		Text(FString::Printf(TEXT("%d of %d"), Selection + 1, Rows.Num()), X + 28.0f, Row + 2.0f, Dim, 0.9f);
 	}
 	if (Current == EDTGScreen::Talk && !LastReply.IsEmpty())
 	{
@@ -571,7 +599,7 @@ void ADTGHud::Choose(int32 Index)
 	{
 		return;
 	}
-	const int32 Count = BuildOptions().Num();
+	const int32 Count = Options().Num();
 	if (Count <= 0)
 	{
 		return;
@@ -608,9 +636,25 @@ void ADTGHud::Choose(int32 Index)
 		const std::vector<OwnedVehicle>& Cars = Game->Sim().Garage;
 		if (Selection < static_cast<int32>(Cars.size()))
 		{
-			// Picking a car makes it the one you drive.
+			// Picking a car brings it to you: the simulation remembers which one is yours, and the
+			// world puts that one on the kerb in place of whatever of yours was standing there.
+			const FString Uid = Utf8(Cars[static_cast<std::size_t>(Selection)].Uid);
 			Game->Sim().ActiveVehicleUid = Cars[static_cast<std::size_t>(Selection)].Uid;
-			OnNotice(TEXT("That's the one you'll be driving."));
+			ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn());
+			ADTGGameMode* Mode = Cast<ADTGGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+			if (Mode && Player)
+			{
+				if (Player->DrivingNow())
+				{
+					Player->ToggleVehicle(); // you cannot be sitting in the one being replaced
+				}
+				Mode->PlaceOwnedCar(Uid, Player->GetActorLocation());
+				OnNotice(TEXT("It's outside."));
+			}
+			else
+			{
+				OnNotice(TEXT("That's the one you'll be driving."));
+			}
 		}
 		break;
 	}
@@ -768,7 +812,8 @@ void ADTGHud::RunTitleOption(int32 Index)
 	default:
 	{
 		// Switching states rebuilds the world and starts a new life in it.
-		const TArray<FString>& States = Game->AvailableStates();
+		// Copied, not referenced: switching state is entitled to rebuild the list this came from.
+		const TArray<FString> States = Game->AvailableStates();
 		const int32 Which = Index - 5;
 		if (!States.IsValidIndex(Which) || States[Which] == Game->StateFile())
 		{
@@ -815,7 +860,15 @@ void ADTGHud::RestartWorld(bool bRebuildTerrain)
 	{
 		Events->Reset();
 	}
-	// Anything else still standing: the player's old car, a stray pedestrian.
+	// The player has to get out before their car is destroyed. ADTGCharacter::Driving is a UPROPERTY,
+	// so it keeps a destroyed actor alive and non-null for good -- the HUD would go on drawing frozen
+	// instruments for a car that no longer exists and never show the on-foot view again.
+	ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn());
+	if (Player && Player->DrivingNow())
+	{
+		Player->ToggleVehicle();
+	}
+	// Anything else still standing: the old cars, a stray pedestrian.
 	for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
 	{
 		It->Destroy();
@@ -834,12 +887,24 @@ void ADTGHud::RestartWorld(bool bRebuildTerrain)
 			Builder->Rebuild();
 		}
 	}
-	if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
+	const CityPlan& Town = Game->Sim().City;
+	const double GroundZ = Game->Sim().Map.HeightAt(Town.SpawnX, Town.SpawnY);
+	const FVector Start = Game->ToUnreal(Town.SpawnX, Town.SpawnY, GroundZ + 1.0);
+	if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
 	{
-		const CityPlan& World = Game->Sim().City;
-		const double GroundZ = Game->Sim().Map.HeightAt(World.SpawnX, World.SpawnY);
+		// Ground under the new start before anybody stands on it.
+		Builder->EnsureGroundAt(Start);
+	}
+	if (Player)
+	{
 		Player->LeaveBuilding();
-		Player->SetActorLocation(Game->ToUnreal(World.SpawnX, World.SpawnY, GroundZ + 1.0));
+		Player->SetActorLocation(Start);
+	}
+	// The simulation gives a new game a car; the world has to be given one too, or the player starts a
+	// fresh game owning a car that exists only in the garage menu.
+	if (ADTGGameMode* Mode = Cast<ADTGGameMode>(UGameplayStatics::GetGameMode(GetWorld())))
+	{
+		Mode->PlaceOwnedCar(Game->Sim().Garage.empty() ? FString() : Utf8(Game->Sim().Garage.front().Uid), Start);
 	}
 }
 

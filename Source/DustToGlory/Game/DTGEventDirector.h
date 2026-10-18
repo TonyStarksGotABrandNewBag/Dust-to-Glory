@@ -42,6 +42,7 @@ struct FDTGRacer
 	int32 Lap = 0;
 	double Finished = -1.0;
 	double Damage = 0.0;
+	double LastSpeed = 0.0;   // to notice a hit: speed lost suddenly is speed lost to something
 	FString Name;
 };
 
@@ -74,6 +75,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Events")
 	int32 DefaultField = 8;
+
+	/** However it is going, an event ends by here. Nothing may strand the player in one. */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Events")
+	float EventLimitSeconds = 420.0f;
 
 private:
 	void Stage(const dtg::sim::VenuePlan& Venue, int32 Tier);

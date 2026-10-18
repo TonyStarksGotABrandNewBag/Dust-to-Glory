@@ -107,6 +107,12 @@ void ADTGPlayerController::BuildInput()
 
 	// ---- Driving
 	DriveContext = NewObject<UInputMappingContext>(this, TEXT("IMC_Driving"));
+	// Menu navigation goes through MoveAction, so without these a screen opened from the car -- the
+	// phone, a building's services, the court -- has no way to move the highlight.
+	MapKey(DriveContext, MoveAction, EKeys::Up);
+	MapKey(DriveContext, MoveAction, EKeys::Down, /*bNegate*/ true);
+	MapKey(DriveContext, MoveAction, EKeys::Gamepad_DPad_Up);
+	MapKey(DriveContext, MoveAction, EKeys::Gamepad_DPad_Down, true);
 	MapKey(DriveContext, ThrottleAction, EKeys::W);
 	MapKey(DriveContext, ThrottleAction, EKeys::Gamepad_RightTriggerAxis);
 	MapKey(DriveContext, BrakeAction, EKeys::S);
@@ -227,14 +233,13 @@ void ADTGPlayerController::PlayerTick(float DeltaTime)
 	Input.Steer = FMath::Clamp(Steer, -1.0, 1.0);
 	Input.Handbrake = FMath::Clamp(Handbrake, 0.0, 1.0);
 	Car->SetDriverInput(Input);
-	// The hidden driver rides with the car, so getting out puts them back where the car is.
+	// The hidden driver rides with the car, so getting out puts them back where the car is -- and
+	// because they stay the view target, the boom they are carrying is the chase camera. Making the car
+	// itself the view target would put the view inside the car: it has no camera component of its own,
+	// so the engine would fall back to its eye height, which is a point inside the body shell.
 	if (Player && Player->DrivingNow() == Car)
 	{
 		Player->SetActorLocation(Car->GetActorLocation());
-		if (GetViewTarget() != Car)
-		{
-			SetViewTargetWithBlend(Car, 0.3f);
-		}
 	}
 }
 

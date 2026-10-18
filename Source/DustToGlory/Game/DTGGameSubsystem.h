@@ -14,7 +14,14 @@
 #include "DTGGameSubsystem.generated.h"
 
 /** Centimetres per simulation metre: the sim works in metres, Unreal in centimetres. */
-static constexpr double DTGMetresToUnreal = 100.0;
+inline constexpr double DTGMetresToUnreal = 100.0;
+
+/**
+ * The trace channel a car body sweeps on (see Config/DefaultEngine.ini). It blocks by default, so
+ * anything a car should crash into needs no setting up; the streamed terrain is the one thing that
+ * turns it off, because wheels ride on the ground and bodies are not meant to collide with it.
+ */
+inline constexpr ECollisionChannel DTGBodySweepChannel = ECC_GameTraceChannel1;
 
 /** Broadcast whenever the simulation posts a notification the player should see. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FDTGNotice, const FString&, Text);
@@ -84,5 +91,6 @@ private:
 	bool bContentLoaded = false;
 	FString CurrentState = TEXT("state.json");
 	mutable TArray<FString> StateList;
+	mutable bool bStatesScanned = false;
 	TArray<FString> Mods;
 };

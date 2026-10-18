@@ -202,7 +202,9 @@ namespace dtg::sim
 		const VenuePlan* FindVenue(EventKind Kind) const;
 		/** Nearest intersection to a point (for traffic and pedestrians). */
 		int NearestIntersection(double X, double Y) const;
+		/** By id, in constant time: the engine layer asks this once per car per frame. */
 		const Intersection* FindIntersection(int Id) const;
+
 		/** City containing a point ("" outside every city). */
 		const CityInfo* CityAt(double X, double Y) const;
 		const CityInfo* FindCity(const std::string& Name) const;
@@ -222,6 +224,8 @@ namespace dtg::sim
 		std::vector<const BuildingPlan*> BuildingsNear(double X, double Y, double RadiusM) const;
 		/** The nearest building door within Radius, or null. */
 		const BuildingPlan* NearestBuilding(double X, double Y, double RadiusM) const;
+		/** Road junctions within a radius, for anything that draws or searches a patch of the map. */
+		std::vector<const Intersection*> NodesNear(double X, double Y, double RadiusM) const;
 
 	private:
 		/** Cell -> indices into Buildings and Intersections. A cell is Index(x) + Index(y) * Stride. */
@@ -240,6 +244,12 @@ namespace dtg::sim
 		};
 		Grid BuildingGrid;
 		Grid NodeGrid;
+		/**
+		 * Id to index, for the two lookups that happen every frame rather than once: which building
+		 * is this, and where is this car driving to. Both were a scan of a state's worth of them.
+		 */
+		std::vector<int> BuildingById;
+		std::vector<int> NodeById;
 	};
 
 	CityPlan GenerateCity(const CityConfig& Config);

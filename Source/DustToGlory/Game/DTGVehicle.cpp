@@ -86,7 +86,11 @@ ADTGVehicle::ADTGVehicle()
 	Body->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Body->SetCollisionResponseToAllChannels(ECR_Overlap);
 	Body->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-	Body->SetGenerateOverlapEvents(true);
+	// So another car's body sweep, and anything else looking for solid things, finds this one.
+	Body->SetCollisionResponseToChannel(DTGBodySweepChannel, ECR_Block);
+	// Nothing subscribes to overlaps, and the car is teleported every frame by the chassis simulation,
+	// which would make the engine recompute the overlap set each time for nobody.
+	Body->SetGenerateOverlapEvents(false);
 
 	// The body and wheels are generated from the car's own dimensions (see DTGMeshBuilder), so no vehicle
 	// art ships with the game and every model in the catalog gets a shape of its own.
@@ -341,15 +345,16 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DTGBody), /*bTraceComplex*/ false, this);
 	if (World)
 	{
-		// The ground and the road are driven on, so the body box may overlap them; buildings, which belong
-		// to the same actor, are not.
-		Params.AddIgnoredComponent(World->TerrainComponent());
+		// Road surfaces are driven on, so the body box may overlap them. The terrain excludes itself
+		// from this channel; buildings, which belong to the same actor as the roads, do not.
 		Params.AddIgnoredComponent(World->SurfacesComponent());
 	}
 	FHitResult Hit;
 	const FQuat Rotation = ToUnrealQuat(Sim.State.Orientation);
 	const FCollisionShape Shape = FCollisionShape::MakeBox(Body->GetScaledBoxExtent() * 0.9f);
-	if (!CurrentWorld->SweepSingleByChannel(Hit, PreviousLocation, Target, Rotation, ECC_Visibility, Shape, Params))
+	// Its own channel rather than Visibility: the engine's Pawn profile ignores Visibility, so a car
+	// sweeping on it drives straight through every pedestrian in the state.
+	if (!CurrentWorld->SweepSingleByChannel(Hit, PreviousLocation, Target, Rotation, DTGBodySweepChannel, Shape, Params))
 	{
 		return;
 	}
@@ -370,7 +375,18 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 		// A real hit is property damage the police may hear about, and wear on the car.
 		Game->Sim().ReportCrime(Crime::PropertyDamage, false, true);
 	}
-	// Back the car out of whatever it hit by how far it went in, so the next sweep starts clear.
-	const double PushM = (Hit.PenetrationDepth > 0.0 ? Hit.PenetrationDepth : 2.0) / DTGMetresToUnreal;
-	Sim.State.Position += Normal * PushM;
+	// Stop where the sweep stopped. PenetrationDepth is zero for an ordinary blocking hit, so backing
+	// out by it left the car at the far end of the sweep -- inside the wall by however far it was
+	// travelling that frame, which at speed is half a metre a frame and gets worse, not better.
+	if (!Hit.bStartPenetrating)
+	{
+		const FVector Clear = Hit.Location + Hit.ImpactNormal * 2.0;
+		Sim.State.Position = Vec3(Clear.X / DTGMetresToUnreal, Clear.Y / DTGMetresToUnreal, Clear.Z / DTGMetresToUnreal);
+	}
+	else
+	{
+		// Already overlapping: push straight back out along the normal by how deep it is.
+		const double PushM = (Hit.PenetrationDepth > 0.0 ? Hit.PenetrationDepth : 2.0) / DTGMetresToUnreal;
+		Sim.State.Position += Normal * PushM;
+	}
 }

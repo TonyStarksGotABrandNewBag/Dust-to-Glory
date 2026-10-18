@@ -3,6 +3,7 @@
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -27,8 +28,15 @@ ADTGGameMode::ADTGGameMode()
 	HUDClass = ADTGHud::StaticClass();
 }
 
-void ADTGGameMode::StartPlay()
+void ADTGGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
+	Super::InitGame(MapName, Options, ErrorMessage);
+
+	// Everything the player's first frame depends on happens here rather than in StartPlay, because
+	// StartPlay runs *after* the pawn has been spawned. The engine's order is InitGame, then the actors
+	// are initialised, then Login and ChoosePlayerStart, and only then BeginPlay and StartPlay. Deciding
+	// where to put the player in StartPlay means ChoosePlayerStart has already read an empty SpawnPoint
+	// and dropped them at the world origin, which is sea level and generally under the ground.
 	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
 	if (Game && Game->IsContentLoaded())
 	{
@@ -43,11 +51,20 @@ void ADTGGameMode::StartPlay()
 		SpawnPoint = Game->ToUnreal(City.SpawnX, City.SpawnY, GroundZ + 1.0);
 	}
 
-	// The world is built before the player exists, so there is ground under them when they appear.
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	World = GetWorld()->SpawnActor<ADTGWorldBuilder>(ADTGWorldBuilder::StaticClass(), FTransform::Identity, Params);
+	Builder = GetWorld()->SpawnActor<ADTGWorldBuilder>(ADTGWorldBuilder::StaticClass(), FTransform::Identity, Params);
+	if (Builder)
+	{
+		// And the ground immediately under that point is built now, synchronously. The streamer fills
+		// the rest a couple of chunks a frame, which takes the best part of a second -- long enough for
+		// a player spawned a metre above nothing to fall through the world before it arrives.
+		Builder->EnsureGroundAt(SpawnPoint);
+	}
+}
 
+void ADTGGameMode::StartPlay()
+{
 	Super::StartPlay();
 
 	SpawnDirectors();
@@ -92,23 +109,66 @@ void ADTGGameMode::SpawnDirectors()
 
 void ADTGGameMode::SpawnStarterCar()
 {
+	PlaceOwnedCar(FString(), SpawnPoint);
+}
+
+ADTGVehicle* ADTGGameMode::PlaceOwnedCar(const FString& Uid, const FVector& Near)
+{
 	if (!Game || !Game->IsContentLoaded() || Game->Sim().Garage.empty())
 	{
-		return;
+		return nullptr;
 	}
-	const OwnedVehicle& Car = Game->Sim().Garage.front();
+	// The one asked for, or the first they own.
+	const OwnedVehicle* Car = &Game->Sim().Garage.front();
+	if (!Uid.IsEmpty())
+	{
+		const std::string Want = TCHAR_TO_UTF8(*Uid);
+		for (const OwnedVehicle& Owned : Game->Sim().Garage)
+		{
+			if (Owned.Uid == Want)
+			{
+				Car = &Owned;
+				break;
+			}
+		}
+	}
+	// Whatever of theirs is standing here already makes way: this is the same car being fetched, or
+	// the one it replaces, and two of the player's cars on one kerb helps nobody.
+	const FString Keep = UTF8_TO_TCHAR(Car->Uid.c_str());
+	for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+	{
+		if (!It->OwnedUid().IsEmpty() && It->OwnedUid() != Keep && !It->bPlayerDriven)
+		{
+			It->Destroy();
+		}
+	}
+	ADTGVehicle* Existing = nullptr;
+	for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+	{
+		if (It->OwnedUid() == Keep)
+		{
+			Existing = *It;
+			break;
+		}
+	}
+	// At the kerb, a few metres from the door.
+	const FVector At = Near + FVector(500.0f, 0.0f, 0.0f);
+	const double GroundZ = Builder ? Builder->GroundHeightAt(At) : At.Z;
+	if (Existing)
+	{
+		Existing->PlaceAt(FVector(At.X, At.Y, GroundZ), 90.0);
+		return Existing;
+	}
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	ADTGVehicle* Pawn = GetWorld()->SpawnActor<ADTGVehicle>(ADTGVehicle::StaticClass(), FTransform::Identity, Params);
 	if (!Pawn)
 	{
-		return;
+		return nullptr;
 	}
-	Pawn->ConfigureFromOwned(Car);
-	// At the kerb, a few metres from the door.
-	const FVector At = SpawnPoint + FVector(500.0f, 0.0f, 0.0f);
-	const double GroundZ = World ? World->GroundHeightAt(At) : At.Z;
+	Pawn->ConfigureFromOwned(*Car);
 	Pawn->PlaceAt(FVector(At.X, At.Y, GroundZ), 90.0);
+	return Pawn;
 }
 
 void ADTGGameMode::Tick(float DeltaSeconds)
