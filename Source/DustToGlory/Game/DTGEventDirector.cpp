@@ -2,14 +2,14 @@
 
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
 
 using namespace dtg::sim;
@@ -364,15 +364,7 @@ void ADTGEventDirector::UpdateSuperhumans(const FVector& Around)
 	{
 		return;
 	}
-	if (UStaticMesh* Cube = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"))))
-	{
-		UStaticMeshComponent* Mesh = NewObject<UStaticMeshComponent>(Person);
-		Mesh->SetStaticMesh(Cube);
-		Mesh->SetRelativeScale3D(FVector(0.5f, 0.5f, 1.9f));
-		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Mesh->SetupAttachment(Person->GetRootComponent());
-		Mesh->RegisterComponent();
-	}
+	DressPerson(Person, Who.Side == Alignment::Hero ? 1 : 2);
 #if !UE_BUILD_SHIPPING
 	UE_LOG(LogDTG, Verbose, TEXT("%s is around: threat %d, %s"), UTF8_TO_TCHAR(Who.Codename.c_str()), Who.Threat,
 		UTF8_TO_TCHAR(Who.Motive.c_str()));

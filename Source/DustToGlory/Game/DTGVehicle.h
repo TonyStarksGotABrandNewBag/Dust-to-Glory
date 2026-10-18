@@ -19,7 +19,7 @@ class ADTGWorldBuilder;
 class UBoxComponent;
 class UDTGEngineAudio;
 class UDTGGameSubsystem;
-class UStaticMeshComponent;
+class UProceduralMeshComponent;
 
 UCLASS()
 class DUSTTOGLORY_API ADTGVehicle : public APawn
@@ -77,10 +77,10 @@ private:
 	TObjectPtr<UBoxComponent> Body;
 
 	UPROPERTY()
-	TObjectPtr<UStaticMeshComponent> Shell;
+	TObjectPtr<UProceduralMeshComponent> Shell;
 
 	UPROPERTY()
-	TArray<TObjectPtr<UStaticMeshComponent>> WheelMeshes;
+	TArray<TObjectPtr<UProceduralMeshComponent>> WheelMeshes;
 
 	UPROPERTY()
 	TObjectPtr<UDTGEngineAudio> Audio;
@@ -97,6 +97,8 @@ private:
 	FString Model;
 	FString Uid;
 	FString ParkedId;
+	FLinearColor PaintColour = FLinearColor(0.5f, 0.5f, 0.52f);
+	FLinearColor RimColour = FLinearColor(0.55f, 0.55f, 0.57f);
 	int32 PendingShift = 0;
 	bool bSwamped = false;
 	double LengthM = 4.5;

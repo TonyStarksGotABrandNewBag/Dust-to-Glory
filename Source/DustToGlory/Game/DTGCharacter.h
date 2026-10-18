@@ -14,6 +14,7 @@
 
 #include "DTGCharacter.generated.h"
 
+class ADTGInterior;
 class ADTGVehicle;
 class UCameraComponent;
 class UDTGGameSubsystem;
@@ -64,6 +65,12 @@ public:
 	/** Uses one of the three power slots. Mutations and level-ups are reported through the subsystem. */
 	void UsePower(int32 Slot);
 
+	/** Steps inside a building (or back out of one). Returns true if the player moved. */
+	bool EnterBuilding(int32 BuildingId);
+	bool LeaveBuilding();
+	bool IsIndoors() const { return InsideBuildingId >= 0; }
+	int32 IndoorBuildingId() const { return InsideBuildingId; }
+
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Interaction")
 	float ReachM = 3.0f;
 
@@ -83,6 +90,11 @@ private:
 	TObjectPtr<ADTGVehicle> Driving;
 
 	UPROPERTY()
+	UPROPERTY()
+	TObjectPtr<ADTGInterior> Interior;
+
 	FDTGInteraction Current;
+	int32 InsideBuildingId = -1;
+	FVector OutsideLocation = FVector::ZeroVector;
 	double NextPowerTime[dtg::sim::PowerSet::SlotCount] = {};
 };

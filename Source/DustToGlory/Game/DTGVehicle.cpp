@@ -3,14 +3,14 @@
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
 #include "Components/BoxComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include "Game/DTGEngineAudio.h"
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGMeshBuilder.h"
 #include "Game/DTGWorldBuilder.h"
 
 using namespace dtg::sim;
@@ -57,6 +57,12 @@ namespace
 		return FQuat(Value.X, Value.Y, Value.Z, Value.W);
 	}
 
+	FLinearColor FromRgb(uint32 Rgb)
+	{
+		return FLinearColor(FColor(static_cast<uint8>((Rgb >> 16) & 0xFF), static_cast<uint8>((Rgb >> 8) & 0xFF),
+			static_cast<uint8>(Rgb & 0xFF)));
+	}
+
 	FVector ToUnrealVector(const Vec3& Value)
 	{
 		return FVector(Value.X * DTGMetresToUnreal, Value.Y * DTGMetresToUnreal, Value.Z * DTGMetresToUnreal);
@@ -75,26 +81,17 @@ ADTGVehicle::ADTGVehicle()
 	Body->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	Body->SetGenerateOverlapEvents(true);
 
-	// Through ConstructorHelpers, because this constructor also runs for the class default object.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-
-	Shell = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Shell"));
+	// The body and wheels are generated from the car's own dimensions (see DTGMeshBuilder), so no vehicle
+	// art ships with the game and every model in the catalog gets a shape of its own.
+	Shell = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Shell"));
 	Shell->SetupAttachment(Body);
 	Shell->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (CubeMesh.Succeeded())
-	{
-		Shell->SetStaticMesh(CubeMesh.Object);
-	}
+	Shell->SetRelativeLocation(FVector::ZeroVector);
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
-		UStaticMeshComponent* Wheel = CreateDefaultSubobject<UStaticMeshComponent>(*FString::Printf(TEXT("Wheel%d"), Index));
+		UProceduralMeshComponent* Wheel = CreateDefaultSubobject<UProceduralMeshComponent>(*FString::Printf(TEXT("Wheel%d"), Index));
 		Wheel->SetupAttachment(Body);
 		Wheel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		if (CylinderMesh.Succeeded())
-		{
-			Wheel->SetStaticMesh(CylinderMesh.Object);
-		}
 		WheelMeshes.Add(Wheel);
 	}
 
@@ -125,6 +122,8 @@ void ADTGVehicle::ConfigureFromOwned(const OwnedVehicle& Car)
 		WidthM = Def->WidthM;
 		HeightM = Def->HeightM;
 	}
+	PaintColour = FromRgb(Car.Build.PaintRgb);
+	RimColour = FromRgb(Car.Build.WheelRgb);
 	Sim.Configure(Setup, LengthM, WidthM, HeightM);
 	Sim.Dynamics().bAutomatic = Game->Sim().AutomaticGearbox();
 	// Worn-out cars make less power, just as they do in the simulation's own telemetry.
@@ -148,6 +147,10 @@ void ADTGVehicle::ConfigureFromModel(const FString& ModelId)
 		WidthM = Def->WidthM;
 		HeightM = Def->HeightM;
 	}
+	// Traffic gets a colour of its own, derived from the model id so the same car is always the same colour.
+	const uint32 Hash = GetTypeHash(ModelId);
+	PaintColour = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash & 0xFF), static_cast<uint8>(50 + (Hash >> 8) % 110), 185);
+	RimColour = FLinearColor(0.55f, 0.55f, 0.57f);
 	Sim.Configure(Setup, LengthM, WidthM, HeightM);
 	Sim.Dynamics().bAutomatic = true;
 	ApplyVisuals();
@@ -158,20 +161,31 @@ void ADTGVehicle::ApplyVisuals()
 {
 	const double S = DTGMetresToUnreal;
 	Body->SetBoxExtent(FVector(0.5 * LengthM * S, 0.5 * WidthM * S, 0.5 * HeightM * S), false);
+
+	UMaterialInterface* const Painted = Cast<UMaterialInterface>(
+		StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial")));
+
 	if (Shell)
 	{
-		// The engine cube is 100 uu a side and centred, so scale in metres and sit it on the body's middle.
-		Shell->SetRelativeScale3D(FVector(LengthM, WidthM, HeightM));
-		Shell->SetRelativeLocation(FVector::ZeroVector);
+		FDTGMesh Mesh;
+		DTGMeshBuilder::BuildCarBody(Setup.Body, LengthM, WidthM, HeightM, PaintColour, Mesh);
+		Shell->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
+		Shell->SetMaterial(0, Painted);
 	}
-	const double Radius = FMath::Max(0.2, Setup.FrontTire.RadiusM > 0.0 ? Setup.FrontTire.RadiusM : 0.32);
-	for (TObjectPtr<UStaticMeshComponent>& Wheel : WheelMeshes)
+	// Wheels sized from the tires actually fitted, so a car on bigger rubber looks like it.
+	const double FrontRadius = FMath::Max(0.2, Setup.FrontTire.RadiusM);
+	const double RearRadius = FMath::Max(0.2, Setup.RearTire.RadiusM);
+	const double TireWidth = FMath::Clamp(0.22 * WidthM, 0.16, 0.42);
+	for (int32 Index = 0; Index < WheelMeshes.Num(); ++Index)
 	{
-		if (Wheel)
+		if (!WheelMeshes[Index])
 		{
-			// The engine cylinder is 100 uu tall and 100 uu across, standing on Z: lay it on its side so it rolls.
-			Wheel->SetRelativeScale3D(FVector(2.0 * Radius, 2.0 * Radius, 0.25));
+			continue;
 		}
+		FDTGMesh Mesh;
+		DTGMeshBuilder::BuildWheel(Index < 2 ? FrontRadius : RearRadius, TireWidth, RimColour, Mesh);
+		WheelMeshes[Index]->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
+		WheelMeshes[Index]->SetMaterial(0, Painted);
 	}
 }
 
@@ -217,9 +231,9 @@ void ADTGVehicle::Tick(float DeltaSeconds)
 		}
 		const Vec3 Local = Wheels[static_cast<std::size_t>(Index)].CenterLocal();
 		WheelMeshes[Index]->SetRelativeLocation(FVector(Local.X * DTGMetresToUnreal, Local.Y * DTGMetresToUnreal, Local.Z * DTGMetresToUnreal));
-		const FRotator Rotation(FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SpinAngle), // pitch: rolling
-			FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SteerAngle),                     // yaw: steering
-			90.0);                                                                                           // roll: lay the cylinder over
+		// The generated wheel already lies on its side, so this is simply spin and steer.
+		const FRotator Rotation(FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SpinAngle),
+			FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SteerAngle), 0.0);
 		WheelMeshes[Index]->SetRelativeRotation(Rotation);
 	}
 

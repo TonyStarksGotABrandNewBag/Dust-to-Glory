@@ -10,10 +10,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 
+#include "Game/DTGMeshBuilder.h"
+
 #include "DTGWorldBuilder.generated.h"
 
 class UDTGGameSubsystem;
-class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UProceduralMeshComponent;
 
@@ -69,9 +70,9 @@ private:
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);
 	/** A flat, axis-aligned slab (streets, parking, venue aprons). */
-	void AddSlab(TArray<FVector>& Verts, TArray<int32>& Tris, TArray<FVector>& Normals, TArray<FVector2D>& Uvs,
-		TArray<FLinearColor>& Colors, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color);
-	UMaterialInterface* TintedMaterial(const FLinearColor& Color, const TCHAR* SlotName);
+	void AddSlab(struct FDTGMesh& Mesh, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color);
+	/** The engine's vertex-colour material: every surface here carries its colour in its vertices. */
+	UMaterialInterface* SurfaceMaterial();
 
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Terrain;
@@ -82,14 +83,15 @@ private:
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Water;
 
+	/** Building shells, one mesh section per town. */
 	UPROPERTY()
-	TMap<FName, TObjectPtr<UInstancedStaticMeshComponent>> BuildingMeshes; // one per lot role, tinted
+	TObjectPtr<UProceduralMeshComponent> Buildings;
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
 
 	UPROPERTY()
-	TMap<FString, TObjectPtr<UMaterialInterface>> Materials;
+	TObjectPtr<UMaterialInterface> Painted;
 
 	TArray<FDTGTerrainChunk> Chunks;
 	TArray<FIntPoint> Pending;

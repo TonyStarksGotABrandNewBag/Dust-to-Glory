@@ -1,31 +1,23 @@
 #include "Game/DTGWorldBuilder.h"
 
 #include "DustToGlory.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/GameInstance.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGMeshBuilder.h"
 
 using namespace dtg::sim;
 
 namespace
 {
-	/** The cube every building shell and slab instance is scaled from (100 uu on a side, centred). */
-	const TCHAR* const CubePath = TEXT("/Engine/BasicShapes/Cube.Cube");
-	const TCHAR* const BasicMaterialPath = TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial");
-
-	FLinearColor FromRgb(uint32 Rgb)
-	{
-		return FLinearColor(FColor(static_cast<uint8>((Rgb >> 16) & 0xFF), static_cast<uint8>((Rgb >> 8) & 0xFF),
-			static_cast<uint8>(Rgb & 0xFF)));
-	}
+	// Everything is drawn with the engine's vertex-colour material, so the colour baked into each vertex
+	// is what shows: no textures to ship and no materials to author.
+	const TCHAR* const VertexColorMaterialPath = TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial");
 }
 
 ADTGWorldBuilder::ADTGWorldBuilder()
@@ -43,6 +35,11 @@ ADTGWorldBuilder::ADTGWorldBuilder()
 	Surfaces->SetupAttachment(Terrain);
 	Surfaces->bUseAsyncCooking = true;
 	Surfaces->SetCollisionProfileName(TEXT("BlockAll"));
+
+	Buildings = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Buildings"));
+	Buildings->SetupAttachment(Terrain);
+	Buildings->bUseAsyncCooking = true;
+	Buildings->SetCollisionProfileName(TEXT("BlockAll"));
 
 	Water = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Water"));
 	Water->SetupAttachment(Terrain);
@@ -63,52 +60,26 @@ void ADTGWorldBuilder::BeginPlay()
 	bBuilt = true;
 }
 
-UMaterialInterface* ADTGWorldBuilder::TintedMaterial(const FLinearColor& Color, const TCHAR* SlotName)
+UMaterialInterface* ADTGWorldBuilder::SurfaceMaterial()
 {
-	const FString Key(SlotName);
-	if (const TObjectPtr<UMaterialInterface>* Found = Materials.Find(Key))
+	if (!Painted)
 	{
-		return Found->Get();
+		Painted = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, VertexColorMaterialPath));
+		if (!Painted)
+		{
+			UE_LOG(LogDTG, Warning, TEXT("No vertex-colour material at %s; the world will be untextured grey."), VertexColorMaterialPath);
+		}
 	}
-	UMaterialInterface* Base = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, BasicMaterialPath));
-	if (!Base)
-	{
-		return nullptr;
-	}
-	UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(Base, this);
-	if (Instance)
-	{
-		// BasicShapeMaterial exposes a single colour parameter.
-		Instance->SetVectorParameterValue(TEXT("Color"), Color);
-		Materials.Add(Key, Instance);
-	}
-	return Instance;
+	return Painted;
 }
 
 // ============================================================================================ Static world
 
-void ADTGWorldBuilder::AddSlab(TArray<FVector>& Verts, TArray<int32>& Tris, TArray<FVector>& Normals, TArray<FVector2D>& Uvs,
-	TArray<FLinearColor>& Colors, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color)
+void ADTGWorldBuilder::AddSlab(FDTGMesh& Mesh, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color)
 {
-	const int32 Base = Verts.Num();
 	const double S = DTGMetresToUnreal;
-	Verts.Add(FVector(MinX * S, MinY * S, Z * S));
-	Verts.Add(FVector(MaxX * S, MinY * S, Z * S));
-	Verts.Add(FVector(MaxX * S, MaxY * S, Z * S));
-	Verts.Add(FVector(MinX * S, MaxY * S, Z * S));
-	for (int32 Index = 0; Index < 4; ++Index)
-	{
-		Normals.Add(FVector::UpVector);
-		Colors.Add(Color);
-	}
-	const double TileU = FMath::Max(1.0, (MaxX - MinX) / 4.0);
-	const double TileV = FMath::Max(1.0, (MaxY - MinY) / 4.0);
-	Uvs.Add(FVector2D(0.0, 0.0));
-	Uvs.Add(FVector2D(TileU, 0.0));
-	Uvs.Add(FVector2D(TileU, TileV));
-	Uvs.Add(FVector2D(0.0, TileV));
-	// Wound so the face normal (UE's Cross(P2-P0, P1-P0)) points up, matching the normals above.
-	Tris.Append({Base, Base + 2, Base + 1, Base, Base + 3, Base + 2});
+	Mesh.AddQuad(FVector(MinX * S, MinY * S, Z * S), FVector(MaxX * S, MinY * S, Z * S), FVector(MaxX * S, MaxY * S, Z * S),
+		FVector(MinX * S, MaxY * S, Z * S), FVector::UpVector, Color);
 }
 
 void ADTGWorldBuilder::BuildStaticWorld()
@@ -124,62 +95,41 @@ void ADTGWorldBuilder::BuildTownStreets()
 {
 	const CityPlan& City = Game->Sim().City;
 	const StatePlan& Map = Game->Sim().Map;
-	TArray<FVector> Verts;
-	TArray<int32> Tris;
-	TArray<FVector> Normals;
-	TArray<FVector2D> Uvs;
-	TArray<FLinearColor> Colors;
-	TArray<FProcMeshTangent> Tangents;
-
 	const FLinearColor Asphalt(0.055f, 0.055f, 0.06f);
 	const FLinearColor Sidewalk(0.42f, 0.41f, 0.39f);
 	const FLinearColor Grass(0.16f, 0.27f, 0.11f);
-	// One section per surface, because each one is drawn with its own tinted material.
-	auto Flush = [&](int32 Section, const FLinearColor& Colour)
-	{
-		if (Verts.Num() > 0)
-		{
-			Surfaces->CreateMeshSection_LinearColor(Section, Verts, Tris, Normals, Uvs, Colors, Tangents, true);
-			Surfaces->SetMaterial(Section, TintedMaterial(Colour, *FString::Printf(TEXT("Surface%d"), Section)));
-		}
-		Verts.Reset();
-		Tris.Reset();
-		Normals.Reset();
-		Uvs.Reset();
-		Colors.Reset();
-	};
+
+	FDTGMesh Mesh;
 	for (const RoadPlan& Road : City.Roads)
 	{
 		// A street sits a hair above its town's pad so it reads as a surface, not z-fighting with the ground.
 		const double Z = Map.HeightAt(Road.Area.CenterX(), Road.Area.CenterY()) + 0.04;
-		AddSlab(Verts, Tris, Normals, Uvs, Colors, Road.Area.MinX, Road.Area.MinY, Road.Area.MaxX, Road.Area.MaxY, Z, Asphalt);
+		AddSlab(Mesh, Road.Area.MinX, Road.Area.MinY, Road.Area.MaxX, Road.Area.MaxY, Z, Asphalt);
 	}
-	Flush(0, Asphalt);
 	for (const Rect& Block : City.Blocks)
 	{
 		const double Z = Map.HeightAt(Block.CenterX(), Block.CenterY()) + 0.06;
-		AddSlab(Verts, Tris, Normals, Uvs, Colors, Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Z, Sidewalk);
+		AddSlab(Mesh, Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Z, Sidewalk);
 	}
-	Flush(3, Sidewalk);
 	for (const Rect& Park : City.Parks)
 	{
 		const double Z = Map.HeightAt(Park.CenterX(), Park.CenterY()) + 0.08;
-		AddSlab(Verts, Tris, Normals, Uvs, Colors, Park.MinX, Park.MinY, Park.MaxX, Park.MaxY, Z, Grass);
+		AddSlab(Mesh, Park.MinX, Park.MinY, Park.MaxX, Park.MaxY, Z, Grass);
 	}
-	Flush(4, Grass);
+	if (!Mesh.IsEmpty())
+	{
+		Surfaces->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
+		Surfaces->SetMaterial(0, SurfaceMaterial());
+	}
 }
 
 void ADTGWorldBuilder::BuildHighways()
 {
 	const CityPlan& City = Game->Sim().City;
-	TArray<FVector> Verts;
-	TArray<int32> Tris;
-	TArray<FVector> Normals;
-	TArray<FVector2D> Uvs;
-	TArray<FLinearColor> Colors;
-	TArray<FProcMeshTangent> Tangents;
 	const double S = DTGMetresToUnreal;
 	const FLinearColor Asphalt(0.06f, 0.06f, 0.065f);
+	const FLinearColor Line(0.65f, 0.63f, 0.5f);
+	FDTGMesh Mesh;
 
 	for (const HighwayPlan& Road : City.Highways)
 	{
@@ -188,12 +138,16 @@ void ADTGWorldBuilder::BuildHighways()
 		{
 			continue;
 		}
-		// Walk the road at the same spacing its deck heights were sampled at, so bridges and ramps come
+		// Walk the road at the spacing its deck heights were sampled at, so bridges and their ramps come
 		// through exactly as the simulation graded them.
 		const double Step = FMath::Max(2.0, Road.DeckStepM);
 		const int32 Steps = FMath::Max(1, FMath::CeilToInt(Length / Step));
 		const double Half = 0.5 * Road.WidthM;
-		int32 Previous = INDEX_NONE;
+		FVector PrevLeft = FVector::ZeroVector;
+		FVector PrevRight = FVector::ZeroVector;
+		FVector PrevInnerLeft = FVector::ZeroVector;
+		FVector PrevInnerRight = FVector::ZeroVector;
+		bool bHavePrevious = false;
 		for (int32 Index = 0; Index <= Steps; ++Index)
 		{
 			const double Along = FMath::Min(Length, Index * Step);
@@ -201,97 +155,100 @@ void ADTGWorldBuilder::BuildHighways()
 			const std::array<double, 3> Ahead = Road.At(FMath::Min(Length, Along + 1.0));
 			double DirX = Ahead[0] - Here[0];
 			double DirY = Ahead[1] - Here[1];
-			if (FMath::Abs(DirX) + FMath::Abs(DirY) < 1e-6 && Index > 0)
+			if (FMath::Abs(DirX) + FMath::Abs(DirY) < 1e-6)
 			{
 				const std::array<double, 3> Behind = Road.At(FMath::Max(0.0, Along - 1.0));
 				DirX = Here[0] - Behind[0];
 				DirY = Here[1] - Behind[1];
 			}
 			const double Len = FMath::Max(1e-6, FMath::Sqrt(DirX * DirX + DirY * DirY));
-			const double NormalX = -DirY / Len;
-			const double NormalY = DirX / Len;
-			const int32 Base = Verts.Num();
-			Verts.Add(FVector((Here[0] - NormalX * Half) * S, (Here[1] - NormalY * Half) * S, (Here[2] + 0.05) * S));
-			Verts.Add(FVector((Here[0] + NormalX * Half) * S, (Here[1] + NormalY * Half) * S, (Here[2] + 0.05) * S));
-			Normals.Add(FVector::UpVector);
-			Normals.Add(FVector::UpVector);
-			Colors.Add(Asphalt);
-			Colors.Add(Asphalt);
-			Uvs.Add(FVector2D(0.0, Along / 8.0));
-			Uvs.Add(FVector2D(1.0, Along / 8.0));
-			if (Previous != INDEX_NONE)
+			const double Nx = -DirY / Len;
+			const double Ny = DirX / Len;
+			const double Z = (Here[2] + 0.05) * S;
+			const FVector Left((Here[0] - Nx * Half) * S, (Here[1] - Ny * Half) * S, Z);
+			const FVector Right((Here[0] + Nx * Half) * S, (Here[1] + Ny * Half) * S, Z);
+			// A centre line, so a highway reads as a road rather than a grey ribbon.
+			const double LineHalf = 0.12;
+			const FVector InnerLeft((Here[0] - Nx * LineHalf) * S, (Here[1] - Ny * LineHalf) * S, Z + 1.0);
+			const FVector InnerRight((Here[0] + Nx * LineHalf) * S, (Here[1] + Ny * LineHalf) * S, Z + 1.0);
+			if (bHavePrevious)
 			{
-				Tris.Append({Previous, Previous + 1, Base + 1, Previous, Base + 1, Base});
+				Mesh.AddQuad(PrevLeft, Left, Right, PrevRight, FVector::UpVector, Asphalt);
+				if (Index % 2 == 0) // a dashed line
+				{
+					Mesh.AddQuad(PrevInnerLeft, InnerLeft, InnerRight, PrevInnerRight, FVector::UpVector, Line);
+				}
 			}
-			Previous = Base;
+			PrevLeft = Left;
+			PrevRight = Right;
+			PrevInnerLeft = InnerLeft;
+			PrevInnerRight = InnerRight;
+			bHavePrevious = true;
 		}
 	}
-	if (Verts.Num() > 0)
+	if (!Mesh.IsEmpty())
 	{
-		Surfaces->CreateMeshSection_LinearColor(1, Verts, Tris, Normals, Uvs, Colors, Tangents, true);
-		Surfaces->SetMaterial(1, TintedMaterial(FLinearColor(0.08f, 0.08f, 0.085f), TEXT("Highways")));
+		Surfaces->CreateMeshSection_LinearColor(1, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
+		Surfaces->SetMaterial(1, SurfaceMaterial());
 	}
 }
 
 void ADTGWorldBuilder::BuildBuildings()
 {
-	UStaticMesh* Cube = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, CubePath));
-	if (!Cube)
-	{
-		UE_LOG(LogDTG, Error, TEXT("Could not load %s; buildings will be missing."), CubePath);
-		return;
-	}
 	const CityPlan& City = Game->Sim().City;
 	const StatePlan& Map = Game->Sim().Map;
-	const double S = DTGMetresToUnreal;
-	for (const BuildingPlan& Building : City.Buildings)
-	{
-		// One instanced component per role: every shop shares a draw call, and the role decides the colour.
-		const FName Key(LotRoleName(Building.Role));
-		TObjectPtr<UInstancedStaticMeshComponent>* Found = BuildingMeshes.Find(Key);
-		if (!Found)
-		{
-			UInstancedStaticMeshComponent* Component = NewObject<UInstancedStaticMeshComponent>(this, Key);
-			Component->SetStaticMesh(Cube);
-			Component->SetMaterial(0, TintedMaterial(FromRgb(Building.ColorRgb), *Key.ToString()));
-			Component->SetCollisionProfileName(TEXT("BlockAll"));
-			Component->SetMobility(EComponentMobility::Movable);
-			Component->SetupAttachment(Terrain);
-			Component->RegisterComponent();
-			Found = &BuildingMeshes.Add(Key, Component);
-		}
-		const double Height = FMath::Max(3.0, Building.HeightM);
-		const double GroundZ = Map.HeightAt(Building.Footprint.CenterX(), Building.Footprint.CenterY());
-		const FVector Centre((Building.Footprint.CenterX()) * S, (Building.Footprint.CenterY()) * S, (GroundZ + 0.5 * Height) * S);
-		// The engine cube is 100 uu on a side, so scale is simply the size in metres.
-		const FVector Scale(Building.Footprint.Width(), Building.Footprint.Depth(), Height);
-		(*Found)->AddInstance(FTransform(FRotator::ZeroRotator, Centre, Scale), /*bWorldSpace*/ true);
-	}
+	// One mesh section per town: a town's worth of shells is a few thousand triangles, and keeping them
+	// apart means a section can be rebuilt later without touching the rest of the state.
+	int32 Section = 0;
 	int32 Total = 0;
-	for (const TPair<FName, TObjectPtr<UInstancedStaticMeshComponent>>& Pair : BuildingMeshes)
+	auto BuildRange = [&](const Rect* Bounds)
 	{
-		Total += Pair.Value->GetInstanceCount();
+		FDTGMesh Mesh;
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			if (Bounds && !Bounds->Contains(Building.Footprint.CenterX(), Building.Footprint.CenterY()))
+			{
+				continue;
+			}
+			const double GroundZ = Map.HeightAt(Building.Footprint.CenterX(), Building.Footprint.CenterY());
+			DTGMeshBuilder::BuildBuilding(Building, GroundZ, DTGMetresToUnreal, Mesh);
+			++Total;
+		}
+		if (!Mesh.IsEmpty())
+		{
+			Buildings->CreateMeshSection_LinearColor(Section, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
+			Buildings->SetMaterial(Section, SurfaceMaterial());
+			++Section;
+		}
+	};
+	if (City.Cities.empty())
+	{
+		BuildRange(nullptr);
 	}
-	UE_LOG(LogDTG, Log, TEXT("Placed %d building shells in %d roles"), Total, BuildingMeshes.Num());
+	else
+	{
+		for (const CityInfo& Town : City.Cities)
+		{
+			BuildRange(&Town.Bounds);
+		}
+	}
+	UE_LOG(LogDTG, Log, TEXT("Built %d building shells across %d sections"), Total, Section);
 }
 
 void ADTGWorldBuilder::BuildVenues()
 {
 	const CityPlan& City = Game->Sim().City;
 	const StatePlan& Map = Game->Sim().Map;
-	TArray<FVector> Verts;
-	TArray<int32> Tris;
-	TArray<FVector> Normals;
-	TArray<FVector2D> Uvs;
-	TArray<FLinearColor> Colors;
-	TArray<FProcMeshTangent> Tangents;
 	const FLinearColor Apron(0.21f, 0.2f, 0.19f);
 	const FLinearColor Track(0.05f, 0.05f, 0.055f);
+	const FLinearColor Stand(0.3f, 0.3f, 0.32f);
+	const double S = DTGMetresToUnreal;
+	FDTGMesh Mesh;
 	for (const VenuePlan& Venue : City.Venues)
 	{
 		const double Z = Map.HeightAt(Venue.Area.CenterX(), Venue.Area.CenterY());
-		AddSlab(Verts, Tris, Normals, Uvs, Colors, Venue.Area.MinX, Venue.Area.MinY, Venue.Area.MaxX, Venue.Area.MaxY, Z + 0.02, Apron);
-		// The racing surface itself follows the venue's centreline.
+		AddSlab(Mesh, Venue.Area.MinX, Venue.Area.MinY, Venue.Area.MaxX, Venue.Area.MaxY, Z + 0.02, Apron);
+		// The racing surface follows the venue's centreline.
 		const double Half = 0.5 * Venue.TrackWidthM;
 		for (std::size_t Index = 0; Index + 1 < Venue.Path.size(); ++Index)
 		{
@@ -302,48 +259,53 @@ void ADTGWorldBuilder::BuildVenues()
 			const double Len = FMath::Max(1e-6, FMath::Sqrt(Dx * Dx + Dy * Dy));
 			const double Nx = -Dy / Len * Half;
 			const double Ny = Dx / Len * Half;
-			const int32 Base = Verts.Num();
-			const double S = DTGMetresToUnreal;
-			Verts.Add(FVector((A[0] - Nx) * S, (A[1] - Ny) * S, (Z + 0.06) * S));
-			Verts.Add(FVector((A[0] + Nx) * S, (A[1] + Ny) * S, (Z + 0.06) * S));
-			Verts.Add(FVector((B[0] + Nx) * S, (B[1] + Ny) * S, (Z + 0.06) * S));
-			Verts.Add(FVector((B[0] - Nx) * S, (B[1] - Ny) * S, (Z + 0.06) * S));
-			for (int32 Corner = 0; Corner < 4; ++Corner)
-			{
-				Normals.Add(FVector::UpVector);
-				Colors.Add(Track);
-			}
-			Uvs.Append({FVector2D(0, 0), FVector2D(1, 0), FVector2D(1, Len / 8.0), FVector2D(0, Len / 8.0)});
-			Tris.Append({Base, Base + 1, Base + 2, Base, Base + 2, Base + 3});
+			Mesh.AddQuad(FVector((A[0] - Nx) * S, (A[1] - Ny) * S, (Z + 0.06) * S),
+				FVector((A[0] + Nx) * S, (A[1] + Ny) * S, (Z + 0.06) * S),
+				FVector((B[0] + Nx) * S, (B[1] + Ny) * S, (Z + 0.06) * S),
+				FVector((B[0] - Nx) * S, (B[1] - Ny) * S, (Z + 0.06) * S), FVector::UpVector, Track);
+		}
+		// Grandstands down the long side, so an event has somewhere for a crowd to be.
+		const double StandDepth = FMath::Min(14.0, Venue.Area.Depth() * 0.12);
+		for (int32 Tier = 0; Tier < 4; ++Tier)
+		{
+			const double Inset = Tier * StandDepth * 0.25;
+			Mesh.AddBox(FVector(Venue.Area.MinX * S, (Venue.Area.MinY - StandDepth + Inset) * S, (Z + Tier * 0.9) * S),
+				FVector(Venue.Area.MaxX * S, (Venue.Area.MinY - StandDepth + Inset + StandDepth * 0.25) * S, (Z + (Tier + 1) * 0.9) * S),
+				Stand);
 		}
 	}
-	if (Verts.Num() > 0)
+	if (!Mesh.IsEmpty())
 	{
-		Surfaces->CreateMeshSection_LinearColor(2, Verts, Tris, Normals, Uvs, Colors, Tangents, true);
-		Surfaces->SetMaterial(2, TintedMaterial(FLinearColor(0.18f, 0.18f, 0.18f), TEXT("Venues")));
+		Surfaces->CreateMeshSection_LinearColor(2, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
+		Surfaces->SetMaterial(2, SurfaceMaterial());
 	}
 }
 
 void ADTGWorldBuilder::BuildWater()
 {
 	const StatePlan& Map = Game->Sim().Map;
-	TArray<FVector> Verts;
-	TArray<int32> Tris;
-	TArray<FVector> Normals;
-	TArray<FVector2D> Uvs;
-	TArray<FLinearColor> Colors;
-	TArray<FProcMeshTangent> Tangents;
 	const FLinearColor Sea(0.02f, 0.09f, 0.16f);
 	const FLinearColor Fresh(0.05f, 0.14f, 0.15f);
+	const double S = DTGMetresToUnreal;
+	FDTGMesh Mesh;
 
 	// The ocean is one sheet at sea level, reaching well past the coast.
 	const Rect& Bounds = Map.Bounds;
 	const double Margin = 4000.0;
-	AddSlab(Verts, Tris, Normals, Uvs, Colors, Bounds.MinX - Margin, Bounds.MinY - Margin, Bounds.MaxX + Margin, Bounds.MaxY + Margin, 0.0, Sea);
+	AddSlab(Mesh, Bounds.MinX - Margin, Bounds.MinY - Margin, Bounds.MaxX + Margin, Bounds.MaxY + Margin, 0.0, Sea);
 	for (const StateLake& Lake : Map.Lakes)
 	{
-		AddSlab(Verts, Tris, Normals, Uvs, Colors, Lake.X - Lake.RadiusM, Lake.Y - Lake.RadiusM, Lake.X + Lake.RadiusM,
-			Lake.Y + Lake.RadiusM, Lake.LevelM, Fresh);
+		// A disc rather than a square, so a lake has a shoreline.
+		constexpr int32 Sides = 24;
+		for (int32 Side = 0; Side < Sides; ++Side)
+		{
+			const double A0 = 2.0 * PI * Side / Sides;
+			const double A1 = 2.0 * PI * (Side + 1) / Sides;
+			Mesh.AddQuad(FVector(Lake.X * S, Lake.Y * S, Lake.LevelM * S),
+				FVector((Lake.X + Lake.RadiusM * FMath::Cos(A0)) * S, (Lake.Y + Lake.RadiusM * FMath::Sin(A0)) * S, Lake.LevelM * S),
+				FVector((Lake.X + Lake.RadiusM * FMath::Cos(A1)) * S, (Lake.Y + Lake.RadiusM * FMath::Sin(A1)) * S, Lake.LevelM * S),
+				FVector(Lake.X * S, Lake.Y * S, Lake.LevelM * S), FVector::UpVector, Fresh);
+		}
 	}
 	for (const StateRiver& River : Map.Rivers)
 	{
@@ -357,26 +319,15 @@ void ADTGWorldBuilder::BuildWater()
 			const double Half = 0.5 * River.WidthM;
 			const double Nx = -Dy / Len * Half;
 			const double Ny = Dx / Len * Half;
-			const double S = DTGMetresToUnreal;
-			const int32 Base = Verts.Num();
 			const double ZA = FMath::Max(0.2, Map.NaturalHeight(A[0], A[1]) - 0.8);
 			const double ZB = FMath::Max(0.2, Map.NaturalHeight(B[0], B[1]) - 0.8);
-			Verts.Add(FVector((A[0] - Nx) * S, (A[1] - Ny) * S, ZA * S));
-			Verts.Add(FVector((A[0] + Nx) * S, (A[1] + Ny) * S, ZA * S));
-			Verts.Add(FVector((B[0] + Nx) * S, (B[1] + Ny) * S, ZB * S));
-			Verts.Add(FVector((B[0] - Nx) * S, (B[1] - Ny) * S, ZB * S));
-			for (int32 Corner = 0; Corner < 4; ++Corner)
-			{
-				Normals.Add(FVector::UpVector);
-				Colors.Add(Fresh);
-			}
-			Uvs.Append({FVector2D(0, 0), FVector2D(1, 0), FVector2D(1, Len / 10.0), FVector2D(0, Len / 10.0)});
-			Tris.Append({Base, Base + 1, Base + 2, Base, Base + 2, Base + 3});
+			Mesh.AddQuad(FVector((A[0] - Nx) * S, (A[1] - Ny) * S, ZA * S), FVector((A[0] + Nx) * S, (A[1] + Ny) * S, ZA * S),
+				FVector((B[0] + Nx) * S, (B[1] + Ny) * S, ZB * S), FVector((B[0] - Nx) * S, (B[1] - Ny) * S, ZB * S),
+				FVector::UpVector, Fresh);
 		}
 	}
-	Water->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, false);
-	Water->SetMaterial(0, TintedMaterial(Sea, TEXT("Water")));
-	(void)Fresh;
+	Water->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
+	Water->SetMaterial(0, SurfaceMaterial());
 }
 
 // ============================================================================================ Terrain streaming
@@ -544,7 +495,7 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 		++NextSection;
 	}
 	Terrain->CreateMeshSection_LinearColor(Section, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
-	Terrain->SetMaterial(Section, TintedMaterial(FLinearColor::White, TEXT("Ground")));
+	Terrain->SetMaterial(Section, SurfaceMaterial());
 
 	FDTGTerrainChunk Chunk;
 	Chunk.X = ChunkX;

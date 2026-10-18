@@ -303,8 +303,22 @@ void ADTGPlayerController::OnInteract()
 	const FDTGInteraction& Focus = Player->Focus();
 	if (Focus.BuildingId >= 0)
 	{
-		// Jail and court have their own screens; everything else opens its service list.
-		Hud->Open(EDTGScreen::Building, Focus.BuildingId);
+		if (Player->IsIndoors())
+		{
+			// At the door, this is the way out; anywhere else inside, it is the building's own menu.
+			if (Focus.Prompt == TEXT("Step outside"))
+			{
+				Player->LeaveBuilding();
+				return;
+			}
+			Hud->Open(EDTGScreen::Building, Focus.BuildingId);
+			return;
+		}
+		// Outside: walk in. Anything the building does is then on its menu.
+		if (!Player->EnterBuilding(Focus.BuildingId))
+		{
+			Hud->Open(EDTGScreen::Building, Focus.BuildingId);
+		}
 	}
 	else if (!Focus.CarId.IsEmpty())
 	{

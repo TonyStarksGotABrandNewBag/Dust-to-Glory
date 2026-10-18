@@ -10,6 +10,7 @@
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGInterior.h"
 #include "Game/DTGPlayerController.h"
 #include "Game/DTGVehicle.h"
 
@@ -303,6 +304,11 @@ TArray<FString> ADTGHud::BuildOptions() const
 			{
 				Options.Add(Utf8(Service));
 			}
+			const ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn());
+			if (Player && Player->IsIndoors())
+			{
+				Options.Add(TEXT("Step outside"));
+			}
 		}
 		break;
 	}
@@ -487,6 +493,16 @@ void ADTGHud::RunBuildingService(int32 Index)
 		return;
 	}
 	const std::vector<std::string> Services = ServicesForRole(Building->Role);
+	if (Index == static_cast<int32>(Services.size()))
+	{
+		// The extra row the menu adds while indoors.
+		if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
+		{
+			Player->LeaveBuilding();
+		}
+		Close();
+		return;
+	}
 	if (Index < 0 || Index >= static_cast<int32>(Services.size()))
 	{
 		return;

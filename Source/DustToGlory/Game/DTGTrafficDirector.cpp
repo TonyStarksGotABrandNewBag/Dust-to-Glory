@@ -3,14 +3,14 @@
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
 #include "Components/CapsuleComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
 
 using namespace dtg::sim;
@@ -359,15 +359,7 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSe
 		{
 			return;
 		}
-		if (UStaticMesh* Cube = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"))))
-		{
-			UStaticMeshComponent* Mesh = NewObject<UStaticMeshComponent>(Person);
-			Mesh->SetStaticMesh(Cube);
-			Mesh->SetRelativeScale3D(FVector(0.45f, 0.45f, 1.8f));
-			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Mesh->SetupAttachment(Person->GetRootComponent());
-			Mesh->RegisterComponent();
-		}
+		DressPerson(Person, FMath::Rand());
 		FDTGWalker Walker;
 		Walker.Actor = Person;
 		// Keyed to the block they live around, so the same passer-by remembers the player between visits.

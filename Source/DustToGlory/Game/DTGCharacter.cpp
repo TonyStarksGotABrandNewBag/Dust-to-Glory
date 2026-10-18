@@ -12,6 +12,7 @@
 #include "TimerManager.h"
 
 #include "Game/DTGGameSubsystem.h"
+#include "Game/DTGInterior.h"
 #include "Game/DTGVehicle.h"
 
 using namespace dtg::sim;
@@ -58,6 +59,18 @@ void ADTGCharacter::UpdateFocus()
 	Current = FDTGInteraction();
 	if (!Game || !Game->IsContentLoaded())
 	{
+		return;
+	}
+	if (InsideBuildingId >= 0)
+	{
+		// Indoors there is one thing in front of you: the door you came in through.
+		if (const BuildingPlan* Inside = Game->Sim().City.FindBuilding(InsideBuildingId))
+		{
+			Current.BuildingId = InsideBuildingId;
+			Current.Title = UTF8_TO_TCHAR(Inside->Name.c_str());
+			const bool bAtDoor = Interior && FVector::Dist(GetActorLocation(), Interior->ExitPoint()) < 300.0;
+			Current.Prompt = bAtDoor ? TEXT("Step outside") : TEXT("Look around");
+		}
 		return;
 	}
 	const CityPlan& City = Game->Sim().City;
@@ -137,6 +150,49 @@ ADTGVehicle* ADTGCharacter::ToggleVehicle()
 	SetActorHiddenInGame(true);
 	GetCharacterMovement()->SetMovementMode(MOVE_None);
 	return Driving;
+}
+
+bool ADTGCharacter::EnterBuilding(int32 TargetBuildingId)
+{
+	if (!Game || !Game->IsContentLoaded() || InsideBuildingId >= 0 || Driving)
+	{
+		return false;
+	}
+	if (!Interior)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Interior = GetWorld()->SpawnActor<ADTGInterior>(ADTGInterior::StaticClass(),
+			FTransform(FRotator::ZeroRotator, FVector(0.0, 0.0, ADTGInterior::PocketZ)), Params);
+	}
+	if (!Interior)
+	{
+		return false;
+	}
+	const FVector Stand = Interior->Open(TargetBuildingId);
+	if (Stand.IsNearlyZero())
+	{
+		return false;
+	}
+	OutsideLocation = GetActorLocation();
+	InsideBuildingId = TargetBuildingId;
+	SetActorLocation(Stand, /*bSweep*/ false);
+	return true;
+}
+
+bool ADTGCharacter::LeaveBuilding()
+{
+	if (InsideBuildingId < 0)
+	{
+		return false;
+	}
+	InsideBuildingId = -1;
+	if (Interior)
+	{
+		Interior->Close();
+	}
+	SetActorLocation(OutsideLocation, /*bSweep*/ false);
+	return true;
 }
 
 void ADTGCharacter::UsePower(int32 Slot)
