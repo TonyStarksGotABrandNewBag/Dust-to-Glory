@@ -100,6 +100,14 @@ namespace dtg::sim
 		std::uint32_t ColorRgb = 0x8090A0;
 		/** Signature engine for performance models ("Flat6", "Rotary", "I6", "V12"...), empty for none. */
 		std::string SignatureEngine;
+		/** Brands sold side by side share a showroom (e.g. a truck brand and its sister luxury brand). */
+		std::string DealerGroup;
+		/** False for race-only outfits; defunct brands also have no showroom (their cars turn up used). */
+		bool bDealer = true;
+
+		/** Showroom id: the dealer group, or the brand itself. */
+		const std::string& ShowroomId() const { return DealerGroup.empty() ? Id : DealerGroup; }
+		bool HasShowroom(int Year) const { return bDealer && (Defunct == 0 || Defunct >= Year); }
 	};
 
 	/** A model line that runs across several generations, e.g. a sedan sold from 1962 to today. */
@@ -112,6 +120,10 @@ namespace dtg::sim
 		int FirstYear = 1970;
 		int LastYear = 0;            // 0 = still in production
 		int GenerationYears = 7;
+		/** Exact model years each generation launched, when known; overrides GenerationYears. */
+		std::vector<int> GenerationStarts;
+		/** Last year of each generation when it didn't run until the next one (gaps in production); 0 = until next. */
+		std::vector<int> GenerationEnds;
 		double Tier = 0.5;           // 0 entry level .. 1 flagship within its segment
 		int ElectricFrom = 0;        // generations starting this year or later are electric, 0 = never
 		bool bEventOnly = false;     // race machinery: not sold at dealerships
@@ -165,7 +177,11 @@ namespace dtg::sim
 		double ZeroTo100S = 9.0;
 
 		Money Msrp = 0;              // launch price in today's money
-		Money MarketPrice = 0;       // what it costs at the dealership now
+		Money MarketPrice = 0;       // what a good example is worth now (new price for current models)
+		int AgeYears = 0;            // years since this generation ended (0 = on sale now)
+		bool IsCurrent() const { return AgeYears == 0; }
+		/** 25+ years old: collector territory, where condition and originality drive the price. */
+		bool IsClassic() const { return AgeYears >= 25; }
 	};
 
 	/** Brands + nameplates expanded into every generation ever built. */

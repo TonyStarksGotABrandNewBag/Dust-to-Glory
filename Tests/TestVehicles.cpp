@@ -348,15 +348,15 @@ DTG_TEST(EngineSoundIsBoundedAndCharacterful)
 DTG_TEST(UsedCarsHaveFaultsAndFlip)
 {
 	GameState State = dtg_test::FreshGame(7);
-	EXPECT(State.UsedCars.Listings().size() == 10);
+	EXPECT(State.UsedCars.Stock(DealerKind::UsedLot).size() == 10);
 	State.Funds.Deposit(Dollars(200000), MoneyCategory::Other, "test", 0);
 	State.Player.AddSkillXp(Skill::Trades, 2500);
 	const UsedListing* Pick = nullptr;
-	for (const UsedListing& Listing : State.UsedCars.Listings())
+	for (const UsedListing* Listing : State.UsedCars.Stock(DealerKind::UsedLot))
 	{
-		if (!Listing.Issues.empty() && (!Pick || Listing.Issues.size() > Pick->Issues.size()))
+		if (!Listing->Issues.empty() && (!Pick || Listing->Issues.size() > Pick->Issues.size()))
 		{
-			Pick = &Listing;
+			Pick = Listing;
 		}
 	}
 	EXPECT(Pick != nullptr);
@@ -400,4 +400,164 @@ DTG_TEST(FaultsHurtDriving)
 	EXPECT(Worn.Engine.PeakPowerKw < Healthy.Engine.PeakPowerKw);
 	EXPECT(Worn.Brakes.MaxTorqueFront < Healthy.Brakes.MaxTorqueFront);
 	EXPECT(Worn.FrontTire.Mu < Healthy.FrontTire.Mu);
+}
+
+DTG_TEST(NewCarsAreCurrentModelsWithWarranty)
+{
+	GameState State = dtg_test::FreshGame(41);
+	State.Funds.Deposit(Dollars(500000), MoneyCategory::Other, "test", 0);
+	const VehicleModel* Old = nullptr;
+	const VehicleModel* Current = nullptr;
+	for (const VehicleModel& Model : State.Vehicles.Models())
+	{
+		if (Model.BrandId == "ardent" && Model.Nameplate == "Stallion")
+		{
+			if (Model.IsClassic() && !Old) Old = &Model;
+			if (Model.IsCurrent()) Current = &Model;
+		}
+	}
+	EXPECT(Old && Current);
+	if (!Old || !Current) return;
+	EXPECT(!State.BuyVehicle(Old->Id).bOk);
+	EXPECT(State.BuyVehicle(Current->Id).bOk);
+	OwnedVehicle* Car = State.FindOwned(State.ActiveVehicleUid);
+	EXPECT(Car && Car->UnderWarranty(State.Clock.TotalMinutes()));
+	if (!Car) return;
+	Car->Issues.push_back(CarIssue::SlippingTransmission);
+	const Money Before = State.Funds.Balance();
+	EXPECT(State.RepairAtShop(Car->Uid, CarIssue::SlippingTransmission).bOk);
+	EXPECT(State.Funds.Balance() == Before); // covered
+}
+
+DTG_TEST(CertifiedPreOwnedAndLocatingAnyModel)
+{
+	GameState State = dtg_test::FreshGame(42);
+	State.Funds.Deposit(Dollars(500000), MoneyCategory::Other, "test", 0);
+	const auto Cpo = State.UsedCars.Stock(DealerKind::Certified, "ardent");
+	EXPECT(!Cpo.empty());
+	if (Cpo.empty()) return;
+	const UsedListing Listing = *Cpo.front();
+	const VehicleModel* Model = State.Vehicles.FindModel(Listing.ModelId);
+	EXPECT(Model && Model->BrandId == "ardent" && Model->AgeYears <= 6);
+	EXPECT(Listing.Issues.empty() && Listing.Condition >= 0.88);
+	// Posted price: a lowball isn't negotiated.
+	EXPECT(State.HaggleUsed(Listing.Id, Listing.AskingPrice / 2).Outcome == HaggleOutcome::WalkedAway);
+	EXPECT(State.BuyUsed(Listing.Id, Listing.AskingPrice).bOk);
+	const OwnedVehicle* Car = State.FindOwned(State.ActiveVehicleUid);
+	EXPECT(Car && Car->bCertified && Car->UnderWarranty(State.Clock.TotalMinutes()));
+
+	// Any model the brand ever built can be tracked down, even from 1908.
+	const VehicleModel* Ancient = nullptr;
+	for (const VehicleModel& Candidate : State.Vehicles.Models())
+	{
+		if (Candidate.BrandId == "ardent" && Candidate.YearStart < 1930) Ancient = &Candidate;
+	}
+	EXPECT(Ancient != nullptr);
+	if (!Ancient) return;
+	EXPECT(State.LocateModel("ardent", Ancient->Id).bOk);
+	EXPECT(!State.LocateModel("bannerman", Ancient->Id).bOk);
+	EXPECT(State.UsedCars.Stock(DealerKind::Located, "ardent").size() == 1);
+	// Defunct brands have no showroom; their cars turn up at the classic dealer and used lots.
+	EXPECT(State.BrandsAtShowroom("packwell").empty());
+	EXPECT(State.UsedCars.Stock(DealerKind::Classic).size() == 14);
+}
+
+DTG_TEST(ClassicsRestorationsAndRestoMods)
+{
+	GameState State = dtg_test::FreshGame(43);
+	State.Funds.Deposit(Dollars(2000000), MoneyCategory::Other, "test", 0);
+	const VehicleModel* Muscle = nullptr;
+	for (const VehicleModel& Model : State.Vehicles.Models())
+	{
+		if (Model.BrandId == "pilgrim" && Model.Nameplate == "Swordfish" && Model.YearStart == 1970) Muscle = &Model;
+	}
+	EXPECT(Muscle != nullptr && Muscle->IsClassic());
+	if (!Muscle) return;
+	// Condition drives classic prices hard.
+	const double Project = ToDollars(MarketValue(*Muscle, 0.3, 150000.0, {}));
+	const double Driver = ToDollars(MarketValue(*Muscle, 0.7, 150000.0, {}));
+	const double Concours = ToDollars(MarketValue(*Muscle, 1.0, 150000.0, {}));
+	EXPECT(Concours > 3.0 * Project);
+	EXPECT(Driver > Project && Concours > Driver);
+	// Classics appreciate: a 1970 muscle car is worth more than its launch price.
+	EXPECT(Muscle->MarketPrice > Muscle->Msrp);
+
+	const std::string Uid = State.GrantVehicle(Muscle->Id);
+	OwnedVehicle* Car = State.FindOwned(Uid);
+	Car->Condition = 0.3;
+	Car->Issues = {CarIssue::Rust, CarIssue::WornEngine, CarIssue::FadedPaint};
+	Car->Build.Install(State.Parts, *State.Parts.Find("wing-gt"));
+	const RestorationQuote Concourse = State.QuoteRestore(Uid, RestorationLevel::Concours, false);
+	EXPECT(Concourse.bAllowed);
+	EXPECT(Concourse.ValueAfter > 2 * Concourse.ValueBefore);
+	EXPECT(Concourse.DiyParts < Concourse.ShopCost);
+	EXPECT(State.RestoreAtShop(Uid, RestorationLevel::Concours, false).bOk);
+	Car = State.FindOwned(Uid);
+	EXPECT(Car->Issues.empty() && Car->Build.Parts.empty() && Car->Condition > 0.95);
+	EXPECT(Car->InShop(State.Clock.TotalMinutes()));
+	EXPECT(Car->Restoration == RestorationLevel::Concours);
+
+	// A second car becomes a resto-mod with a crate engine, and drives like a modern car.
+	const std::string ModUid = State.GrantVehicle(Muscle->Id);
+	OwnedVehicle* Mod = State.FindOwned(ModUid);
+	Mod->Condition = 0.5;
+	const VehicleSetup Stock = State.SetupForOwned(*Mod);
+	const RestorationQuote RestoMod = State.QuoteRestore(ModUid, RestorationLevel::RestoMod, true);
+	EXPECT(RestoMod.bAllowed && RestoMod.PartsFitted.size() == 5);
+	State.Player.AddSkillXp(Skill::Trades, 4000);
+	EXPECT(State.RestoreDiy(ModUid, RestorationLevel::RestoMod, true, 1.0).bOk);
+	Mod = State.FindOwned(ModUid);
+	EXPECT(Mod->Restoration == RestorationLevel::RestoMod && Mod->Build.Has("swap-crate-v8-modern"));
+	const VehicleSetup Modern = State.SetupForOwned(*Mod);
+	EXPECT(Modern.Engine.PeakPowerKw > Stock.Engine.PeakPowerKw);
+	EXPECT(Modern.Brakes.MaxTorqueFront > Stock.Brakes.MaxTorqueFront);
+	// Modern cars can't be "restored", just repaired.
+	const VehicleModel* NewCar = State.Vehicles.NewestOfBody(BodyStyle::Sedan);
+	const std::string NewUid = State.GrantVehicle(NewCar->Id);
+	EXPECT(!State.QuoteRestore(NewUid, RestorationLevel::Show, false).bAllowed);
+}
+
+DTG_TEST(ManualGearboxShiftsOnlyWhenAsked)
+{
+	const GameState& State = dtg_test::LoadedState();
+	const VehicleModel* Model = State.Vehicles.NewestOfBody(BodyStyle::Sports);
+	VehicleDynamics Dyn(State.SetupFor(Model->Id));
+	Dyn.bAutomatic = false;
+	std::array<WheelContact, 4> Contacts{};
+	double Speed = 0.0;
+	DriverInput Input;
+	Input.Throttle = 1.0;
+	bool bHitLimiter = false;
+	for (int Step = 0; Step < 240 * 6; ++Step)
+	{
+		for (WheelContact& Contact : Contacts)
+		{
+			Contact.bGrounded = true;
+			Contact.LoadN = 3500.0;
+			Contact.VelLongMs = Speed;
+		}
+		const auto Out = Dyn.Step(1.0 / 240.0, Input, Contacts);
+		double Push = 0.0;
+		for (const WheelOutput& Wheel : Out) Push += Wheel.Fx;
+		Speed = std::max(0.0, Speed + Push / 1400.0 / 240.0);
+		bHitLimiter = bHitLimiter || Dyn.Telemetry().bRevLimiter;
+	}
+	EXPECT(Dyn.Telemetry().Gear == 1); // it never shifted by itself
+	EXPECT(bHitLimiter);
+	Input.ShiftRequest = 1;
+	for (int Step = 0; Step < 240; ++Step)
+	{
+		const auto Out = Dyn.Step(1.0 / 240.0, Input, Contacts);
+		(void)Out;
+		Input.ShiftRequest = 0;
+	}
+	EXPECT(Dyn.Telemetry().Gear == 2);
+
+	GameState Fresh = dtg_test::FreshGame(5);
+	EXPECT(Fresh.AutomaticGearbox());
+	Fresh.SetTransmission(true);
+	EXPECT(!Fresh.AutomaticGearbox());
+	GameState Restored = dtg_test::LoadedState();
+	EXPECT(Restored.LoadFromJson(Fresh.SaveToJson(), nullptr));
+	EXPECT(!Restored.AutomaticGearbox());
 }

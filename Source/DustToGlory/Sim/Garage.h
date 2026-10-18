@@ -41,6 +41,18 @@ namespace dtg::sim
 	const IssueInfo& GetIssueInfo(CarIssue Issue);
 	bool ParseCarIssue(const std::string& Text, CarIssue& Out);
 
+	/** How far a car has been restored. A resto-mod keeps the classic body but modern running gear. */
+	enum class RestorationLevel : int
+	{
+		None,
+		Driver,     // mechanically sorted, honest paint: a classic you can use
+		Show,       // body-off, everything refinished
+		Concours,   // factory-correct to the last bolt; aftermarket parts come off
+		RestoMod,   // show-quality body, modern suspension, brakes, wheels and (optionally) a crate engine
+		Count
+	};
+	const char* RestorationName(RestorationLevel Level);
+
 	/** A car in the player's garage. */
 	struct OwnedVehicle
 	{
@@ -50,13 +62,21 @@ namespace dtg::sim
 		double Condition = 1.0;     // 0 wrecked .. 1 showroom
 		double MileageKm = 0.0;
 		std::vector<CarIssue> Issues;
+		RestorationLevel Restoration = RestorationLevel::None;
+		bool bCertified = false;              // bought certified pre-owned
+		std::int64_t WarrantyUntilMinute = 0; // free shop repairs until then (new and CPO cars)
+		std::int64_t ReadyMinute = 0;         // in the restoration shop until then
 
 		bool Has(CarIssue Issue) const;
+		bool InShop(std::int64_t NowMinute) const { return ReadyMinute > NowMinute; }
+		bool UnderWarranty(std::int64_t NowMinute) const { return WarrantyUntilMinute > NowMinute; }
 	};
 
 	/** What a buyer would pay for this car in its current state. */
 	Money MarketValue(const VehicleModel& Model, double Condition, double MileageKm, const std::vector<CarIssue>& Issues);
 	Money ResaleValue(const VehicleModel& Model, const OwnedVehicle& Car);
+	/** Collector value of a classic in this state: condition and originality matter far more than mileage. */
+	double ClassicConditionFactor(double Condition);
 	/** Dealers pay less than private buyers. */
 	Money TradeInOffer(const VehicleModel& Model, const OwnedVehicle& Car);
 	/** A private buyer's offer (market value +/- haggling, plus a little for tasteful mods). */
@@ -88,6 +108,18 @@ namespace dtg::sim
 	/** Pay a shop: always fixed. */
 	void ShopRepair(OwnedVehicle& Car, CarIssue Issue);
 
+	/** Who is selling: the used lot, a brand showroom's certified pre-owned row, the classic dealer, or a car a
+	    showroom tracked down on request. */
+	enum class DealerKind : int
+	{
+		UsedLot,
+		Certified,
+		Classic,
+		Located,
+		Count
+	};
+	const char* DealerKindName(DealerKind Kind);
+
 	struct UsedListing
 	{
 		std::string Id;
@@ -99,7 +131,40 @@ namespace dtg::sim
 		std::string Seller;
 		bool bBarnFind = false;
 		int Rounds = 0;            // haggling rounds used
+		DealerKind Dealer = DealerKind::UsedLot;
+		std::string ShowroomId;    // certified and located cars: the showroom selling them
+		RestorationLevel Restoration = RestorationLevel::None;
+		std::vector<std::string> Parts; // resto-mods come with their modern parts fitted
+		bool bNoHaggle = false;    // certified pre-owned: posted price
 	};
+
+	/** Certified pre-owned: recent, inspected, low miles, a year of warranty, a premium over the used lot. */
+	std::vector<UsedListing> GenerateCertified(const VehicleCatalog& Catalog, const std::vector<std::string>& BrandIds,
+		const std::string& ShowroomId, Rng& Random, int Count);
+	/** The classic dealer: 25+ year-old cars from projects to concours winners, plus resto-mods. */
+	std::vector<UsedListing> GenerateClassics(const VehicleCatalog& Catalog, Rng& Random, int Count);
+	/** A showroom tracks down one example of any model its brands ever built. */
+	UsedListing LocateExample(const VehicleModel& Model, const std::string& ShowroomId, Rng& Random);
+
+	// ------------------------------------------------------------------ Restoration
+	struct RestorationQuote
+	{
+		bool bAllowed = false;
+		std::string Reason;          // why not, when not allowed
+		Money ShopCost = 0;          // labor + parts at the restoration shop
+		int ShopDays = 0;
+		Money DiyParts = 0;          // parts only, doing it yourself
+		int DiyHours = 0;
+		double DiySuccessChance = 0.0;
+		Money ValueBefore = 0;
+		Money ValueAfter = 0;
+		std::vector<std::string> PartsFitted; // resto-mod running gear
+	};
+	/** bCrateEngine adds the modern crate V8 to a resto-mod. */
+	RestorationQuote QuoteRestoration(const VehicleModel& Model, const OwnedVehicle& Car, RestorationLevel Level, const Profile& Player,
+		const PartCatalog& Parts, bool bCrateEngine = false);
+	/** Applies the finished restoration (condition, faults, parts and level). */
+	void ApplyRestoration(OwnedVehicle& Car, RestorationLevel Level, const RestorationQuote& Quote, const PartCatalog& Parts, double Quality);
 
 	enum class HaggleOutcome : int
 	{
@@ -126,6 +191,10 @@ namespace dtg::sim
 		/** Removes the listing and returns the car it described (the caller handles payment). */
 		bool Take(const std::string& ListingId, OwnedVehicle& OutCar);
 		void Restore(std::vector<UsedListing> InListings) { ListingList = std::move(InListings); }
+		/** Replaces one dealer's stock (the used lot's Refresh only touches the used lot). */
+		void ReplaceStock(DealerKind Kind, const std::string& ShowroomId, std::vector<UsedListing> Stock);
+		void Add(UsedListing Listing) { ListingList.push_back(std::move(Listing)); }
+		std::vector<const UsedListing*> Stock(DealerKind Kind, const std::string& ShowroomId = std::string()) const;
 
 	private:
 		std::vector<UsedListing> ListingList;

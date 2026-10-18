@@ -134,6 +134,7 @@ namespace dtg::sim
 		std::vector<RoadPlan> Roads;
 		std::vector<Intersection> Intersections;
 		std::vector<BuildingPlan> Buildings;
+		std::vector<Rect> Blocks;      // every city block between the roads (sidewalk slabs), parks included
 		std::vector<Rect> Parks;
 		std::vector<VenuePlan> Venues;
 		Rect Bounds;

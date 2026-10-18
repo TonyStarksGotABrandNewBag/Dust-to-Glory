@@ -452,8 +452,9 @@ namespace dtg::sim
 					}
 				}
 			}
-			else if (Gear < 0 && Input.Throttle > 0.1 && GroundSpeedMs > -0.6)
+			else if (Gear < 0 && ((Input.Throttle > 0.1 && GroundSpeedMs > -0.6) || GroundSpeedMs > 1.5))
 			{
+				// Throttle from a standstill, or rolling forward in reverse: back into first.
 				BeginShift(1);
 			}
 		}
@@ -466,8 +467,8 @@ namespace dtg::sim
 			}
 		}
 
-		// Automatic reverse: the brake pedal drives backwards and the throttle brakes.
-		if (bAutomatic && Gear < 0)
+		// Automatic reverse: the brake pedal drives backwards and the throttle brakes (only once stopped or reversing).
+		if (bAutomatic && Gear < 0 && GroundSpeedMs < 1.0)
 		{
 			std::swap(Throttle, Brake);
 		}
@@ -591,31 +592,42 @@ namespace dtg::sim
 			DrivenOmega /= std::max(1, DrivenCount);
 			const double OmegaIn = DrivenOmega * Ratio;
 
+			// What the driven tires can carry, as torque at the wheels.
+			double WheelTraction = 0.0;
+			for (int Wheel = 0; Wheel < 4; ++Wheel)
+			{
+				const std::size_t W = static_cast<std::size_t>(Wheel);
+				if (IsDriven(Wheel) && Contacts[W].bGrounded)
+				{
+					const TireSetup& Tire = Wheel < 2 ? Config.FrontTire : Config.RearTire;
+					WheelTraction += Tire.Mu * Contacts[W].SurfaceGrip * Config.ChassisGrip * Contacts[W].LoadN * Tire.RadiusM;
+				}
+			}
+			// Launch: the automatic clutch is still slipping. Like launch control, hold the engine near the launch rpm
+			// and let the clutch (not the throttle) meter torque to what the tires can take.
+			const bool bLaunching = bAutomatic && bEngaged && !bClutchLocked && !bElectric && std::fabs(GroundSpeed) < 25.0;
+			const double LaunchRpm = Idle + std::min(500.0 + 2500.0 * Throttle, std::max(600.0, 0.6 * Config.Engine.RedlineRpm - Idle));
+
 			// Traction control, feed-forward part: never ask for more torque than the driven tires can carry.
 			double TcLimit = 1.0;
-			if (Config.TractionControl > 0 && Ratio != 0.0)
+			if (Config.TractionControl > 0 && Ratio != 0.0 && !bLaunching)
 			{
-				double Traction = 0.0;
-				for (int Wheel = 0; Wheel < 4; ++Wheel)
-				{
-					const std::size_t W = static_cast<std::size_t>(Wheel);
-					if (IsDriven(Wheel) && Contacts[W].bGrounded)
-					{
-						const TireSetup& Tire = Wheel < 2 ? Config.FrontTire : Config.RearTire;
-						Traction += Tire.Mu * Contacts[W].SurfaceGrip * Config.ChassisGrip * Contacts[W].LoadN * Tire.RadiusM;
-					}
-				}
 				// Headroom covers the torque spent spinning up the engine and wheels (large in low gears);
 				// lower settings allow a little more slip for faster launches.
-				Traction *= 1.5 * (1.0 + 0.08 * (5 - Config.TractionControl));
+				const double Traction = WheelTraction * 1.5 * (1.0 + 0.08 * (5 - Config.TractionControl));
 				const double EngineLimit = Traction / (std::fabs(Ratio) * Config.Gearbox.Efficiency);
 				const double Available = Torque.TorqueAt(OmegaToRpm(EngineOmega)) * CurrentBoostFactor() + 1.0;
 				TcLimit = Clamp(EngineLimit / Available, 0.15, 1.0);
 			}
 
 			// Rev limiter and traction control shape the throttle the engine actually sees.
-			double EffectiveThrottle = std::min(Throttle, Throttle * TcFactor);
-			EffectiveThrottle = std::min(EffectiveThrottle, TcLimit);
+			// Feed-forward caps the throttle at what the tires can take; feedback trims below that when they still spin.
+			double EffectiveThrottle = std::min(Throttle, TcLimit) * (bLaunching ? 1.0 : TcFactor);
+			if (bLaunching && Throttle > 0.05)
+			{
+				// Rpm governor (ignition cut) above the launch rpm.
+				EffectiveThrottle *= Clamp((LaunchRpm + 400.0 - OmegaToRpm(EngineOmega)) / 400.0, 0.0, 1.0);
+			}
 			if (TcLimit < Throttle)
 			{
 				Telem.bTractionControlActive = true;
@@ -671,7 +683,6 @@ namespace dtg::sim
 			{
 				// Automatic launch clutch: it bites progressively as the engine revs toward the launch rpm,
 				// and is fully engaged once the driveline itself is turning that fast.
-				const double LaunchRpm = Idle + std::min(500.0 + 2500.0 * EffectiveThrottle, std::max(600.0, 0.6 * Config.Engine.RedlineRpm - Idle));
 				const double DrivelineRpm = OmegaToRpm(OmegaIn);
 				double Engagement = 1.0;
 				if (bAutomatic && DrivelineRpm < LaunchRpm)
@@ -679,6 +690,11 @@ namespace dtg::sim
 					const double ByEngine = Clamp((EngineRpm - Idle) / std::max(100.0, LaunchRpm - Idle), 0.05, 1.0);
 					const double ByDriveline = Clamp(DrivelineRpm / LaunchRpm, 0.0, 1.0);
 					Engagement = std::max(ByEngine, ByDriveline);
+					// Off the throttle at crawling speed the automatic clutch opens: the car rolls, it doesn't creep.
+					if (Throttle < 0.02)
+					{
+						Engagement = 0.0;
+					}
 				}
 				const double Capacity = Config.Gearbox.ClutchCapacityNm;
 				if (bClutchLocked)
@@ -701,7 +717,18 @@ namespace dtg::sim
 					// A slipping clutch transmits its (bounded) friction torque in the direction of the slip, but never
 					// more than it takes to bring both sides to the same speed this substep (avoids chatter).
 					const double Slip = EngineOmega - OmegaIn;
-					const double Cap = Capacity * Engagement;
+					double Cap = Capacity * Engagement;
+					if (bLaunching && Config.TractionControl > 0)
+					{
+						// Launch control: slip the clutch so the tires sit just past their grip peak.
+						// TcFactor (slip feedback) backs the clutch off further when the tires still break loose.
+						const double LaunchTraction = WheelTraction * (0.98 + 0.03 * (5 - Config.TractionControl)) * TcFactor;
+						Cap = std::min(Cap, LaunchTraction / std::max(1e-6, std::fabs(Ratio) * Config.Gearbox.Efficiency));
+						if (Cap < Capacity * Engagement)
+						{
+							Telem.bTractionControlActive = true;
+						}
+					}
 					double DrivenInertia = 0.0;
 					for (int Wheel = 0; Wheel < 4; ++Wheel)
 					{
@@ -878,7 +905,7 @@ namespace dtg::sim
 				const double Excess = MaxDrivenSlip - Target;
 				if (Excess > 0.0 && Throttle > 0.1)
 				{
-					TcFactor = std::max(0.4, TcFactor - Excess * 1.5 * H);
+					TcFactor = std::max(0.1, TcFactor - Excess * 2.5 * H);
 					Telem.bTractionControlActive = true;
 				}
 				else

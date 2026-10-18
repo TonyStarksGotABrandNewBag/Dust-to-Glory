@@ -290,10 +290,15 @@ namespace dtg::sim
 			Item.Set("paint", Num(Car.Build.PaintRgb));
 			Item.Set("finish", Num(Car.Build.PaintFinish));
 			Item.Set("wheels", Num(Car.Build.WheelRgb));
+			Item.Set("restoration", Num(static_cast<int>(Car.Restoration)));
+			Item.Set("certified", Bool(Car.bCertified));
+			Item.Set("warranty", Num(static_cast<double>(Car.WarrantyUntilMinute)));
+			Item.Set("ready", Num(static_cast<double>(Car.ReadyMinute)));
 			GarageJson.Push(Item);
 		}
 		Root.Set("garage", GarageJson);
 		Root.Set("activeVehicle", Str(ActiveVehicleUid));
+		Root.Set("manualTransmission", Bool(bManualTransmission));
 
 		JsonValue LotJson = JsonValue::MakeArray();
 		for (const UsedListing& Listing : UsedCars.Listings())
@@ -308,6 +313,11 @@ namespace dtg::sim
 			Item.Set("seller", Str(Listing.Seller));
 			Item.Set("barnFind", Bool(Listing.bBarnFind));
 			Item.Set("rounds", Num(Listing.Rounds));
+			Item.Set("dealer", Num(static_cast<int>(Listing.Dealer)));
+			Item.Set("showroom", Str(Listing.ShowroomId));
+			Item.Set("restoration", Num(static_cast<int>(Listing.Restoration)));
+			Item.Set("parts", Strings(Listing.Parts));
+			Item.Set("noHaggle", Bool(Listing.bNoHaggle));
 			LotJson.Push(Item);
 		}
 		Root.Set("usedCars", LotJson);
@@ -611,12 +621,17 @@ namespace dtg::sim
 			Car.Build.PaintRgb = static_cast<std::uint32_t>(Item.GetInt64("paint", 0xB8B8B8));
 			Car.Build.PaintFinish = Item.GetInt("finish", 0);
 			Car.Build.WheelRgb = static_cast<std::uint32_t>(Item.GetInt64("wheels", 0x303030));
+			Car.Restoration = static_cast<RestorationLevel>(Clamp(Item.GetInt("restoration"), 0, static_cast<int>(RestorationLevel::Count) - 1));
+			Car.bCertified = Item.GetBool("certified");
+			Car.WarrantyUntilMinute = Item.GetInt64("warranty");
+			Car.ReadyMinute = Item.GetInt64("ready");
 			if (Vehicles.FindModel(Car.ModelId))
 			{
 				Garage.push_back(Car);
 			}
 		}
 		ActiveVehicleUid = Root.GetString("activeVehicle");
+		bManualTransmission = Root.GetBool("manualTransmission");
 
 		const JsonValue& Tools = Root.Get("hackTools");
 		HackTools.ProbeKit = Tools.GetInt("probe");
@@ -799,11 +814,17 @@ namespace dtg::sim
 			Listing.Seller = Item.GetString("seller");
 			Listing.bBarnFind = Item.GetBool("barnFind");
 			Listing.Rounds = Item.GetInt("rounds");
+			Listing.Dealer = static_cast<DealerKind>(Clamp(Item.GetInt("dealer"), 0, static_cast<int>(DealerKind::Count) - 1));
+			Listing.ShowroomId = Item.GetString("showroom");
+			Listing.Restoration = static_cast<RestorationLevel>(Clamp(Item.GetInt("restoration"), 0, static_cast<int>(RestorationLevel::Count) - 1));
+			Listing.Parts = ReadStrings(Item.Get("parts"));
+			Listing.bNoHaggle = Item.GetBool("noHaggle");
 			Lot.push_back(Listing);
 		}
 		if (Lot.empty())
 		{
 			RefreshUsedCars();
+			RefreshDealerStock();
 		}
 		else
 		{

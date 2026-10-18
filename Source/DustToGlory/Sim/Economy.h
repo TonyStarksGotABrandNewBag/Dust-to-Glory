@@ -35,12 +35,12 @@ namespace dtg::sim
 	 */
 	struct EconomyIndex
 	{
-		std::string Era = "1995";
+		std::string Era = "Present day, 1995 prices";
 		double Vehicles = 0.55;   // a 2010s $30k sedan lists around $16.5k
 		double Housing = 1.0;     // home prices in the city plan are already authored in era dollars
 		double Goods = 0.55;      // parts, tools, furniture baselines that use modern formulas
 		double Wages = 1.0;       // career pay in careers.json is authored in era dollars
-		int CalendarYear = 1995;  // year shown on newspapers and receipts
+		int CalendarYear = 2026;  // year shown on newspapers and receipts (prices stay 1995-level)
 	};
 
 	struct Transaction

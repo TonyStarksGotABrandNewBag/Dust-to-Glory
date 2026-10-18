@@ -132,6 +132,7 @@ namespace dtg::sim
 		Rng Random{1977};
 		int NextVehicleNumber = 1;
 		int EventsWon = 0;
+		bool bManualTransmission = false;
 
 		/** Parses every data file and builds the catalog, city and businesses. */
 		bool LoadContent(const ContentFiles& Files, ContentReport& Report);
@@ -156,6 +157,21 @@ namespace dtg::sim
 		const OwnedVehicle* ActiveVehicle() const;
 		/** Physics setup for one of the player's cars (or a stock catalog model when Uid is empty). */
 		VehicleSetup SetupFor(const std::string& ModelId, const VehicleBuild* Build = nullptr) const;
+		/** New cars are current models only; everything older is sold used, certified, classic or located. */
+		Money NewCarPrice(const VehicleModel& Model) const;
+		/** Weekly restock of the classic dealer and every showroom's certified pre-owned row. */
+		void RefreshDealerStock();
+		/** A showroom tracks down any model its brands ever built; the car appears in its Located row. */
+		ActionResult LocateModel(const std::string& ShowroomId, const std::string& ModelId);
+		RestorationQuote QuoteRestore(const std::string& Uid, RestorationLevel Level, bool bCrateEngine) const;
+		ActionResult RestoreAtShop(const std::string& Uid, RestorationLevel Level, bool bCrateEngine);
+		ActionResult RestoreDiy(const std::string& Uid, RestorationLevel Level, bool bCrateEngine, double Performance);
+		/** Player preference: automatic or manual shifting (GT-style AT/MT). */
+		ActionResult SetTransmission(bool bManual);
+		bool AutomaticGearbox() const { return !bManualTransmission; }
+
+		/** Brands sold in a showroom building (BuildingPlan::Param of a dealership). */
+		std::vector<const Brand*> BrandsAtShowroom(const std::string& ShowroomId) const;
 		/** Grants a car for free (event machinery, story rewards). */
 		std::string GrantVehicle(const std::string& ModelId);
 

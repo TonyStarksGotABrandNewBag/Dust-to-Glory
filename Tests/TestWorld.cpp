@@ -48,15 +48,29 @@ DTG_TEST(EveryBuildingIsInteractable)
 		EXPECT(ParseLotRole(Def.Workplace, Role));
 		EXPECT_MSG(City.FirstWithRole(Role) != nullptr, Def.Workplace);
 	}
+	// Every brand still on sale has a showroom (sister brands share one); defunct brands are sold used.
+	int Showrooms = 0;
 	for (const Brand& Maker : State.Vehicles.Brands())
 	{
+		if (!Maker.HasShowroom(State.Vehicles.CurrentYear()))
+		{
+			continue;
+		}
+		++Showrooms;
 		bool bFound = false;
 		for (const BuildingPlan* Dealer : City.WithRole(LotRole::Dealership))
 		{
-			bFound = bFound || Dealer->Param == Maker.Id;
+			bFound = bFound || Dealer->Param == Maker.ShowroomId();
 		}
 		EXPECT_MSG(bFound, Maker.Id);
+		bool bListed = false;
+		for (const Brand* Sold : State.BrandsAtShowroom(Maker.ShowroomId()))
+		{
+			bListed = bListed || Sold == &Maker;
+		}
+		EXPECT_MSG(bListed, Maker.Id);
 	}
+	EXPECT(Showrooms >= 50);
 	for (const std::string& Store : State.Homes.Stores())
 	{
 		bool bFound = false;

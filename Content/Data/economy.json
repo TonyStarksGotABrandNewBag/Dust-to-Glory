@@ -1,12 +1,13 @@
-// Price levels for the world. The default is the mid-1990s United States: houses and cars are cheap
+// Price levels for the world. The game is set in the present day (every car through the catalog year,
+// smartphones, EVs) but the cost of living is the mid-1990s United States: houses and cars are cheap
 // relative to wages, so a help-desk technician at ~$15/hr lives comfortably.
 // vehicles: multiplier on the catalog's 2010s-baseline prices (0.55 puts a family sedan around $16k).
 // housing:  multiplier on city home prices, which are already authored in 1995 dollars.
 // goods:    multiplier for prices computed from modern baselines (paint jobs, some services).
 // wages:    multiplier on career pay, which careers.json already lists in 1995 dollars.
 {
-  "era": "1995",
-  "calendarYear": 1995,
+  "era": "Present day, 1995 prices",
+  "calendarYear": 2026,
   "catalogYear": 2026,
   "vehicles": 0.55,
   "housing": 1.0,

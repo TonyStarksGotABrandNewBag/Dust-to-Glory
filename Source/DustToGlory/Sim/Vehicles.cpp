@@ -615,7 +615,17 @@ namespace dtg::sim
 
 	double StockFinalDrive(const VehicleModel& Model, const std::vector<double>& Ratios)
 	{
-		const double TopRatio = Ratios.empty() ? 1.0 : Ratios.back();
+		// Modern gearboxes reach top speed a gear or two before the last; the top gears are overdrives for cruising.
+		std::size_t SpeedGear = Ratios.empty() ? 0 : Ratios.size() - 1;
+		if (Ratios.size() >= 7)
+		{
+			SpeedGear = Ratios.size() - 3;
+		}
+		else if (Ratios.size() == 6)
+		{
+			SpeedGear = Ratios.size() - 2;
+		}
+		const double TopRatio = Ratios.empty() ? 1.0 : Ratios[SpeedGear];
 		const double TopSpeedMs = std::max(10.0, Model.TopSpeedKph / 3.6);
 		const double RedlineOmega = Model.RedlineRpm * 2.0 * 3.14159265358979 / 60.0;
 		return std::round(RedlineOmega * Model.WheelRadiusM / (TopRatio * TopSpeedMs * 1.04) * 100.0) / 100.0;
@@ -708,7 +718,12 @@ namespace dtg::sim
 		Model.WidthM = Body.Width;
 		Model.HeightM = Body.Height;
 		Model.Seats = Body.Seats;
-		Model.TireGrip = std::round(Body.Grip * EraGrip(MidYear) * 100.0) / 100.0;
+		double Grip = Body.Grip * EraGrip(MidYear);
+		if ((IsPerformanceBody(Line.Body) || Line.Body == BodyStyle::Muscle) && MidYear >= 1985)
+		{
+			Grip *= 1.0 + 0.12 * Line.Tier; // performance trims ship on stickier, wider tires
+		}
+		Model.TireGrip = std::round(Grip * 100.0) / 100.0;
 		Model.WheelRadiusM = Body.WheelRadius;
 		Model.Gears = GearCount(Line.Body, MidYear, Model.bElectric);
 
@@ -728,8 +743,9 @@ namespace dtg::sim
 		// Spec-sheet 0-100: the slower of the power limit and the traction limit.
 		const double V100 = 27.78;
 		const double PowerLimited = 0.9 + Model.MassKg * V100 * V100 / (2.0 * 0.58 * Model.PowerKw * 1000.0);
-		double DriveShare = 0.65;
-		if (Line.Drive == Drivetrain::RWD) DriveShare = 0.95;
+		// Share of the car's weight on the driven tires during a launch (static share plus weight transfer).
+		double DriveShare = std::max(0.4, Model.WeightFront - 0.08);
+		if (Line.Drive == Drivetrain::RWD) DriveShare = std::min(0.95, 1.0 - Model.WeightFront + 0.12);
 		if (Line.Drive == Drivetrain::AWD) DriveShare = 1.0;
 		const double TractionLimited = V100 / (Model.TireGrip * 9.81 * DriveShare) + 0.3;
 		Model.ZeroTo100S = std::round(std::max(PowerLimited, TractionLimited) * 10.0) / 10.0;
@@ -737,16 +753,45 @@ namespace dtg::sim
 		const double Msrp = Body.BasePriceUsd * (0.7 + 0.9 * Line.Tier) * (1.0 + 0.8 * Maker.Prestige) * Random.Range(0.95, 1.05) * PriceIndex;
 		Model.Msrp = ToMoney(std::round(Msrp / 100.0) * 100.0);
 
-		// Market value: depreciation, then collector appreciation for desirable classics.
+		// Market value: depreciation to a floor, then collector appreciation for desirable classics. Msrp is the
+		// launch price in today's money, so a desirable classic ending up worth more than it is real appreciation.
 		const int Age = std::max(0, CurrentYearValue - YearEnd);
-		double Value = Msrp * std::pow(0.86, std::min(Age, 20));
-		if (Age > 25 && IsCollectible(Line.Body))
+		Model.AgeYears = Age;
+		double Value = Msrp * std::max(std::pow(0.86, Age), 0.06);
+		double Desire = 0.0;
+		double RampStart = 20.0;
+		double RampYears = 25.0;
+		if (IsCollectible(Line.Body) || Line.Body == BodyStyle::Muscle)
 		{
-			Value *= std::min(4.0, 1.0 + 0.06 * (Age - 25) * (0.5 + Maker.Prestige));
+			Desire = (0.25 + 1.2 * Line.Tier) * (0.6 + 0.8 * Maker.Prestige) * (1.0 + 0.5 * std::max(0.0, Maker.PerformanceBias));
 		}
-		else if (Age > 45)
+		else if (Line.Body == BodyStyle::Pickup || Line.Body == BodyStyle::SUV || Line.Body == BodyStyle::Wagon || Line.Body == BodyStyle::Luxury)
 		{
-			Value *= std::min(2.5, 1.0 + 0.03 * (Age - 45));
+			// Vintage trucks, 4x4s, wood-panel wagons and land yachts have their own collectors.
+			Desire = 0.5 * (0.25 + 1.2 * Line.Tier) * (0.6 + 0.8 * Maker.Prestige);
+			RampStart = 25.0;
+			RampYears = 30.0;
+		}
+		if (Age > 45)
+		{
+			Desire = std::max(Desire, 0.3 + Line.Tier); // anything this old is a survivor worth preserving
+		}
+		if (Maker.Country == "USA" && YearStart >= 1953 && YearStart <= 1972)
+		{
+			Desire *= 1.4; // golden-age Americana: tailfins, chrome and big V8s
+		}
+		if (YearEnd - YearStart <= 1 && Age > 40)
+		{
+			Desire *= 3.0; // built for a year or two: genuinely rare
+		}
+		if (Maker.Defunct > 0 && Age > 30)
+		{
+			Desire *= 1.2; // orphan makes have devoted followings
+		}
+		if (Desire > 0.0 && Age > RampStart)
+		{
+			const double Ramp = std::min(1.0, (Age - RampStart) / RampYears);
+			Value += (Msrp * Desire - Value) * Ramp * (Msrp * Desire > Value ? 1.0 : 0.0);
 		}
 		Value = std::max(Value, 1500.0 * PriceIndex);
 		Model.MarketPrice = ToMoney(std::round(Value / 50.0) * 50.0);
@@ -776,7 +821,29 @@ namespace dtg::sim
 			{
 				continue;
 			}
-			Rng Random(HashString(Line.BrandId + "/" + Line.Name));
+			if (!Line.GenerationStarts.empty())
+			{
+				// Known launch years: each generation runs until the next one starts.
+				int Generation = 1;
+				for (std::size_t Index = 0; Index < Line.GenerationStarts.size(); ++Index)
+				{
+					const int Start = std::max(First, Line.GenerationStarts[Index]);
+					int Next = Index + 1 < Line.GenerationStarts.size() ? Line.GenerationStarts[Index + 1] - 1 : Last;
+					if (Index < Line.GenerationEnds.size() && Line.GenerationEnds[Index] > 0)
+					{
+						Next = std::min(Next, Line.GenerationEnds[Index]);
+					}
+					const int End = std::min(Last, Next);
+					if (Start > End)
+					{
+						continue;
+					}
+					ModelList.push_back(MakeGeneration(*Maker, Line, Generation, Start, End, CurrentYearValue, Prices));
+					++Generation;
+				}
+				continue;
+			}
+			Rng Random(HashString(Line.BrandId + "/" + Line.Name + "/" + std::to_string(Line.FirstYear)));
 			const int BaseLength = std::max(2, Line.GenerationYears);
 			int Start = First;
 			int Generation = 1;

@@ -202,6 +202,8 @@ namespace dtg::sim
 			Maker.PerformanceBias = BrandJson.GetNumber("performance", 0.0);
 			Maker.ColorRgb = detail_state::ParseColor(BrandJson.GetString("color"), 0x8090A0);
 			Maker.SignatureEngine = BrandJson.GetString("signatureEngine");
+			Maker.DealerGroup = BrandJson.GetString("dealerGroup");
+			Maker.bDealer = BrandJson.GetBool("dealer", true);
 			if (!Maker.SignatureEngine.empty())
 			{
 				EngineLayout Ignored = EngineLayout::I4;
@@ -223,7 +225,21 @@ namespace dtg::sim
 				{
 					Errors.push_back("vehicles.json: " + Maker.Id + " " + Line.Name + " has unknown drive");
 				}
-				Line.FirstYear = LineJson.GetInt("first", 1970);
+				// "gens": launch years, or [start, end] pairs where production paused before the next generation.
+				for (const JsonValue& Entry : LineJson.Get("gens").Items())
+				{
+					if (Entry.IsArray() && Entry.Size() >= 2)
+					{
+						Line.GenerationStarts.push_back(Entry.At(0).AsInt());
+						Line.GenerationEnds.push_back(Entry.At(1).AsInt());
+					}
+					else
+					{
+						Line.GenerationStarts.push_back(Entry.AsInt());
+						Line.GenerationEnds.push_back(0);
+					}
+				}
+				Line.FirstYear = LineJson.GetInt("first", Line.GenerationStarts.empty() ? 1970 : Line.GenerationStarts.front());
 				Line.LastYear = LineJson.GetInt("last", 0);
 				Line.GenerationYears = LineJson.GetInt("genYears", 7);
 				Line.Tier = LineJson.GetNumber("tier", 0.5);
@@ -613,9 +629,26 @@ namespace dtg::sim
 
 		CityConfig Config;
 		Config.Seed = WorldSeed;
+		// One showroom per dealer group (sister brands share a building); defunct brands have none.
 		for (const Brand& Maker : Vehicles.Brands())
 		{
-			Config.Brands.emplace_back(Maker.Id, Maker.Name);
+			if (!Maker.HasShowroom(Vehicles.CurrentYear()))
+			{
+				continue;
+			}
+			bool bMerged = false;
+			for (auto& Entry : Config.Brands)
+			{
+				if (Entry.first == Maker.ShowroomId())
+				{
+					Entry.second += " & " + Maker.Name;
+					bMerged = true;
+				}
+			}
+			if (!bMerged)
+			{
+				Config.Brands.emplace_back(Maker.ShowroomId(), Maker.Name);
+			}
 		}
 		Config.FurnitureStores = Homes.Stores();
 		for (const CareerDef& Def : Careers.Careers())
@@ -802,6 +835,7 @@ namespace dtg::sim
 		}
 		RefreshHackBoard();
 		RefreshUsedCars();
+		RefreshDealerStock();
 		Notify("Welcome to Dust Valley, " + PlayerName + ". Choose your powers, find a job, and make something of yourself.");
 	}
 
@@ -919,6 +953,7 @@ namespace dtg::sim
 	void GameState::RunWeek(std::int64_t Minute, TickReport& Report)
 	{
 		Report.bNewWeek = true;
+		RefreshDealerStock();
 		if (PlayerMinistry.IsFounded())
 		{
 			Report.Offering = PlayerMinistry.CollectWeeklyOffering(Random);
@@ -988,13 +1023,21 @@ namespace dtg::sim
 		{
 			return ActionResult::Failure("That model isn't for sale.");
 		}
-		const Money Price = static_cast<Money>(std::llround(static_cast<double>(Model->MarketPrice) * ActiveLaws().VehiclePriceMul));
+		if (!Model->IsCurrent())
+		{
+			return ActionResult::Failure("That model is out of production. Ask the showroom to locate one, or try the used and classic dealers.");
+		}
+		const Money Price = NewCarPrice(*Model);
 		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Bought " + Model->DisplayName, Clock.TotalMinutes()))
 		{
 			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
 		}
 		ActiveVehicleUid = GrantVehicle(ModelId);
-		return ActionResult::Success("Congratulations on your " + Model->DisplayName + "! It's parked out front.");
+		if (OwnedVehicle* Car = FindOwned(ActiveVehicleUid))
+		{
+			Car->WarrantyUntilMinute = Clock.TotalMinutes() + 3 * 365 * GameClock::MinutesPerDay;
+		}
+		return ActionResult::Success("Congratulations on your new " + Model->DisplayName + "! Three-year warranty included. It's parked out front.");
 	}
 
 	ActionResult GameState::SellVehicle(const std::string& Uid)
@@ -1593,12 +1636,23 @@ namespace dtg::sim
 		{
 			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
 		}
+		const DealerKind Kind = Listing->Dealer;
 		OwnedVehicle Car;
 		UsedCars.Take(ListingId, Car);
 		Car.Uid = "car-" + std::to_string(NextVehicleNumber++);
+		if (Kind == DealerKind::Certified)
+		{
+			Car.WarrantyUntilMinute = Clock.TotalMinutes() + 365 * GameClock::MinutesPerDay;
+		}
 		Garage.push_back(Car);
 		ActiveVehicleUid = Car.Uid;
-		return ActionResult::Success("It's yours. Check it over in the garage before you drive it hard.");
+		switch (Kind)
+		{
+		case DealerKind::Certified: return ActionResult::Success("Certified pre-owned, with a one-year warranty. Enjoy it.");
+		case DealerKind::Classic: return ActionResult::Success("A piece of history is yours. Treat it kindly.");
+		case DealerKind::Located: return ActionResult::Success("The dealership delivered your car. It's parked out front.");
+		default: return ActionResult::Success("It's yours. Check it over in the garage before you drive it hard.");
+		}
 	}
 
 	RepairQuote GameState::Quote(const std::string& Uid, CarIssue Issue) const
@@ -1637,6 +1691,11 @@ namespace dtg::sim
 		if (!Car || !Car->Has(Issue))
 		{
 			return ActionResult::Failure("Nothing to fix.");
+		}
+		if (Car->UnderWarranty(Clock.TotalMinutes()) && !GetIssueInfo(Issue).bCosmetic)
+		{
+			ShopRepair(*Car, Issue);
+			return ActionResult::Success(std::string(GetIssueInfo(Issue).Name) + " fixed under warranty. No charge.");
 		}
 		const RepairQuote QuoteValue = Quote(Uid, Issue);
 		const Money Total = QuoteValue.Parts + QuoteValue.ShopLabor;
@@ -1682,6 +1741,138 @@ namespace dtg::sim
 	}
 
 	// ==================================================================================== Politics
+
+	Money GameState::NewCarPrice(const VehicleModel& Model) const
+	{
+		return static_cast<Money>(std::llround(static_cast<double>(Model.MarketPrice) * ActiveLaws().VehiclePriceMul));
+	}
+
+	void GameState::RefreshDealerStock()
+	{
+		UsedCars.ReplaceStock(DealerKind::Classic, std::string(), GenerateClassics(Vehicles, Random, 14));
+		std::vector<std::string> Showrooms;
+		for (const Brand& Maker : Vehicles.Brands())
+		{
+			if (Maker.HasShowroom(Vehicles.CurrentYear()) &&
+				std::find(Showrooms.begin(), Showrooms.end(), Maker.ShowroomId()) == Showrooms.end())
+			{
+				Showrooms.push_back(Maker.ShowroomId());
+			}
+		}
+		for (const std::string& Showroom : Showrooms)
+		{
+			std::vector<std::string> BrandIds;
+			for (const Brand* Maker : BrandsAtShowroom(Showroom))
+			{
+				BrandIds.push_back(Maker->Id);
+			}
+			UsedCars.ReplaceStock(DealerKind::Certified, Showroom, GenerateCertified(Vehicles, BrandIds, Showroom, Random, 4));
+		}
+	}
+
+	ActionResult GameState::LocateModel(const std::string& ShowroomId, const std::string& ModelId)
+	{
+		const VehicleModel* Model = Vehicles.FindModel(ModelId);
+		if (!Model || Model->bEventOnly)
+		{
+			return ActionResult::Failure("Nobody can find one of those.");
+		}
+		bool bSold = false;
+		for (const Brand* Maker : BrandsAtShowroom(ShowroomId))
+		{
+			bSold = bSold || Maker->Id == Model->BrandId;
+		}
+		if (!bSold)
+		{
+			return ActionResult::Failure("This showroom doesn't deal in that brand.");
+		}
+		if (Model->IsCurrent())
+		{
+			return ActionResult::Failure("That one's on sale new. No need to hunt for it.");
+		}
+		UsedListing Listing = LocateExample(*Model, ShowroomId, Random);
+		const std::string Price = FormatMoney(Listing.AskingPrice);
+		UsedCars.Add(Listing);
+		return ActionResult::Success("Found one: " + Model->DisplayName + " for " + Price + ". It's waiting at the showroom.");
+	}
+
+	RestorationQuote GameState::QuoteRestore(const std::string& Uid, RestorationLevel Level, bool bCrateEngine) const
+	{
+		const OwnedVehicle* Car = FindOwned(Uid);
+		const VehicleModel* Model = Car ? Vehicles.FindModel(Car->ModelId) : nullptr;
+		if (!Car || !Model)
+		{
+			RestorationQuote Missing;
+			Missing.Reason = "No such car.";
+			return Missing;
+		}
+		return QuoteRestoration(*Model, *Car, Level, Player, Parts, bCrateEngine);
+	}
+
+	ActionResult GameState::RestoreAtShop(const std::string& Uid, RestorationLevel Level, bool bCrateEngine)
+	{
+		const RestorationQuote QuoteValue = QuoteRestore(Uid, Level, bCrateEngine);
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car || !QuoteValue.bAllowed)
+		{
+			return ActionResult::Failure(QuoteValue.Reason.empty() ? "Can't restore that." : QuoteValue.Reason);
+		}
+		if (Car->InShop(Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("It's already in the shop.");
+		}
+		if (!Funds.TrySpend(QuoteValue.ShopCost, MoneyCategory::Vehicle, RestorationName(Level), Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("The restoration shop wants " + FormatMoney(QuoteValue.ShopCost) + ".");
+		}
+		ApplyRestoration(*Car, Level, QuoteValue, Parts, 1.0);
+		Car->ReadyMinute = Clock.TotalMinutes() + static_cast<std::int64_t>(QuoteValue.ShopDays) * GameClock::MinutesPerDay;
+		return ActionResult::Success(std::string(RestorationName(Level)) + " booked. Ready in " + std::to_string(QuoteValue.ShopDays) + " days.");
+	}
+
+	ActionResult GameState::RestoreDiy(const std::string& Uid, RestorationLevel Level, bool bCrateEngine, double Performance)
+	{
+		const RestorationQuote QuoteValue = QuoteRestore(Uid, Level, bCrateEngine);
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car || !QuoteValue.bAllowed)
+		{
+			return ActionResult::Failure(QuoteValue.Reason.empty() ? "Can't restore that." : QuoteValue.Reason);
+		}
+		if (!Funds.TrySpend(QuoteValue.DiyParts, MoneyCategory::Vehicle, std::string("Parts: ") + RestorationName(Level), Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("Parts alone cost " + FormatMoney(QuoteValue.DiyParts) + ".");
+		}
+		const bool bClean = Random.Chance(QuoteValue.DiySuccessChance);
+		const double Quality = Clamp(Performance, 0.0, 1.0) * (bClean ? 1.0 : 0.55);
+		ApplyRestoration(*Car, Level, QuoteValue, Parts, Quality);
+		if (!bClean)
+		{
+			Car->Condition = std::max(0.3, Car->Condition - 0.12);
+		}
+		Player.AddSkillXp(Skill::Trades, QuoteValue.DiyHours * 6);
+		Skip(static_cast<std::int64_t>(QuoteValue.DiyHours) * 60);
+		return bClean ? ActionResult::Success("Weekends well spent: the restoration came out beautifully.")
+			: ActionResult::Success("It's done, but it shows a few amateur touches. Still better than before.");
+	}
+
+	ActionResult GameState::SetTransmission(bool bManual)
+	{
+		bManualTransmission = bManual;
+		return ActionResult::Success(bManual ? "Manual: you shift (clutch is automatic)." : "Automatic: the gearbox shifts for you.");
+	}
+
+	std::vector<const Brand*> GameState::BrandsAtShowroom(const std::string& ShowroomId) const
+	{
+		std::vector<const Brand*> Result;
+		for (const Brand& Maker : Vehicles.Brands())
+		{
+			if (Maker.ShowroomId() == ShowroomId && Maker.HasShowroom(Vehicles.CurrentYear()))
+			{
+				Result.push_back(&Maker);
+			}
+		}
+		return Result;
+	}
 
 	const LawDef* GameState::FindLaw(const std::string& Id) const
 	{

@@ -147,33 +147,33 @@ namespace dtg::sim
 		{
 		case LotRole::Home: return {"Visit", "Buy or enter home", "Arrange furniture"};
 		case LotRole::Apartment: return {"Visit a neighbor", "Buy or enter apartment", "Arrange furniture"};
-		case LotRole::Dealership: return {"Browse every model", "Test drive", "Sell a car"};
+		case LotRole::Dealership: return {"Browse every model", "Test drive", "Used car lot", "Sell a car"};
 		case LotRole::Church: return {"Ministry office", "Attend service", "Volunteer"};
 		case LotRole::Hospital: return {"Work a shift", "Get treated"};
 		case LotRole::University: return {"Enroll", "Attend class", "Work a shift"};
 		case LotRole::CareerCenter: return {"Job board", "Career advice"};
-		case LotRole::Office: return {"Work a shift", "Hacking contracts"};
-		case LotRole::TechCampus: return {"Work a shift", "Hacking contracts"};
+		case LotRole::Office: return {"Work a shift", "Hacking contracts", "Business consulting"};
+		case LotRole::TechCampus: return {"Work a shift", "Hacking contracts", "Create IP"};
 		case LotRole::PowerPlant: return {"Work a shift"};
 		case LotRole::GardenCenter: return {"Work a shift", "Shop plants"};
 		case LotRole::PoliceStation: return {"Work a shift", "Pay fines"};
 		case LotRole::FireStation: return {"Work a shift"};
 		case LotRole::FurnitureStore: return {"Shop furniture", "Track deliveries"};
-		case LotRole::ModShop: return {"Parts and tuning", "Paint shop", "Dyno"};
+		case LotRole::ModShop: return {"Parts and tuning", "Paint shop", "Dyno", "DIY garage"};
 		case LotRole::ElectronicsStore: return {"Hacking tools", "Gadgets"};
-		case LotRole::Bank: return {"Account summary", "Work a shift"};
+		case LotRole::Bank: return {"Account summary", "Stock exchange", "Work a shift"};
 		case LotRole::Diner: return {"Eat", "Work a shift"};
 		case LotRole::Gym: return {"Train", "Work a shift"};
-		case LotRole::Library: return {"Study", "Read"};
-		case LotRole::Courthouse: return {"Work a shift", "Public records"};
+		case LotRole::Library: return {"Study", "Create IP"};
+		case LotRole::Courthouse: return {"Run for office", "Legislature", "Public records", "Work a shift"};
 		case LotRole::Stadium: return {"Tryouts and games", "Watch a game"};
 		case LotRole::TrackField: return {"Train", "Compete"};
-		case LotRole::RealEstate: return {"Browse homes"};
+		case LotRole::RealEstate: return {"Browse homes", "Buy a business"};
 		case LotRole::Shop: return {"Browse", "Work a shift"};
 		case LotRole::School: return {"Work a shift", "Volunteer"};
 		case LotRole::Hotel: return {"Rent a room", "Work a shift"};
 		case LotRole::Museum: return {"Explore exhibits"};
-		case LotRole::Studio: return {"Record music", "Work a shift"};
+		case LotRole::Studio: return {"Create IP", "Work a shift"};
 		case LotRole::Count: break;
 		}
 		return {"Visit"};
@@ -335,6 +335,7 @@ namespace dtg::sim
 			{
 				const double BlockMinX = Origin + I * Pitch + Road;
 				const double BlockMinY = Origin + J * Pitch + Road;
+				Plan.Blocks.push_back(Rect{BlockMinX, BlockMinY, BlockMinX + Block, BlockMinY + Block});
 				bool bPark = false;
 				for (const auto& Park : ParkBlocks)
 				{
