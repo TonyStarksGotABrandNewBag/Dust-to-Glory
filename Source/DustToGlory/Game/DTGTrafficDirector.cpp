@@ -374,6 +374,34 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around, float DeltaSe
 	}
 }
 
+void ADTGTrafficDirector::Reset()
+{
+	for (FDTGDriver& Driver : Drivers)
+	{
+		if (Driver.Car)
+		{
+			Driver.Car->Destroy();
+		}
+	}
+	for (FDTGWalker& Walker : Walkers)
+	{
+		if (Walker.Actor)
+		{
+			Walker.Actor->Destroy();
+		}
+	}
+	for (TObjectPtr<ADTGVehicle>& Car : Parked)
+	{
+		if (Car)
+		{
+			Car->Destroy();
+		}
+	}
+	Drivers.Reset();
+	Walkers.Reset();
+	Parked.Reset();
+}
+
 void ADTGTrafficDirector::UpdateParkedCars(const FVector& Around)
 {
 	// A car outside a house is a car the player can walk up to and make an offer on, so each nearby home

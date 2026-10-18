@@ -77,6 +77,12 @@ private:
 	void UpdatePolice(const FVector& Around);
 	void UpdatePedestrians(const FVector& Around, float DeltaSeconds);
 	void UpdateParkedCars(const FVector& Around);
+
+public:
+	/** Forgets and destroys everything it has spawned: the world underneath has been replaced. */
+	void Reset();
+
+private:
 	void DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds);
 	ADTGVehicle* SpawnCar(const FVector& At, double YawDegrees, bool bPolice);
 	/** A node on the road graph near a point, preferring one the player can't already see. */

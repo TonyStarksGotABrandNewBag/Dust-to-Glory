@@ -49,6 +49,7 @@ void UDTGBody::Build(int32 Seed)
 	FLinearColor Clothes;
 	FLinearColor Skin;
 	PaletteFor(Seed, Clothes, Skin);
+	Limbs.Reset();
 	UMaterialInterface* const Material = Painted();
 	constexpr double S = 100.0;
 	// Parts are built around their own pivot -- a hip for a leg, a shoulder for an arm -- so swinging one

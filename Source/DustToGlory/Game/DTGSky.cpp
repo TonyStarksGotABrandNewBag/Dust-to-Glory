@@ -137,7 +137,7 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 	// Weather arrives rather than snapping on.
 	FogDensity = FMath::FInterpTo(FogDensity, TargetDensity, DeltaSeconds, 0.35f);
 	Brightness = FMath::FInterpTo(Brightness, TargetBrightness, DeltaSeconds, 0.35f);
-	Visibility = FMath::FInterpTo(Visibility, TargetVisibility, DeltaSeconds, 0.35f);
+	Visibility = FMath::FInterpTo(Visibility, TargetVisibility, static_cast<double>(DeltaSeconds), 0.35);
 	Fog->SetFogDensity(FogDensity);
 	Fog->SetFogInscatteringColor(FogColour);
 }

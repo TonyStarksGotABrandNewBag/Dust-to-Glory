@@ -15,9 +15,10 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGEventDirector.h"
 #include "Game/DTGInterior.h"
+#include "Game/DTGTrafficDirector.h"
+#include "Game/DTGVehicle.h"
 #include "Game/DTGWorldBuilder.h"
 #include "Game/DTGPlayerController.h"
-#include "Game/DTGVehicle.h"
 
 using namespace dtg::sim;
 
@@ -719,6 +720,8 @@ void ADTGHud::RunTitleOption(int32 Index)
 	case 2:
 	{
 		Game->StartNewGame(TEXT("Newcomer"));
+		// The simulation has a new garage, new money and a new home, so the old world's cars must go.
+		RestartWorld(/*bRebuildTerrain*/ false);
 		const StateCity* Start = Game->Sim().Map.StartCity();
 		OnNotice(FString::Printf(TEXT("A new life in %s."), Start ? *Utf8(Start->Name) : TEXT("town")));
 		Close();
@@ -740,29 +743,8 @@ void ADTGHud::RunTitleOption(int32 Index)
 			OnNotice(TEXT("That state wouldn't load."));
 			break;
 		}
-		// The simulation now holds a different world, so everything standing in the old one has to go.
-		if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
-		{
-			Builder->Rebuild();
-		}
-		for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
-		{
-			It->Destroy();
-		}
-		for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
-		{
-			if (!It->IsPlayerControlled())
-			{
-				It->Destroy();
-			}
-		}
-		if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
-		{
-			const CityPlan& World = Game->Sim().City;
-			const double GroundZ = Game->Sim().Map.HeightAt(World.SpawnX, World.SpawnY);
-			Player->LeaveBuilding();
-			Player->SetActorLocation(Game->ToUnreal(World.SpawnX, World.SpawnY, GroundZ + 1.0));
-		}
+		// The simulation now holds a different world: the old one has to be taken down and rebuilt.
+		RestartWorld(/*bRebuildTerrain*/ true);
 		OnNotice(TEXT("A new life, somewhere else entirely."));
 		Close();
 		break;
@@ -782,6 +764,46 @@ void ADTGHud::RunEventOption(int32 Index)
 	if (Director && Director->StartEvent(static_cast<EventKind>(Kind), Tier))
 	{
 		Close();
+	}
+}
+
+void ADTGHud::RestartWorld(bool bRebuildTerrain)
+{
+	// The directors own what they spawned, so they clear it themselves rather than leaving this to the
+	// garbage collector to notice.
+	if (ADTGTrafficDirector* Traffic = Cast<ADTGTrafficDirector>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGTrafficDirector::StaticClass())))
+	{
+		Traffic->Reset();
+	}
+	if (ADTGEventDirector* Events = Cast<ADTGEventDirector>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGEventDirector::StaticClass())))
+	{
+		Events->Reset();
+	}
+	// Anything else still standing: the player's old car, a stray pedestrian.
+	for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+	{
+		It->Destroy();
+	}
+	for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsPlayerControlled())
+		{
+			It->Destroy();
+		}
+	}
+	if (bRebuildTerrain)
+	{
+		if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
+		{
+			Builder->Rebuild();
+		}
+	}
+	if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
+	{
+		const CityPlan& World = Game->Sim().City;
+		const double GroundZ = Game->Sim().Map.HeightAt(World.SpawnX, World.SpawnY);
+		Player->LeaveBuilding();
+		Player->SetActorLocation(Game->ToUnreal(World.SpawnX, World.SpawnY, GroundZ + 1.0));
 	}
 }
 

@@ -9,7 +9,6 @@
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
-#include "GameFramework/PlayerController.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
 
@@ -158,6 +157,24 @@ void ADTGEventDirector::AbandonEvent()
 		}
 	}
 	Racers.Reset();
+	State = EDTGRaceState::Idle;
+}
+
+void ADTGEventDirector::Reset()
+{
+	AbandonEvent();
+	for (TObjectPtr<AActor>& Who : Superhumans)
+	{
+		if (Who)
+		{
+			Who->Destroy();
+		}
+	}
+	Superhumans.Reset();
+	if (Game && Game->IsContentLoaded())
+	{
+		Game->Sim().Fights.Clear();
+	}
 	State = EDTGRaceState::Idle;
 }
 
@@ -352,33 +369,45 @@ void ADTGEventDirector::UpdateSuperhumans(const FVector& Around)
 	const int32 Want = 3;
 	for (int32 Index = Superhumans.Num() - 1; Index >= 0; --Index)
 	{
-		if (!Superhumans[Index] || FVector::Dist(Superhumans[Index]->GetActorLocation(), Around) > 60000.0)
+		if (Superhumans[Index] && FVector::Dist(Superhumans[Index]->GetActorLocation(), Around) <= 60000.0)
 		{
-			if (Superhumans[Index])
-			{
-				Superhumans[Index]->Destroy();
-			}
-			Superhumans.RemoveAtSwap(Index);
+			continue;
 		}
+		if (Superhumans[Index])
+		{
+			// Leaving the area means leaving the fight; otherwise they would keep swinging from miles away.
+			for (const FName& Tag : Superhumans[Index]->Tags)
+			{
+				const FString Name = Tag.ToString();
+				if (Name.StartsWith(TEXT("super:")))
+				{
+					Game->Sim().Fights.Disengage(TCHAR_TO_UTF8(*Name.RightChop(6)));
+				}
+			}
+			Superhumans[Index]->Destroy();
+		}
+		Superhumans.RemoveAtSwap(Index);
 	}
 	if (Superhumans.Num() >= Want || Around.IsNearlyZero())
 	{
 		return;
 	}
 	const Alignment Side = FMath::RandBool() ? Alignment::Hero : Alignment::Villain;
-	// The simulation makes them and keeps them, so a fight uses their real codename, threat and bounty.
-	const std::string Id = Game->Sim().EngageSuperhuman(Side, 1 + FMath::RandHelper(5));
-	const Fighter* Who = Game->Sim().Fights.Find(Id);
-	if (!Who)
-	{
-		return;
-	}
 	const FVector At = Around + FVector(FMath::FRandRange(-12000.0f, 12000.0f), FMath::FRandRange(-12000.0f, 12000.0f), 200.0f);
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	ACharacter* Person = GetWorld()->SpawnActor<ACharacter>(ACharacter::StaticClass(), FTransform(FRotator::ZeroRotator, At), Params);
 	if (!Person)
 	{
+		return;
+	}
+	// Registered only once they are standing somewhere, so a failed spawn leaves no ghost in the fight
+	// list. The simulation keeps them, so a fight uses their real codename, threat and bounty.
+	const std::string Id = Game->Sim().EngageSuperhuman(Side, 1 + FMath::RandHelper(5));
+	const Fighter* Who = Game->Sim().Fights.Find(Id);
+	if (!Who)
+	{
+		Person->Destroy();
 		return;
 	}
 	DTGMeshBuilder::DressPerson(Person, Side == Alignment::Hero ? 1 : 2);

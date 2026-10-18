@@ -40,6 +40,8 @@ public:
 
 	/** The streamed ground, which vehicles exclude from their body sweeps (their wheels ride on it). */
 	UProceduralMeshComponent* TerrainComponent() const { return Terrain; }
+	/** Streets, highway decks and venue aprons: driven on, not driven into. */
+	UProceduralMeshComponent* SurfacesComponent() const { return Surfaces; }
 	/** Throws away everything built and builds it again: the state changed under us. */
 	void Rebuild();
 

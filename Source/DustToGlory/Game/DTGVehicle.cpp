@@ -341,8 +341,10 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DTGBody), /*bTraceComplex*/ false, this);
 	if (World)
 	{
-		// Only the ground: buildings, streets and venue slabs belong to the same actor and must be hit.
+		// The ground and the road are driven on, so the body box may overlap them; buildings, which belong
+		// to the same actor, are not.
 		Params.AddIgnoredComponent(World->TerrainComponent());
+		Params.AddIgnoredComponent(World->SurfacesComponent());
 	}
 	FHitResult Hit;
 	const FQuat Rotation = ToUnrealQuat(Sim.State.Orientation);

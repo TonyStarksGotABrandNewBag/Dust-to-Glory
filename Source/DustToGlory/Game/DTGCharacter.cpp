@@ -340,33 +340,50 @@ void ADTGCharacter::UsePower(int32 Slot)
 			}
 		}
 	}
-	// If someone is in front of you, the power lands on them; otherwise it is just used.
+	// If someone is in front of you the power lands on them, and Strike is what uses it -- so the power is
+	// spent once either way, and levels and mutates once.
+	EffectivePower Effect;
 	const FString Target = EngageNearest();
-	if (!Target.IsEmpty())
+	if (Target.IsEmpty())
+	{
+		const GameState::PowerUse Used = Game->Sim().UsePower(Slot, Witnesses, /*bInPublic*/ true);
+		if (!Used.bOk)
+		{
+			return;
+		}
+		Effect = Used.Power;
+	}
+	else
 	{
 		const StrikeResult Hit = Game->Sim().Strike(TCHAR_TO_UTF8(*Target), StrikeKind::Power, Slot);
 		if (!Hit.Summary.empty())
 		{
 			Game->OnNotice.Broadcast(UTF8_TO_TCHAR(Hit.Summary.c_str()));
 		}
+		// Reading the power's numbers back is free; using it again would not be.
+		const PowerInstance* Instance = Game->Sim().PlayerPowers.Slot(Slot);
+		if (!Instance)
+		{
+			return;
+		}
+		Effect = Game->Sim().Powers.Evaluate(*Instance);
+		if (!Effect.Def)
+		{
+			return;
+		}
 	}
-	const GameState::PowerUse Used = Game->Sim().UsePower(Slot, Witnesses, /*bInPublic*/ true);
-	if (!Used.bOk)
-	{
-		return;
-	}
-	NextPowerTime[Slot] = Now + FMath::Max(0.2, Used.Power.CooldownS);
+	NextPowerTime[Slot] = Now + FMath::Max(0.2, Effect.CooldownS);
 
 	// What the power does in the world. The simulation owns the numbers; this is the body of it.
 	const FVector Forward = GetActorForwardVector();
-	switch (Used.Power.Def->Effect)
+	switch (Effect.Def->Effect)
 	{
 	case PowerEffect::Flight:
 		GetCharacterMovement()->SetMovementMode(MOVE_Flying);
-		GetCharacterMovement()->MaxFlySpeed = static_cast<float>(600.0 * Used.Power.Potency);
+		GetCharacterMovement()->MaxFlySpeed = static_cast<float>(600.0 * Effect.Potency);
 		break;
 	case PowerEffect::SuperSpeed:
-		GetCharacterMovement()->MaxWalkSpeed = static_cast<float>(420.0 * (1.0 + Used.Power.Potency));
+		GetCharacterMovement()->MaxWalkSpeed = static_cast<float>(420.0 * (1.0 + Effect.Potency));
 		break;
 	case PowerEffect::SuperStrength:
 	case PowerEffect::Telekinesis:
@@ -375,10 +392,10 @@ void ADTGCharacter::UsePower(int32 Slot)
 		const FVector Centre = GetActorLocation() + Forward * 150.0f;
 		for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
 		{
-			if (FVector::DistSquared(It->GetActorLocation(), Centre) < FMath::Square(Used.Power.RangeM * DTGMetresToUnreal))
+			if (FVector::DistSquared(It->GetActorLocation(), Centre) < FMath::Square(Effect.RangeM * DTGMetresToUnreal))
 			{
 				const FVector Push = (It->GetActorLocation() - GetActorLocation()).GetSafeNormal() + FVector(0.0f, 0.0f, 0.3f);
-				const Vec3 Impulse(Push.X * 4000.0 * Used.Power.Potency, Push.Y * 4000.0 * Used.Power.Potency, Push.Z * 4000.0 * Used.Power.Potency);
+				const Vec3 Impulse(Push.X * 4000.0 * Effect.Potency, Push.Y * 4000.0 * Effect.Potency, Push.Z * 4000.0 * Effect.Potency);
 				const FVector At = It->GetActorLocation();
 				It->Chassis().ApplyImpulse(Vec3(At.X / DTGMetresToUnreal, At.Y / DTGMetresToUnreal, At.Z / DTGMetresToUnreal), Impulse);
 			}
@@ -387,8 +404,8 @@ void ADTGCharacter::UsePower(int32 Slot)
 	}
 	case PowerEffect::Teleport:
 	{
-		const FVector Target = GetActorLocation() + Forward * static_cast<float>(Used.Power.RangeM * DTGMetresToUnreal);
-		SetActorLocation(Target, /*bSweep*/ true);
+		const FVector Landing = GetActorLocation() + Forward * static_cast<float>(Effect.RangeM * DTGMetresToUnreal);
+		SetActorLocation(Landing, /*bSweep*/ true);
 		break;
 	}
 	case PowerEffect::SonicBoom:
@@ -400,13 +417,13 @@ void ADTGCharacter::UsePower(int32 Slot)
 		// A line of force: what it hits takes it.
 		FHitResult Hit;
 		const FVector Start = GetActorLocation() + FVector(0.0f, 0.0f, 40.0f);
-		const FVector End = Start + Forward * static_cast<float>(Used.Power.RangeM * DTGMetresToUnreal);
+		const FVector End = Start + Forward * static_cast<float>(Effect.RangeM * DTGMetresToUnreal);
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(DTGPower), false, this);
 		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
 		{
 			if (ADTGVehicle* Car = Cast<ADTGVehicle>(Hit.GetActor()))
 			{
-				const Vec3 Impulse(Forward.X * 3000.0 * Used.Power.Potency, Forward.Y * 3000.0 * Used.Power.Potency, 800.0);
+				const Vec3 Impulse(Forward.X * 3000.0 * Effect.Potency, Forward.Y * 3000.0 * Effect.Potency, 800.0);
 				Car->Chassis().ApplyImpulse(Vec3(Hit.ImpactPoint.X / DTGMetresToUnreal, Hit.ImpactPoint.Y / DTGMetresToUnreal,
 										   Hit.ImpactPoint.Z / DTGMetresToUnreal), Impulse);
 			}
@@ -419,7 +436,7 @@ void ADTGCharacter::UsePower(int32 Slot)
 		// Visible again when the effect runs out.
 		FTimerHandle Handle;
 		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]() { SetActorHiddenInGame(false); }),
-			static_cast<float>(FMath::Max(0.5, Used.Power.DurationS)), false);
+			static_cast<float>(FMath::Max(0.5, Effect.DurationS)), false);
 		break;
 	}
 	default:

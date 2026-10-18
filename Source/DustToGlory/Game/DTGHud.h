@@ -78,6 +78,8 @@ private:
 	void RunTalkOption(int32 Index);
 	void RunTitleOption(int32 Index);
 	void RunEventOption(int32 Index);
+	/** Clears away everything standing in the old world and puts the player where the new one starts. */
+	void RestartWorld(bool bRebuildTerrain);
 
 	void Text(const FString& Line, float X, float Y, const FLinearColor& Colour = FLinearColor::White, float Scale = 1.0f);
 	void Panel(float X, float Y, float W, float H, const FLinearColor& Colour);

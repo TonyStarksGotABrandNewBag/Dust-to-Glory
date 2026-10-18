@@ -59,6 +59,8 @@ public:
 	/** Starts an event at its venue. The entry fee is taken by the simulation. */
 	bool StartEvent(dtg::sim::EventKind Kind, int32 Tier);
 	void AbandonEvent();
+	/** Forgets and destroys everything it has spawned: the world underneath has been replaced. */
+	void Reset();
 	EDTGRaceState RaceState() const { return State; }
 	dtg::sim::EventKind CurrentKind() const { return Kind; }
 	/** Player's position in the field right now (1 = leading). */

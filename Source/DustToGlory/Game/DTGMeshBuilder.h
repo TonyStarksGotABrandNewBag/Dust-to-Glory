@@ -15,6 +15,9 @@
 #include "Sim/CityLayout.h"
 #include "Sim/Vehicles.h"
 
+class AActor;
+class UDTGBody;
+
 /** A mesh under construction, in Unreal units and world space. */
 struct FDTGMesh
 {
@@ -90,5 +93,5 @@ namespace DTGMeshBuilder
 	 * Gives an actor a body that walks (see DTGBody). Seed picks their clothes, so the same person looks
 	 * the same each time; 1 and 2 are reserved for a hero and a villain, who are supposed to stand out.
 	 */
-	class UDTGBody* DressPerson(class AActor* Person, int32 Seed);
+	UDTGBody* DressPerson(AActor* Person, int32 Seed);
 }
