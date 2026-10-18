@@ -131,4 +131,57 @@ namespace dtg::sim
 		double SmoothSlip = 0.0;
 		double SmoothSpeed = 0.0;
 	};
+
+	/**
+	 * Weather you can hear: rain and thunder, built the same way as everything else here rather than
+	 * played from a file.
+	 *
+	 * Rain is filtered noise in two bands -- a hiss off the ground and a lower patter on the roof -- and
+	 * how much of each you get depends on how hard it is falling and whether you are inside something.
+	 * Thunder is a long noise burst swept from a crack down to a rumble, delayed by distance the way the
+	 * real thing is, so a far strike arrives as a roll seconds after the flash lights the road.
+	 */
+	class WeatherSynth
+	{
+	public:
+		void Configure(double InSampleRate);
+		/** Intensity 0..1 (what the sky is drawing), Shelter 0..1 (1 inside a car with the windows up). */
+		void Render(float* Out, int NumSamples, double Intensity, double Shelter);
+		/**
+		 * A strike, at a distance in kilometres. Near strikes crack, far ones roll; the sound is held
+		 * back by how long it takes to travel, which is what makes a storm feel like it has a middle.
+		 */
+		void Thunder(double DistanceKm, double Loudness);
+		/** True while any strike is still travelling or still sounding. */
+		bool IsThundering() const;
+
+	private:
+		/**
+		 * A storm throws strikes in clusters, and a far one is still on its way when the next goes off,
+		 * so more than one has to be in the air at a time. With a single slot the near clap of every
+		 * pair was overwritten before it was ever heard.
+		 */
+		static constexpr int MaxClaps = 4;
+
+		struct Clap
+		{
+			int Delay = 0;         // samples before it is heard
+			int Remaining = 0;     // samples left to sound
+			int Length = 1;
+			double Loudness = 0.0;
+			double Distance = 1.0;
+
+			bool Busy() const { return Remaining > 0 || Delay > 0; }
+		};
+
+		double SampleRate = 48000.0;
+		Biquad Hiss;
+		Biquad Patter;
+		Biquad Muffle;
+		Biquad Rumble;
+		Biquad Crack;
+		Rng Random{0x5704D20BULL};
+		double SmoothFall = 0.0;
+		std::array<Clap, MaxClaps> Booms{};
+	};
 }

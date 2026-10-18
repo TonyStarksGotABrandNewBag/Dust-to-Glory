@@ -364,4 +364,125 @@ namespace dtg::sim
 			Out[Index] = static_cast<float>(Clamp(std::tanh(Mix), -1.0, 1.0));
 		}
 	}
+
+	// ================================================================================ Weather
+
+	void WeatherSynth::Configure(double InSampleRate)
+	{
+		SampleRate = InSampleRate > 1000.0 ? InSampleRate : 48000.0;
+		// Rain is mostly high: the hiss of a thousand drops hitting things at once.
+		Hiss.SetBandPass(SampleRate, 4200.0, 0.6);
+		// And partly low: the heavier patter of the drops you are actually under.
+		Patter.SetBandPass(SampleRate, 900.0, 0.8);
+		// Shelter is a roof between you and all of it.
+		Muffle.SetLowPass(SampleRate, 1400.0, 0.707);
+		Rumble.SetLowPass(SampleRate, 110.0, 0.9);
+		Crack.SetBandPass(SampleRate, 1700.0, 0.7);
+		// Sample counts are in samples, so anything still in the air belongs to the old rate.
+		Booms = std::array<Clap, MaxClaps>{};
+		SmoothFall = 0.0;
+	}
+
+	bool WeatherSynth::IsThundering() const
+	{
+		for (const Clap& One : Booms)
+		{
+			if (One.Busy())
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void WeatherSynth::Thunder(double DistanceKm, double Loudness)
+	{
+		// A free slot, or failing that the one with least left in it -- losing the tail of an old roll
+		// is a better trade than losing a whole new strike.
+		Clap* Slot = nullptr;
+		for (Clap& One : Booms)
+		{
+			if (!One.Busy())
+			{
+				Slot = &One;
+				break;
+			}
+			if (!Slot || One.Delay + One.Remaining < Slot->Delay + Slot->Remaining)
+			{
+				Slot = &One;
+			}
+		}
+		if (!Slot)
+		{
+			return;
+		}
+		const double Distance = Clamp(DistanceKm, 0.2, 18.0);
+		Slot->Distance = Distance;
+		Slot->Loudness = Clamp(Loudness, 0.0, 1.0);
+		// Sound covers about a third of a kilometre a second, which is the count everybody knows.
+		Slot->Delay = static_cast<int>(Distance * 2.94 * SampleRate);
+		// A close strike is a crack; a distant one has had miles to smear into a roll.
+		const double Seconds = 0.7 + 0.35 * Distance;
+		Slot->Length = static_cast<int>(Seconds * SampleRate);
+		Slot->Remaining = Slot->Length;
+	}
+
+	void WeatherSynth::Render(float* Out, int NumSamples, double Intensity, double Shelter)
+	{
+		if (!Out || NumSamples <= 0)
+		{
+			return;
+		}
+		const double Dt = 1.0 / SampleRate;
+		const double SmoothK = 1.0 - std::exp(-Dt / 0.4); // weather arrives over a second or so
+		const double Inside = Clamp(Shelter, 0.0, 1.0);
+		const double Wanted = Clamp(Intensity, 0.0, 1.0);
+		for (int Index = 0; Index < NumSamples; ++Index)
+		{
+			SmoothFall += (Wanted - SmoothFall) * SmoothK;
+			const double NoiseValue = Random.NextDouble() * 2.0 - 1.0;
+
+			// Harder rain is louder and lower: a downpour is more roar than hiss.
+			double Mix = Hiss.Process(NoiseValue) * SmoothFall * 0.5 * (1.0 - 0.55 * Inside);
+			Mix += Patter.Process(NoiseValue) * SmoothFall * SmoothFall * 0.45;
+			if (Inside > 0.0)
+			{
+				// Inside a car you hear the drumming on the roof rather than the air.
+				Mix = Mix * (1.0 - Inside) + Muffle.Process(Mix) * Inside * 1.35;
+			}
+
+			// Everything still in the air: one filter pair shared between them, which is what a sky
+			// full of thunder sounds like anyway.
+			double Thunderclap = 0.0;
+			double CrackAmount = 0.0;
+			for (Clap& One : Booms)
+			{
+				if (One.Delay > 0)
+				{
+					One.Delay -= 1;
+					continue;
+				}
+				if (One.Remaining <= 0)
+				{
+					continue;
+				}
+				const double Through = 1.0 - static_cast<double>(One.Remaining) / static_cast<double>(One.Length);
+				One.Remaining -= 1;
+				// Thunder opens with its highest content and falls away into the low roll.
+				const double Near = Clamp(1.0 - One.Distance / 6.0, 0.0, 1.0);
+				const double Envelope = Through < 0.04 ? Through / 0.04 : std::exp(-(Through - 0.04) * 3.4);
+				Thunderclap += Envelope * One.Loudness * (0.35 + 0.65 * Near);
+				// The crack is only the first instant of a near strike; the roll is what is left.
+				CrackAmount += Envelope * One.Loudness * Near * std::exp(-Through * 11.0);
+			}
+			if (Thunderclap > 0.0)
+			{
+				const double Bang = Random.NextDouble() * 2.0 - 1.0;
+				double Strike = Rumble.Process(Bang) * 2.2 * Clamp(Thunderclap, 0.0, 1.6);
+				Strike += Crack.Process(Bang) * 1.4 * Clamp(CrackAmount, 0.0, 1.6);
+				Mix += Strike * (1.0 - 0.3 * Inside);
+			}
+			Out[Index] = static_cast<float>(Clamp(std::tanh(Mix), -1.0, 1.0));
+		}
+	}
 }

@@ -38,8 +38,13 @@ public:
 	/** How far you can see, in metres, which weather decides. */
 	double VisibilityM() const { return Visibility; }
 
+	/** How bright the current lightning flash is, 0 when there isn't one. */
+	double FlashStrength() const { return Flash; }
+
 private:
 	void ApplyWeather(dtg::sim::Weather Value, float DeltaSeconds);
+	/** Lightning: strikes on their own schedule during a storm and decay over a few frames. */
+	void Strike(bool bStormy, float DeltaSeconds);
 
 	UPROPERTY()
 	TObjectPtr<UDirectionalLightComponent> Sun;
@@ -59,6 +64,10 @@ private:
 	double Fraction = 0.5;
 	double SunPitch = 60.0;
 	double Visibility = 4000.0;
+	double Flash = 0.0;            // 0..1, the current flash, falling away
+	double NextStrike = 8.0;       // seconds until the next one
+	float SunBase = 6.0f;          // eased daylight level of the sun
+	bool bSunSettled = false;      // false until the first frame has set it from the clock
 	float Brightness = 6.0f;
 	float FogDensity = 0.02f;
 };

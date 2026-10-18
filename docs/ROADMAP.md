@@ -54,6 +54,13 @@ against the risk of telling, so a friend hands over what a stranger will not sel
 front of them, they repeat: word travels through the people they actually know, arriving attributed and
 losing a little conviction at every mouth, until the town has an opinion of you that nobody gave it.
 
+**Rain** — a storm you can see and hear. Three layers of streaks around the camera, built as geometry like
+everything else, leaning into the wind and into your own speed, so driving fast lays the rain over towards
+you and it radiates from a point ahead. Lightning lights the sky and the fog, and the thunder that follows
+it is held back by how long the sound would really take to arrive -- a far strike is a roll several seconds
+after the flash. The rain and the thunder are synthesised sample by sample, like the engine note, so a
+downpour gets louder and lower rather than crossfading, and from inside a car you hear the roof.
+
 ## Next
 
 In the order it's worth doing:
@@ -61,9 +68,8 @@ In the order it's worth doing:
 1. **Art.** The generated shapes are a floor, not a ceiling: they are the right size, in the right place,
    with the right silhouette, which is exactly what makes them straightforward to replace with modelled
    meshes and proper materials. Vehicle models would change the look of the game on their own.
-2. **Rain you can see.** Weather already darkens the sky and takes grip away; there are no particles.
-3. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
-4. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
+2. **More states.** The generator takes a state file and two exist; a third is a day of data entry.
+3. **Multiplayer.** Nothing in the split prevents it — the simulation is deterministic — but nothing
    supports it yet either.
 
 ## Thin on purpose

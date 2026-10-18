@@ -26,6 +26,21 @@ Nothing about that is special-cased — it falls out of `FiringSchedule` in `Sim
 `RoadSynth` handles the last two: squeal when the tires let go, a rolling roar that grows with speed, and
 wind over the top.
 
+## Weather
+
+`WeatherSynth` does the same job for rain and thunder. Rain is filtered noise in two bands -- a high hiss
+off everything at once and a lower patter -- mixed by how hard it is falling, so a downpour is more roar
+than hiss rather than the same loop turned up. A roof between you and it, a car or a building, puts the
+sound through a low-pass instead of swapping to a different file.
+
+Thunder is a noise burst that opens with a crack and falls away into a low roll, and it is **delayed by
+how far off the strike was**: about three seconds to the kilometre, which is the count everybody knows. A
+flash the player sees across the marsh is heard eight or nine seconds later, by which time the sky may
+have flashed again, so several claps can be in the air at once.
+
+The sky decides when lightning strikes, because it is the sky that lights up; `ADTGWeatherFx` watches the
+flash and asks for the clap. A brighter flash is a nearer strike, which is the only cue the player has.
+
 ## How it runs in the engine
 
 `UDTGEngineAudio` is a `USynthComponent`. `OnGenerateAudio` runs on the audio render thread and renders

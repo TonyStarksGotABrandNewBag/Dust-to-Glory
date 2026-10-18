@@ -10,6 +10,7 @@
 class ADTGEventDirector;
 class ADTGTrafficDirector;
 class ADTGSky;
+class ADTGWeatherFx;
 class ADTGWorldBuilder;
 class UDTGGameSubsystem;
 
@@ -52,6 +53,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<ADTGSky> Sky;
+
+	UPROPERTY()
+	TObjectPtr<ADTGWeatherFx> WeatherFx;
 
 	FVector SpawnPoint = FVector::ZeroVector;
 	bool bStarted = false;

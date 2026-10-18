@@ -80,16 +80,55 @@ void ADTGSky::Tick(float DeltaSeconds)
 	// South Carolina and Florida both face east, so the sun comes up over the Atlantic.
 	Sun->SetWorldRotation(FRotator(-SunPitch, 100.0 + Fraction * 200.0, 0.0));
 
-	ApplyWeather(Game->Sim().Weather.Current(), DeltaSeconds);
+	const Weather Now = Game->Sim().Weather.Current();
+	ApplyWeather(Now, DeltaSeconds);
+	Strike(Now == Weather::Storm, DeltaSeconds);
 
-	// Night is lit by the sky rather than the sun, and never goes fully black.
+	// Night is lit by the sky rather than the sun, and never goes fully black. A flash is added on top
+	// of all of it, so lightning lights a midnight road as well as a grey afternoon.
 	const double Daylight = FMath::Clamp((SunPitch + 6.0) / 18.0, 0.0, 1.0);
 	const float TargetIntensity = static_cast<float>(0.15 + Daylight * Brightness);
-	Sun->SetIntensity(FMath::FInterpTo(Sun->Intensity, TargetIntensity, DeltaSeconds, 2.0f));
+	// The daylight level is kept separately from what the light is actually set to, in case anything
+	// else is ever added on top of it. It starts where the first frame wants it, so a game that begins
+	// at night does not open with a second of daylight easing away.
+	SunBase = bSunSettled ? FMath::FInterpTo(SunBase, TargetIntensity, DeltaSeconds, 2.0f) : TargetIntensity;
+	bSunSettled = true;
+	Sun->SetIntensity(SunBase);
 	// Warm at the horizon, white overhead: the cheapest trick there is for making dusk look like dusk.
 	const double Warmth = 1.0 - FMath::Clamp(SunPitch / 25.0, 0.0, 1.0);
 	Sun->SetLightColor(FLinearColor(1.0f, static_cast<float>(1.0 - 0.35 * Warmth), static_cast<float>(1.0 - 0.6 * Warmth)));
-	Ambient->SetIntensity(static_cast<float>(0.25 + Daylight * 0.9));
+	// A flash is sky light rather than sun light. The sun is pitched below the horizon at night, so
+	// adding it there would light the world from underneath at exactly the moment it shows most.
+	// Lightning is instantaneous; the decay is what you actually see.
+	Ambient->SetIntensity(static_cast<float>(0.25 + Daylight * 0.9 + Flash * 11.0));
+	if (Flash > 0.0)
+	{
+		// The fog lights up with it, which is what makes a flash read across a whole wet street.
+		Fog->SetFogInscatteringColor(FLinearColor(
+			FMath::Min(1.0f, 0.45f + static_cast<float>(Flash) * 0.6f),
+			FMath::Min(1.0f, 0.5f + static_cast<float>(Flash) * 0.6f),
+			FMath::Min(1.0f, 0.6f + static_cast<float>(Flash) * 0.5f)));
+	}
+}
+
+void ADTGSky::Strike(bool bStormy, float DeltaSeconds)
+{
+	// A flash is bright for a frame or two and gone, sometimes with a second one on its heels, which is
+	// what makes lightning read as lightning rather than as the lights flickering.
+	Flash = FMath::Max(0.0, Flash - static_cast<double>(DeltaSeconds) * 7.0);
+	if (!bStormy)
+	{
+		NextStrike = FMath::Min(NextStrike, 4.0);
+		return;
+	}
+	NextStrike -= static_cast<double>(DeltaSeconds);
+	if (NextStrike > 0.0)
+	{
+		return;
+	}
+	Flash = FMath::FRandRange(0.5, 1.0);
+	// Clustered rather than metronomic: a storm gives you two close together and then nothing for a while.
+	NextStrike = FMath::FRand() < 0.35 ? FMath::FRandRange(0.12, 0.4) : FMath::FRandRange(5.0, 22.0);
 }
 
 void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)

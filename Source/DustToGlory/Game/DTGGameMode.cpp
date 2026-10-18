@@ -13,6 +13,7 @@
 #include "Game/DTGPlayerController.h"
 #include "Game/DTGSky.h"
 #include "Game/DTGTrafficDirector.h"
+#include "Game/DTGWeatherFx.h"
 #include "Game/DTGVehicle.h"
 #include "Game/DTGWorldBuilder.h"
 
@@ -85,6 +86,8 @@ void ADTGGameMode::SpawnDirectors()
 	// The sun, sky and fog follow the simulation's clock and weather.
 	Sky = GetWorld()->SpawnActor<ADTGSky>(ADTGSky::StaticClass(), FTransform::Identity, Params);
 	Events = GetWorld()->SpawnActor<ADTGEventDirector>(ADTGEventDirector::StaticClass(), FTransform::Identity, Params);
+	// Rain, which reads the same weather the sky and the tires do.
+	WeatherFx = GetWorld()->SpawnActor<ADTGWeatherFx>(ADTGWeatherFx::StaticClass(), FTransform::Identity, Params);
 }
 
 void ADTGGameMode::SpawnStarterCar()

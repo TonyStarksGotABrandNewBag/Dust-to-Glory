@@ -566,3 +566,131 @@ DTG_TEST(ManualGearboxShiftsOnlyWhenAsked)
 	EXPECT(Restored.LoadFromJson(Fresh.SaveToJson(), nullptr));
 	EXPECT(!Restored.AutomaticGearbox());
 }
+
+namespace
+{
+	/** Loudness of a block of samples. */
+	double Rms(const std::vector<float>& Samples, std::size_t From, std::size_t Count)
+	{
+		double Total = 0.0;
+		for (std::size_t Index = From; Index < From + Count && Index < Samples.size(); ++Index)
+		{
+			Total += static_cast<double>(Samples[Index]) * static_cast<double>(Samples[Index]);
+		}
+		return Count > 0 ? std::sqrt(Total / static_cast<double>(Count)) : 0.0;
+	}
+
+	/** How often the signal crosses zero, which stands in for how bright it is. */
+	double Brightness(const std::vector<float>& Samples, std::size_t From, std::size_t Count)
+	{
+		int Crossings = 0;
+		for (std::size_t Index = From + 1; Index < From + Count && Index < Samples.size(); ++Index)
+		{
+			Crossings += (Samples[Index] < 0.0f) != (Samples[Index - 1] < 0.0f) ? 1 : 0;
+		}
+		return Count > 1 ? static_cast<double>(Crossings) / static_cast<double>(Count) : 0.0;
+	}
+
+	std::vector<float> RenderWeather(WeatherSynth& Synth, double Seconds, double Intensity, double Shelter)
+	{
+		const std::size_t Count = static_cast<std::size_t>(48000.0 * Seconds);
+		std::vector<float> Samples(Count, 0.0f);
+		for (std::size_t At = 0; At + 480 <= Count; At += 480)
+		{
+			Synth.Render(Samples.data() + At, 480, Intensity, Shelter);
+		}
+		return Samples;
+	}
+}
+
+DTG_TEST(RainAndThunderAreSynthesised)
+{
+	WeatherSynth Dry;
+	Dry.Configure(48000.0);
+	const std::vector<float> Silence = RenderWeather(Dry, 1.0, 0.0, 0.0);
+	EXPECT(Rms(Silence, 0, Silence.size()) < 1e-4); // no weather, no sound
+
+	WeatherSynth Light;
+	Light.Configure(48000.0);
+	const std::vector<float> Drizzle = RenderWeather(Light, 3.0, 0.35, 0.0);
+	WeatherSynth Heavy;
+	Heavy.Configure(48000.0);
+	const std::vector<float> Downpour = RenderWeather(Heavy, 3.0, 1.0, 0.0);
+	// Measured after the level has settled, since weather arrives over about a second.
+	const double Quiet = Rms(Drizzle, 96000, 48000);
+	const double Loud = Rms(Downpour, 96000, 48000);
+	EXPECT(Quiet > 1e-3);
+	EXPECT(Loud > Quiet * 1.5);
+	// A downpour is more roar than hiss: harder rain sits lower.
+	EXPECT(Brightness(Downpour, 96000, 48000) < Brightness(Drizzle, 96000, 48000));
+
+	// A roof between you and it takes the top off the sound.
+	WeatherSynth Inside;
+	Inside.Configure(48000.0);
+	const std::vector<float> Sheltered = RenderWeather(Inside, 3.0, 1.0, 1.0);
+	EXPECT(Brightness(Sheltered, 96000, 48000) < Brightness(Downpour, 96000, 48000));
+
+	// Nothing ever clips, whatever is going on.
+	for (const float Sample : Downpour)
+	{
+		EXPECT(Sample >= -1.0f && Sample <= 1.0f);
+	}
+}
+
+DTG_TEST(ThunderArrivesWhenTheSoundDoes)
+{
+	// A strike five kilometres off is seen at once and heard about fifteen seconds later.
+	WeatherSynth Far;
+	Far.Configure(48000.0);
+	Far.Thunder(5.0, 1.0);
+	EXPECT(Far.IsThundering());
+	const std::vector<float> Distant = RenderWeather(Far, 20.0, 0.0, 0.0);
+	EXPECT(Rms(Distant, 0, 48000 * 10) < 1e-4);          // ten seconds of nothing
+	EXPECT(Rms(Distant, 48000 * 15, 48000 * 2) > 1e-3);  // and then the roll
+
+	// A strike on top of you arrives almost at once, and hits harder.
+	WeatherSynth Near;
+	Near.Configure(48000.0);
+	Near.Thunder(0.3, 1.0);
+	const std::vector<float> Close = RenderWeather(Near, 6.0, 0.0, 0.0);
+	EXPECT(Rms(Close, 0, 48000 * 2) > 1e-3);
+	EXPECT(Rms(Close, 0, 48000 * 2) > Rms(Distant, 48000 * 15, 48000 * 2));
+	// A near strike cracks; a far one has had miles to smear into a rumble.
+	EXPECT(Brightness(Close, 44100, 24000) > Brightness(Distant, 48000 * 15, 24000));
+
+	// And it ends: thunder is not a drone.
+	const std::vector<float> After = RenderWeather(Near, 4.0, 0.0, 0.0);
+	EXPECT(!Near.IsThundering());
+	EXPECT(Rms(After, 48000 * 2, 48000) < 1e-4);
+}
+
+DTG_TEST(AStormCanHaveSeveralClapsInTheAir)
+{
+	// A storm throws strikes in clusters, and a far one is still travelling when the next goes off. With
+	// one slot the near clap of every pair was overwritten before anybody heard it.
+	WeatherSynth Synth;
+	Synth.Configure(48000.0);
+	Synth.Thunder(0.4, 1.0);   // heard in about 1.2 seconds
+	Synth.Thunder(9.0, 1.0);   // heard in about 26 seconds, and must not eat the near one
+	const std::vector<float> Pair = RenderWeather(Synth, 5.0, 0.0, 0.0);
+	EXPECT(Rms(Pair, 48000, 48000 * 3) > 1e-3);
+	EXPECT(Synth.IsThundering()); // the far one is still on its way
+
+	// Four at once, the oldest giving way rather than the newest being dropped.
+	WeatherSynth Busy;
+	Busy.Configure(48000.0);
+	for (int Index = 0; Index < 6; ++Index)
+	{
+		Busy.Thunder(0.3 + 0.1 * static_cast<double>(Index), 1.0);
+	}
+	const std::vector<float> Many = RenderWeather(Busy, 6.0, 0.0, 0.0);
+	EXPECT(Rms(Many, 0, 48000 * 4) > 1e-3);
+	for (const float Sample : Many)
+	{
+		EXPECT(Sample >= -1.0f && Sample <= 1.0f); // several at once still must not clip
+	}
+
+	// Reconfiguring clears what was in the air: those counts were in the old sample rate.
+	Busy.Configure(48000.0);
+	EXPECT(!Busy.IsThundering());
+}
