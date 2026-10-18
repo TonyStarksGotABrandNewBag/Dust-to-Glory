@@ -6,6 +6,7 @@
 
 #include "Sim/SimCommon.h"
 
+#include <cstddef>
 #include <string>
 #include <vector>
 

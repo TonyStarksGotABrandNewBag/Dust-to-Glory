@@ -13,6 +13,7 @@
 #include "Sim/Tuning.h"
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 namespace dtg::sim

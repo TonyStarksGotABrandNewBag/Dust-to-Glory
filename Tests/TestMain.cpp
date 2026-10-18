@@ -1,6 +1,8 @@
 #include "TestFramework.h"
 
+#include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace dtg_test
 {

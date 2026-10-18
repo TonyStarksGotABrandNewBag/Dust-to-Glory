@@ -3,6 +3,7 @@
 #include "Sim/SimCommon.h"
 
 #include <array>
+#include <cstddef>
 #include <string>
 #include <vector>
 

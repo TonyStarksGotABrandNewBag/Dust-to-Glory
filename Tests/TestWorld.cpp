@@ -1,9 +1,12 @@
 #include "TestFramework.h"
 #include "TestSupport.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <set>
+#include <string>
 
 using namespace dtg::sim;
 

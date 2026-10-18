@@ -4,6 +4,9 @@
 #include "TestSupport.h"
 
 #include <cmath>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 using namespace dtg::sim;
 

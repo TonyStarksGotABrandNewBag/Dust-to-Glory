@@ -1,8 +1,13 @@
 #include "TestFramework.h"
 #include "TestSupport.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <set>
+#include <string>
+#include <vector>
 
 using namespace dtg::sim;
 

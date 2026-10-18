@@ -2,6 +2,7 @@
 // Shared by the engine and the tests so both interpret data files identically.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>

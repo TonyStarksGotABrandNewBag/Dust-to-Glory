@@ -22,7 +22,16 @@ jobs:
         run: cmake -S Tests -B Tests/build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
       - name: Build
-        run: cmake --build Tests/build --config RelWithDebInfo --parallel
+        shell: bash
+        run: |
+          # The compiler's own diagnostics are republished as annotations: CI logs aren't always reachable.
+          set -o pipefail
+          if ! cmake --build Tests/build --config RelWithDebInfo --parallel 2>&1 | tee build.log; then
+            grep -E "error|warning" build.log | head -12 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
 
       - name: Test
         run: ctest --test-dir Tests/build --build-config RelWithDebInfo --output-on-failure

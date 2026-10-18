@@ -1,6 +1,12 @@
 #include "TestFramework.h"
 #include "TestSupport.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 using namespace dtg::sim;
 
 DTG_TEST(JsonParsesAndRoundTrips)
