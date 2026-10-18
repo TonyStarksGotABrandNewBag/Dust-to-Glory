@@ -1,0 +1,1826 @@
+#include "Sim/GameState.h"
+
+#include <cstdio>
+
+namespace dtg::sim
+{
+	namespace detail_state
+	{
+		std::uint32_t ParseColor(const std::string& Text, std::uint32_t Fallback)
+		{
+			if (Text.size() != 7 || Text[0] != '#')
+			{
+				return Fallback;
+			}
+			std::uint32_t Value = 0;
+			for (std::size_t Index = 1; Index < 7; ++Index)
+			{
+				const char Character = Text[Index];
+				Value <<= 4u;
+				if (Character >= '0' && Character <= '9') Value |= static_cast<std::uint32_t>(Character - '0');
+				else if (Character >= 'a' && Character <= 'f') Value |= static_cast<std::uint32_t>(Character - 'a' + 10);
+				else if (Character >= 'A' && Character <= 'F') Value |= static_cast<std::uint32_t>(Character - 'A' + 10);
+				else return Fallback;
+			}
+			return Value;
+		}
+
+		std::vector<std::string> ReadStrings(const JsonValue& Array)
+		{
+			std::vector<std::string> Values;
+			for (const JsonValue& Item : Array.Items())
+			{
+				Values.push_back(Item.AsString());
+			}
+			return Values;
+		}
+
+		struct DoubleField
+		{
+			const char* Key;
+			double PartEffects::*Member;
+		};
+
+		const DoubleField EffectDoubles[] = {
+			{"powerMul", &PartEffects::PowerMul},
+			{"torqueMul", &PartEffects::TorqueMul},
+			{"redlineAdd", &PartEffects::RedlineAdd},
+			{"rpmShift", &PartEffects::RpmShift},
+			{"camLope", &PartEffects::CamLope},
+			{"inertiaMul", &PartEffects::InertiaMul},
+			{"boostBar", &PartEffects::BoostBar},
+			{"spoolSeconds", &PartEffects::SpoolSeconds},
+			{"boostThresholdRpm", &PartEffects::BoostThresholdRpm},
+			{"swapLitres", &PartEffects::SwapLitres},
+			{"swapPowerKw", &PartEffects::SwapPowerKw},
+			{"swapTorqueNm", &PartEffects::SwapTorqueNm},
+			{"swapPowerRpm", &PartEffects::SwapPowerRpm},
+			{"swapRedline", &PartEffects::SwapRedline},
+			{"swapMassKg", &PartEffects::SwapMassKg},
+			{"shiftTimeMul", &PartEffects::ShiftTimeMul},
+			{"clutchCapacityMul", &PartEffects::ClutchCapacityMul},
+			{"massKg", &PartEffects::MassKg},
+			{"massMul", &PartEffects::MassMul},
+			{"springMul", &PartEffects::SpringMul},
+			{"rideHeightAddM", &PartEffects::RideHeightAddM},
+			{"brakeTorqueMul", &PartEffects::BrakeTorqueMul},
+			{"tireMu", &PartEffects::TireMu},
+			{"tireStiffnessMul", &PartEffects::TireStiffnessMul},
+			{"wheelRadiusAddM", &PartEffects::WheelRadiusAddM},
+			{"wheelInertiaMul", &PartEffects::WheelInertiaMul},
+			{"trackAddM", &PartEffects::TrackAddM},
+			{"chassisGripMul", &PartEffects::ChassisGripMul},
+			{"steerLockAddDeg", &PartEffects::SteerLockAddDeg},
+			{"dragMul", &PartEffects::DragMul},
+			{"downforceFront", &PartEffects::DownforceFront},
+			{"downforceRear", &PartEffects::DownforceRear},
+			{"durabilityMul", &PartEffects::DurabilityMul},
+			{"nitroFraction", &PartEffects::NitroFraction},
+			{"nitroSeconds", &PartEffects::NitroSeconds},
+			{"exhaustLoudness", &PartEffects::ExhaustLoudness},
+			{"intakeLoudness", &PartEffects::IntakeLoudness},
+			{"pops", &PartEffects::Pops},
+		};
+
+		struct BoolField
+		{
+			const char* Key;
+			bool PartEffects::*Member;
+		};
+
+		const BoolField EffectBools[] = {
+			{"addsTurbo", &PartEffects::bAddsTurbo},
+			{"addsSupercharger", &PartEffects::bAddsSupercharger},
+			{"antiLag", &PartEffects::bAntiLag},
+			{"customRatios", &PartEffects::bCustomRatios},
+			{"adjustableFinal", &PartEffects::bAdjustableFinal},
+			{"straightCut", &PartEffects::bStraightCut},
+			{"adjustableDiff", &PartEffects::bAdjustableDiff},
+			{"adjustableSuspension", &PartEffects::bAdjustableSuspension},
+			{"adjustableBrakeBias", &PartEffects::bAdjustableBrakeBias},
+			{"adjustableAero", &PartEffects::bAdjustableAero},
+		};
+
+		const std::vector<std::string>& KnownEffectKeys()
+		{
+			static std::vector<std::string> Keys;
+			if (Keys.empty())
+			{
+				for (const auto& Field : EffectDoubles) Keys.push_back(Field.Key);
+				for (const auto& Field : EffectBools) Keys.push_back(Field.Key);
+				Keys.push_back("swapLayout");
+				Keys.push_back("swapAspiration");
+				Keys.push_back("gearsOverride");
+				Keys.push_back("diff");
+				Keys.push_back("exhaustTone");
+			}
+			return Keys;
+		}
+
+		std::string SectorForRole(LotRole Role)
+		{
+			switch (Role)
+			{
+			case LotRole::Diner: return "Restaurant";
+			case LotRole::Office: return "Finance";
+			case LotRole::TechCampus: return "Tech";
+			case LotRole::Studio: return "Media";
+			case LotRole::Dealership:
+			case LotRole::ModShop: return "Auto";
+			case LotRole::Church: return "Faith";
+			case LotRole::Bank: return "Finance";
+			case LotRole::Hotel: return "Hospitality";
+			default: return "Retail";
+			}
+		}
+
+		double MonthlyRevenueForRole(LotRole Role)
+		{
+			switch (Role)
+			{
+			case LotRole::Shop: return 25000.0;
+			case LotRole::Diner: return 40000.0;
+			case LotRole::Office: return 150000.0;
+			case LotRole::Hotel: return 120000.0;
+			case LotRole::FurnitureStore: return 80000.0;
+			case LotRole::ModShop: return 60000.0;
+			case LotRole::ElectronicsStore: return 70000.0;
+			case LotRole::Gym: return 30000.0;
+			case LotRole::Studio: return 35000.0;
+			case LotRole::Dealership: return 400000.0;
+			case LotRole::GardenCenter: return 30000.0;
+			case LotRole::Church: return 20000.0;
+			case LotRole::Museum: return 30000.0;
+			case LotRole::RealEstate: return 45000.0;
+			default: return 0.0;
+			}
+		}
+
+	}
+
+	// ==================================================================================== Loaders
+
+	bool LoadEconomyJson(const JsonValue& Root, EconomyIndex& Out, std::vector<std::string>& Errors)
+	{
+		if (!Root.IsObject())
+		{
+			Errors.push_back("economy.json: root must be an object");
+			return false;
+		}
+		Out.Era = Root.GetString("era", Out.Era);
+		Out.CalendarYear = Root.GetInt("calendarYear", Out.CalendarYear);
+		Out.Vehicles = Root.GetNumber("vehicles", Out.Vehicles);
+		Out.Housing = Root.GetNumber("housing", Out.Housing);
+		Out.Goods = Root.GetNumber("goods", Out.Goods);
+		Out.Wages = Root.GetNumber("wages", Out.Wages);
+		return true;
+	}
+
+	bool LoadVehiclesJson(const JsonValue& Root, VehicleCatalog& Out, std::vector<std::string>& Errors)
+	{
+		const JsonValue& Brands = Root.Get("brands");
+		if (!Brands.IsArray() || Brands.Size() == 0)
+		{
+			Errors.push_back("vehicles.json: 'brands' must be a non-empty array");
+			return false;
+		}
+		for (const JsonValue& BrandJson : Brands.Items())
+		{
+			Brand Maker;
+			Maker.Id = BrandJson.GetString("id");
+			Maker.Name = BrandJson.GetString("name");
+			if (Maker.Id.empty() || Maker.Name.empty())
+			{
+				Errors.push_back("vehicles.json: every brand needs an id and a name");
+				continue;
+			}
+			Maker.Country = BrandJson.GetString("country");
+			Maker.Tagline = BrandJson.GetString("tagline");
+			Maker.Founded = BrandJson.GetInt("founded", 1950);
+			Maker.Defunct = BrandJson.GetInt("defunct", 0);
+			Maker.Prestige = BrandJson.GetNumber("prestige", 0.5);
+			Maker.PerformanceBias = BrandJson.GetNumber("performance", 0.0);
+			Maker.ColorRgb = detail_state::ParseColor(BrandJson.GetString("color"), 0x8090A0);
+			Maker.SignatureEngine = BrandJson.GetString("signatureEngine");
+			if (!Maker.SignatureEngine.empty())
+			{
+				EngineLayout Ignored = EngineLayout::I4;
+				if (!ParseEngineLayout(Maker.SignatureEngine, Ignored))
+				{
+					Errors.push_back("vehicles.json: brand " + Maker.Id + " has unknown signatureEngine " + Maker.SignatureEngine);
+				}
+			}
+			for (const JsonValue& LineJson : BrandJson.Get("nameplates").Items())
+			{
+				Nameplate Line;
+				Line.BrandId = Maker.Id;
+				Line.Name = LineJson.GetString("name");
+				if (!ParseBodyStyle(LineJson.GetString("body"), Line.Body))
+				{
+					Errors.push_back("vehicles.json: " + Maker.Id + " " + Line.Name + " has unknown body " + LineJson.GetString("body"));
+				}
+				if (!ParseDrivetrain(LineJson.GetString("drive", "RWD"), Line.Drive))
+				{
+					Errors.push_back("vehicles.json: " + Maker.Id + " " + Line.Name + " has unknown drive");
+				}
+				Line.FirstYear = LineJson.GetInt("first", 1970);
+				Line.LastYear = LineJson.GetInt("last", 0);
+				Line.GenerationYears = LineJson.GetInt("genYears", 7);
+				Line.Tier = LineJson.GetNumber("tier", 0.5);
+				Line.ElectricFrom = LineJson.GetInt("electricFrom", 0);
+				Line.bEventOnly = LineJson.GetBool("eventOnly", false);
+				Line.EngineHint = LineJson.GetString("engine");
+				Line.AspirationHint = LineJson.GetString("aspiration");
+				Line.PositionHint = LineJson.GetString("position");
+				if (Line.Name.empty())
+				{
+					Errors.push_back("vehicles.json: nameplate without a name in " + Maker.Id);
+					continue;
+				}
+				Out.AddNameplate(Line);
+			}
+			Out.AddBrand(Maker);
+		}
+		return true;
+	}
+
+	bool LoadPartsJson(const JsonValue& Root, PartCatalog& Out, std::vector<std::string>& Errors)
+	{
+		const JsonValue& Parts = Root.Get("parts");
+		if (!Parts.IsArray())
+		{
+			Errors.push_back("parts.json: 'parts' must be an array");
+			return false;
+		}
+		for (const JsonValue& PartJson : Parts.Items())
+		{
+			PartDef Part;
+			Part.Id = PartJson.GetString("id");
+			Part.Name = PartJson.GetString("name");
+			Part.Maker = PartJson.GetString("maker");
+			Part.Description = PartJson.GetString("description");
+			if (Part.Id.empty() || !ParsePartCategory(PartJson.GetString("category"), Part.Category))
+			{
+				Errors.push_back("parts.json: part '" + Part.Id + "' needs an id and a valid category");
+				continue;
+			}
+			Part.Tier = PartJson.GetInt("tier", 1);
+			Part.PriceBase = PartJson.GetNumber("price", 0.0);
+			Part.PricePercentOfCar = PartJson.GetNumber("pricePct", 0.0);
+			Part.bIceOnly = PartJson.GetBool("iceOnly", false);
+			Part.bEvOnly = PartJson.GetBool("evOnly", false);
+			Part.Visual = PartJson.GetString("visual");
+			for (const JsonValue& BodyJson : PartJson.Get("bodies").Items())
+			{
+				BodyStyle Body = BodyStyle::Sedan;
+				if (ParseBodyStyle(BodyJson.AsString(), Body))
+				{
+					Part.Bodies.push_back(Body);
+				}
+				else
+				{
+					Errors.push_back("parts.json: " + Part.Id + " lists unknown body " + BodyJson.AsString());
+				}
+			}
+			const JsonValue& Fx = PartJson.Get("effects");
+			for (const auto& Member : Fx.Members())
+			{
+				bool bKnown = false;
+				for (const std::string& Key : detail_state::KnownEffectKeys())
+				{
+					bKnown = bKnown || Key == Member.first;
+				}
+				if (!bKnown)
+				{
+					Errors.push_back("parts.json: " + Part.Id + " has unknown effect '" + Member.first + "'");
+				}
+			}
+			for (const auto& Field : detail_state::EffectDoubles)
+			{
+				if (const JsonValue* Value = Fx.Find(Field.Key))
+				{
+					Part.Effects.*(Field.Member) = Value->AsNumber();
+				}
+			}
+			for (const auto& Field : detail_state::EffectBools)
+			{
+				if (const JsonValue* Value = Fx.Find(Field.Key))
+				{
+					Part.Effects.*(Field.Member) = Value->AsBool();
+				}
+			}
+			Part.Effects.SwapLayout = Fx.GetString("swapLayout");
+			Part.Effects.SwapAspiration = Fx.GetString("swapAspiration");
+			Part.Effects.GearsOverride = Fx.GetInt("gearsOverride", 0);
+			Part.Effects.ExhaustTone = Fx.GetInt("exhaustTone", -1);
+			const std::string Diff = ToLowerAscii(Fx.GetString("diff"));
+			if (!Diff.empty())
+			{
+				Part.Effects.bSetsDiff = true;
+				if (Diff == "open") Part.Effects.Diff = DiffType::Open;
+				else if (Diff == "lsd" || Diff == "limitedslip") Part.Effects.Diff = DiffType::LimitedSlip;
+				else if (Diff == "locked" || Diff == "spool") Part.Effects.Diff = DiffType::Locked;
+				else Errors.push_back("parts.json: " + Part.Id + " has unknown diff '" + Diff + "'");
+			}
+			Out.Add(Part);
+		}
+		return true;
+	}
+
+	bool LoadCareersJson(const JsonValue& Root, CareerBook& Out, std::vector<std::string>& Errors)
+	{
+		for (const JsonValue& EduJson : Root.Get("educations").Items())
+		{
+			EducationDef Edu;
+			Edu.Id = EduJson.GetString("id");
+			Edu.Name = EduJson.GetString("name");
+			Edu.Description = EduJson.GetString("description");
+			Edu.Tuition = ToMoney(EduJson.GetNumber("tuition", 0.0));
+			Edu.StudyHours = EduJson.GetInt("hours", 20);
+			Edu.Prerequisite = EduJson.GetString("prerequisite");
+			if (!ParseSkill(EduJson.GetString("skill", "Science"), Edu.TrainsSkill))
+			{
+				Errors.push_back("careers.json: education " + Edu.Id + " has unknown skill");
+			}
+			if (Edu.Id.empty())
+			{
+				Errors.push_back("careers.json: education without an id");
+				continue;
+			}
+			Out.AddEducation(Edu);
+		}
+		const JsonValue& Careers = Root.Get("careers");
+		if (!Careers.IsArray() || Careers.Size() == 0)
+		{
+			Errors.push_back("careers.json: 'careers' must be a non-empty array");
+			return false;
+		}
+		for (const JsonValue& CareerJson : Careers.Items())
+		{
+			CareerDef Def;
+			Def.Id = CareerJson.GetString("id");
+			Def.Name = CareerJson.GetString("name");
+			Def.Category = CareerJson.GetString("category");
+			Def.Description = CareerJson.GetString("description");
+			Def.Workplace = CareerJson.GetString("workplace");
+			Def.Education = CareerJson.GetString("education");
+			Def.RequiredSkillLevel = CareerJson.GetInt("requiredLevel", 0);
+			Def.ShiftHours = CareerJson.GetInt("shiftHours", 8);
+			if (!ParseSkill(CareerJson.GetString("skill", "People"), Def.PrimarySkill))
+			{
+				Errors.push_back("careers.json: career " + Def.Id + " has unknown skill");
+			}
+			if (!ParseMinigame(CareerJson.GetString("minigame", "SkillCheck"), Def.Minigame))
+			{
+				Errors.push_back("careers.json: career " + Def.Id + " has unknown minigame");
+			}
+			LotRole Workplace = LotRole::Office;
+			if (!ParseLotRole(Def.Workplace, Workplace))
+			{
+				Errors.push_back("careers.json: career " + Def.Id + " has unknown workplace " + Def.Workplace);
+			}
+			Def.Tasks = detail_state::ReadStrings(CareerJson.Get("tasks"));
+			for (const JsonValue& LevelJson : CareerJson.Get("levels").Items())
+			{
+				CareerLevel Level;
+				Level.Title = LevelJson.GetString("title");
+				Level.HourlyPay = ToMoney(LevelJson.GetNumber("pay", 10.0));
+				Level.XpToNext = LevelJson.GetInt("xp", 200);
+				Def.Levels.push_back(Level);
+			}
+			if (Def.Id.empty() || Def.Levels.empty())
+			{
+				Errors.push_back("careers.json: career '" + Def.Id + "' needs an id and at least one level");
+				continue;
+			}
+			Out.AddCareer(Def);
+		}
+		for (const CareerDef& Def : Out.Careers())
+		{
+			if (!Def.Education.empty() && !Out.FindEducation(Def.Education))
+			{
+				Errors.push_back("careers.json: career " + Def.Id + " requires missing education " + Def.Education);
+			}
+		}
+		return true;
+	}
+
+	bool LoadPowersJson(const JsonValue& Root, PowerRoster& Out, std::vector<std::string>& Errors)
+	{
+		for (const JsonValue& MutationJson : Root.Get("mutations").Items())
+		{
+			MutationDef Mutation;
+			Mutation.Id = MutationJson.GetString("id");
+			Mutation.Name = MutationJson.GetString("name");
+			Mutation.Description = MutationJson.GetString("description");
+			Mutation.Weight = MutationJson.GetNumber("weight", 1.0);
+			Mutation.bDrawback = MutationJson.GetBool("drawback", false);
+			const JsonValue& Mods = MutationJson.Get("mods");
+			Mutation.Mods.Potency = Mods.GetNumber("potency", 1.0);
+			Mutation.Mods.Range = Mods.GetNumber("range", 1.0);
+			Mutation.Mods.Cooldown = Mods.GetNumber("cooldown", 1.0);
+			Mutation.Mods.EnergyCost = Mods.GetNumber("energy", 1.0);
+			Mutation.Mods.Duration = Mods.GetNumber("duration", 1.0);
+			Out.AddMutation(Mutation);
+		}
+		const JsonValue& Powers = Root.Get("powers");
+		if (!Powers.IsArray() || Powers.Size() < 3)
+		{
+			Errors.push_back("powers.json: at least three powers are required");
+			return false;
+		}
+		for (const JsonValue& PowerJson : Powers.Items())
+		{
+			PowerDef Def;
+			Def.Id = PowerJson.GetString("id");
+			Def.Name = PowerJson.GetString("name");
+			Def.Archetype = PowerJson.GetString("archetype");
+			Def.Description = PowerJson.GetString("description");
+			if (!ParsePowerEffect(PowerJson.GetString("effect"), Def.Effect))
+			{
+				Errors.push_back("powers.json: power " + Def.Id + " has unknown effect " + PowerJson.GetString("effect"));
+			}
+			Def.BaseCooldownS = PowerJson.GetNumber("cooldown", 5.0);
+			Def.BaseEnergy = PowerJson.GetNumber("energy", 20.0);
+			Def.BaseRangeM = PowerJson.GetNumber("range", 20.0);
+			Def.BaseDurationS = PowerJson.GetNumber("duration", 0.0);
+			Def.BasePotency = PowerJson.GetNumber("potency", 1.0);
+			Def.Mutations = detail_state::ReadStrings(PowerJson.Get("mutations"));
+			Def.EvolvesTo = PowerJson.GetString("evolvesTo");
+			Def.bStarter = PowerJson.GetBool("starter", true);
+			Out.AddPower(Def);
+		}
+		for (const PowerDef& Def : Out.Powers())
+		{
+			for (const std::string& MutationId : Def.Mutations)
+			{
+				if (!Out.FindMutation(MutationId))
+				{
+					Errors.push_back("powers.json: power " + Def.Id + " references missing mutation " + MutationId);
+				}
+			}
+			if (!Def.EvolvesTo.empty() && !Out.FindPower(Def.EvolvesTo))
+			{
+				Errors.push_back("powers.json: power " + Def.Id + " evolves into missing power " + Def.EvolvesTo);
+			}
+		}
+		return true;
+	}
+
+	bool LoadFurnitureJson(const JsonValue& Root, HomeAndFurniture& Out, std::vector<std::string>& Errors)
+	{
+		const JsonValue& Items = Root.Get("items");
+		if (!Items.IsArray() || Items.Size() == 0)
+		{
+			Errors.push_back("furniture.json: 'items' must be a non-empty array");
+			return false;
+		}
+		for (const JsonValue& ItemJson : Items.Items())
+		{
+			FurnitureItem Item;
+			Item.Id = ItemJson.GetString("id");
+			Item.Name = ItemJson.GetString("name");
+			Item.Store = ItemJson.GetString("store");
+			Item.Category = ItemJson.GetString("category");
+			Item.Price = ToMoney(ItemJson.GetNumber("price", 100.0));
+			Item.WidthM = ItemJson.GetNumber("w", 1.0);
+			Item.DepthM = ItemJson.GetNumber("d", 1.0);
+			Item.HeightM = ItemJson.GetNumber("h", 1.0);
+			Item.ColorRgb = detail_state::ParseColor(ItemJson.GetString("color"), 0x8B6F4E);
+			if (Item.Id.empty() || Item.Store.empty())
+			{
+				Errors.push_back("furniture.json: item '" + Item.Id + "' needs an id and a store");
+				continue;
+			}
+			Out.AddItem(Item);
+		}
+		return true;
+	}
+
+	bool LoadLawsJson(const JsonValue& Root, std::vector<LawDef>& Out, std::vector<std::string>& Errors)
+	{
+		const JsonValue& Laws = Root.Get("laws");
+		if (!Laws.IsArray())
+		{
+			Errors.push_back("laws.json: 'laws' must be an array");
+			return false;
+		}
+		struct OfficeName
+		{
+			const char* Key;
+			Office Value;
+		};
+		const OfficeName Offices[] = {
+			{"citycouncil", Office::CityCouncil}, {"mayor", Office::Mayor}, {"staterepresentative", Office::StateRepresentative},
+			{"governor", Office::Governor}, {"senator", Office::Senator}, {"president", Office::President}};
+		for (const JsonValue& LawJson : Laws.Items())
+		{
+			LawDef Law;
+			Law.Id = LawJson.GetString("id");
+			Law.Name = LawJson.GetString("name");
+			Law.Description = LawJson.GetString("description");
+			Law.Popularity = LawJson.GetNumber("popularity", 0.0);
+			const std::string OfficeKey = ToLowerAscii(LawJson.GetString("minimumOffice", "CityCouncil"));
+			bool bFound = false;
+			for (const OfficeName& Entry : Offices)
+			{
+				if (OfficeKey == Entry.Key)
+				{
+					Law.MinimumOffice = Entry.Value;
+					bFound = true;
+				}
+			}
+			if (!bFound)
+			{
+				Errors.push_back("laws.json: law " + Law.Id + " has unknown minimumOffice");
+			}
+			const JsonValue& Fx = LawJson.Get("effects");
+			Law.Effects.SpeedingHeatMul = Fx.GetNumber("speedingHeatMul", 1.0);
+			Law.Effects.PoliceUnitsMul = Fx.GetNumber("policeUnitsMul", 1.0);
+			Law.Effects.BusinessHealthBonus = Fx.GetNumber("businessHealthBonus", 0.0);
+			Law.Effects.WageMul = Fx.GetNumber("wageMul", 1.0);
+			Law.Effects.TrafficDensityMul = Fx.GetNumber("trafficDensityMul", 1.0);
+			Law.Effects.HousingPriceMul = Fx.GetNumber("housingPriceMul", 1.0);
+			Law.Effects.VehiclePriceMul = Fx.GetNumber("vehiclePriceMul", 1.0);
+			Law.Effects.HackingHeatMul = Fx.GetNumber("hackingHeatMul", 1.0);
+			Law.Effects.TuitionMul = Fx.GetNumber("tuitionMul", 1.0);
+			Law.Effects.bStreetRacingLegal = Fx.GetBool("streetRacingLegal", false);
+			if (Law.Id.empty() || Law.Name.empty())
+			{
+				Errors.push_back("laws.json: every law needs an id and a name");
+				continue;
+			}
+			Out.push_back(Law);
+		}
+		return true;
+	}
+
+	// ==================================================================================== Content
+
+	bool GameState::LoadContent(const ContentFiles& Files, ContentReport& Report)
+	{
+		struct Source
+		{
+			const std::string* Text;
+			const char* Name;
+			JsonValue Parsed;
+		};
+		Source Sources[] = {
+			{&Files.Economy, "economy.json", {}},
+			{&Files.Vehicles, "vehicles.json", {}},
+			{&Files.Parts, "parts.json", {}},
+			{&Files.Careers, "careers.json", {}},
+			{&Files.Powers, "powers.json", {}},
+			{&Files.Furniture, "furniture.json", {}},
+			{&Files.Companies, "companies.json", {}},
+			{&Files.Laws, "laws.json", {}},
+		};
+		for (Source& Entry : Sources)
+		{
+			JsonParseResult Result = ParseJson(*Entry.Text);
+			if (!Result.bOk)
+			{
+				char Buffer[256];
+				std::snprintf(Buffer, sizeof(Buffer), "%s: %s at line %zu, column %zu", Entry.Name, Result.Error.c_str(), Result.Line, Result.Column);
+				Report.Errors.push_back(Buffer);
+			}
+			Entry.Parsed = std::move(Result.Value);
+		}
+		if (!Report.Ok())
+		{
+			return false;
+		}
+
+		Economy = EconomyIndex();
+		Vehicles = VehicleCatalog();
+		Parts = PartCatalog();
+		Careers = CareerBook();
+		Powers = PowerRoster();
+		Homes = HomeAndFurniture();
+
+		LoadEconomyJson(Sources[0].Parsed, Economy, Report.Errors);
+		LoadVehiclesJson(Sources[1].Parsed, Vehicles, Report.Errors);
+		LoadPartsJson(Sources[2].Parsed, Parts, Report.Errors);
+		LoadCareersJson(Sources[3].Parsed, Careers, Report.Errors);
+		LoadPowersJson(Sources[4].Parsed, Powers, Report.Errors);
+		LoadFurnitureJson(Sources[5].Parsed, Homes, Report.Errors);
+		CompaniesData = Sources[6].Parsed;
+		LawBook.clear();
+		LoadLawsJson(Sources[7].Parsed, LawBook, Report.Errors);
+
+		const int CatalogYear = Sources[0].Parsed.GetInt("catalogYear", 2026);
+		Vehicles.Build(CatalogYear, Economy.Vehicles);
+
+		CityConfig Config;
+		Config.Seed = WorldSeed;
+		for (const Brand& Maker : Vehicles.Brands())
+		{
+			Config.Brands.emplace_back(Maker.Id, Maker.Name);
+		}
+		Config.FurnitureStores = Homes.Stores();
+		for (const CareerDef& Def : Careers.Careers())
+		{
+			Config.RequiredWorkplaces.push_back(Def.Workplace);
+		}
+		City = GenerateCity(Config);
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			if (IsResidential(Building.Role))
+			{
+				Property Home;
+				Home.Id = PropertyIdFor(Building.Id);
+				Home.Name = Building.Name;
+				Home.Kind = Building.Role == LotRole::Home ? "House" : "Apartment";
+				Home.Price = static_cast<Money>(std::llround(static_cast<double>(Building.Price) * Economy.Housing));
+				Home.Bedrooms = Building.Role == LotRole::Home ? 3 : 2;
+				Home.InteriorWidthM = Building.Footprint.Width() - 1.0;
+				Home.InteriorDepthM = Building.Footprint.Depth() - 1.0;
+				Homes.AddProperty(Home);
+			}
+		}
+
+		Markets = Market();
+		BuildBusinesses(CompaniesData, Report);
+
+		Report.Brands = static_cast<int>(Vehicles.Brands().size());
+		Report.Nameplates = static_cast<int>(Vehicles.Nameplates().size());
+		Report.Models = static_cast<int>(Vehicles.Models().size());
+		Report.Parts = static_cast<int>(Parts.All().size());
+		Report.Careers = static_cast<int>(Careers.Careers().size());
+		Report.Educations = static_cast<int>(Careers.Educations().size());
+		Report.Powers = static_cast<int>(Powers.Powers().size());
+		Report.Mutations = static_cast<int>(Powers.Mutations().size());
+		Report.FurnitureItems = static_cast<int>(Homes.Items().size());
+		Report.Businesses = static_cast<int>(Markets.Businesses().size());
+		Report.Buildings = static_cast<int>(City.Buildings.size());
+		Report.Laws = static_cast<int>(LawBook.size());
+		return Report.Ok();
+	}
+
+	void GameState::BuildBusinesses(const JsonValue& Companies, ContentReport& Report)
+	{
+		Rng Local(WorldSeed ^ 0xB0B0B0ULL);
+		// Public companies first; an office tower named after one becomes its headquarters.
+		for (const JsonValue& CompanyJson : Companies.Get("public").Items())
+		{
+			Business Value;
+			Value.Id = CompanyJson.GetString("id");
+			Value.Name = CompanyJson.GetString("name");
+			Value.Sector = CompanyJson.GetString("sector", "Finance");
+			Value.BaseRevenue = ToMoney(CompanyJson.GetNumber("revenue", 5000000.0));
+			Value.BaseCosts = ToMoney(CompanyJson.GetNumber("costs", 4500000.0));
+			Value.Cash = Value.BaseRevenue;
+			Value.Integrity = CompanyJson.GetNumber("integrity", 0.8);
+			Value.Health = CompanyJson.GetNumber("health", 0.7);
+			Value.Rep.Rating = CompanyJson.GetNumber("rating", 3.8);
+			Value.Rep.Followers = CompanyJson.GetInt("followers", 50000);
+			if (Value.Id.empty() || Value.Name.empty())
+			{
+				Report.Errors.push_back("companies.json: public company needs an id and a name");
+				continue;
+			}
+			for (const BuildingPlan& Building : City.Buildings)
+			{
+				if (Building.Role == LotRole::Office && Building.Name.rfind(Value.Name, 0) == 0 && !Markets.FindByBuilding(Building.Id))
+				{
+					Value.BuildingId = Building.Id;
+					break;
+				}
+			}
+			Markets.AddBusiness(Value);
+			Markets.ListStock(Value.Id, CompanyJson.GetString("ticker"), CompanyJson.GetNumber("price", 20.0),
+				CompanyJson.GetInt64("shares", 10000000), CompanyJson.GetNumber("volatility", 0.02));
+		}
+		// Rival ministries across the region.
+		for (const JsonValue& MinistryJson : Companies.Get("ministries").Items())
+		{
+			Business Value;
+			Value.Id = MinistryJson.GetString("id");
+			Value.Name = MinistryJson.GetString("name");
+			Value.Sector = "Faith";
+			Value.BaseRevenue = ToMoney(MinistryJson.GetNumber("giving", 20000.0));
+			Value.BaseCosts = static_cast<Money>(static_cast<double>(Value.BaseRevenue) * 0.9);
+			Value.Integrity = MinistryJson.GetNumber("integrity", 0.8);
+			Value.Doctrine = MinistryJson.GetNumber("doctrine", 0.9);
+			Value.Rep.Followers = MinistryJson.GetInt("followers", 400);
+			Value.Rep.Trust = MinistryJson.GetNumber("trust", 0.75);
+			const std::string Building = MinistryJson.GetString("building");
+			if (Building == "Church")
+			{
+				if (const BuildingPlan* Church = City.FirstWithRole(LotRole::Church))
+				{
+					Value.BuildingId = Church->Id;
+				}
+			}
+			Markets.AddBusiness(Value);
+		}
+		// Every commercial building in the city is a private business.
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			const double Revenue = detail_state::MonthlyRevenueForRole(Building.Role);
+			if (Revenue <= 0.0 || Markets.FindByBuilding(Building.Id))
+			{
+				continue;
+			}
+			Business Value;
+			Value.Id = "biz-" + std::to_string(Building.Id);
+			Value.Name = Building.Name;
+			Value.Sector = detail_state::SectorForRole(Building.Role);
+			Value.BuildingId = Building.Id;
+			const double Size = Clamp(0.6 + 0.1 * Building.Floors, 0.6, 2.5);
+			Value.BaseRevenue = ToMoney(std::round(Revenue * Size * Local.Range(0.8, 1.2)));
+			Value.BaseCosts = static_cast<Money>(static_cast<double>(Value.BaseRevenue) * Local.Range(0.82, 0.97));
+			Value.Cash = Value.BaseRevenue / 2;
+			Value.Integrity = Local.Range(0.4, 1.0);
+			Value.Rep.Rating = Local.Range(3.2, 4.6);
+			Value.Rep.ReviewCount = Local.RangeInt(5, 200);
+			Value.Rep.Followers = Local.RangeInt(50, 3000);
+			const double Roll = Local.NextDouble();
+			int ProblemCount = 0;
+			if (Roll < 0.08)
+			{
+				ProblemCount = Local.RangeInt(2, 3);
+				Value.Health = 0.2;
+			}
+			else if (Roll < 0.33)
+			{
+				ProblemCount = Local.RangeInt(1, 2);
+				Value.Health = 0.5;
+			}
+			for (int Index = 0; Index < ProblemCount; ++Index)
+			{
+				const ProblemKind Kind = static_cast<ProblemKind>(Local.RangeInt(0, static_cast<int>(ProblemKind::Count) - 1));
+				bool bHas = false;
+				for (const ProblemKind Existing : Value.Problems) bHas = bHas || Existing == Kind;
+				if (!bHas) Value.Problems.push_back(Kind);
+			}
+			Markets.AddBusiness(Value);
+		}
+	}
+
+	void GameState::NewGame(std::uint64_t Seed, const std::string& Name)
+	{
+		Random.Reseed(Seed);
+		PlayerName = Name.empty() ? std::string("Player") : Name;
+		Funds = Wallet(Dollars(2500));
+		Clock = GameClock();
+		Weather = WeatherSystem();
+		Player = Profile();
+		Jobs.clear();
+		PlayerPowers = PowerSet();
+		Homes.Load(HomeAndFurniture::Snapshot());
+		Garage.clear();
+		ActiveVehicleUid.clear();
+		HackTools = HackToolkit();
+		Wanted = WantedSystem();
+		PlayerMinistry = Ministry();
+		Ip = IpPortfolio();
+		Npcs = NpcPopulation();
+		UsedCars = UsedCarMarket();
+		Politics = PoliticalCareer();
+		NextVehicleNumber = 1;
+		EventsWon = 0;
+		PendingNotifications.clear();
+
+		// Everyone starts with a modest apartment and a cheap, old car.
+		if (City.StarterHomeId >= 0)
+		{
+			Homes.GrantProperty(PropertyIdFor(City.StarterHomeId));
+		}
+		const VehicleModel* Starter = nullptr;
+		for (const VehicleModel& Model : Vehicles.Models())
+		{
+			if (!Model.bEventOnly && (Model.Body == BodyStyle::Hatchback || Model.Body == BodyStyle::Sedan) &&
+				(!Starter || Model.MarketPrice < Starter->MarketPrice))
+			{
+				Starter = &Model;
+			}
+		}
+		if (Starter)
+		{
+			ActiveVehicleUid = GrantVehicle(Starter->Id);
+		}
+		RefreshHackBoard();
+		RefreshUsedCars();
+		Notify("Welcome to Dust Valley, " + PlayerName + ". Choose your powers, find a job, and make something of yourself.");
+	}
+
+	// ==================================================================================== Time
+
+	TickReport GameState::Advance(double RealSeconds)
+	{
+		TickReport Report;
+		const std::int64_t Before = Clock.TotalMinutes();
+		Report.MinutesElapsed = Clock.Advance(RealSeconds);
+		for (std::int64_t Minute = Before + 1; Minute <= Before + Report.MinutesElapsed; ++Minute)
+		{
+			RunMinute(Minute, Report);
+		}
+		return Report;
+	}
+
+	TickReport GameState::Skip(std::int64_t Minutes)
+	{
+		TickReport Report;
+		const std::int64_t Before = Clock.TotalMinutes();
+		Clock.Skip(Minutes);
+		Report.MinutesElapsed = Clock.TotalMinutes() - Before;
+		for (std::int64_t Minute = Before + 1; Minute <= Clock.TotalMinutes(); ++Minute)
+		{
+			RunMinute(Minute, Report);
+		}
+		return Report;
+	}
+
+	void GameState::RunMinute(std::int64_t Minute, TickReport& Report)
+	{
+		if (Weather.Update(Minute, Random))
+		{
+			Report.bWeatherChanged = true;
+		}
+		for (const DeliveryEvent& Event : Homes.Update(Minute))
+		{
+			Report.Deliveries.push_back(Event);
+			if (Event.NewStatus == OrderStatus::OutForDelivery)
+			{
+				Notify("Your furniture order #" + std::to_string(Event.OrderId) + " is out for delivery.");
+			}
+			else if (Event.NewStatus == OrderStatus::Delivered)
+			{
+				Notify("Furniture order #" + std::to_string(Event.OrderId) + " was delivered. Arrange it at home.");
+			}
+		}
+		const std::int64_t TimeOfDay = Minute % GameClock::MinutesPerDay;
+		const int DayOfWeek = static_cast<int>((Minute / GameClock::MinutesPerDay) % 7);
+		if (TimeOfDay == 6 * 60)
+		{
+			Report.bNewDay = true;
+			RefreshHackBoard();
+			RefreshUsedCars();
+		}
+		const ElectionResult Election = Politics.Update(Minute, Random);
+		if (Election.bHeld)
+		{
+			Report.Election = Election;
+			const int Share = static_cast<int>(std::lround(Election.PlayerShare * 100.0));
+			Notify(Election.bWon ? "Election night: you won with " + std::to_string(Share) + "%! You are now " + OfficeTitle(Election.Target) + "."
+				: "Election night: " + Election.Opponent + " beat you (" + std::to_string(Share) + "% for you).");
+		}
+		if (TimeOfDay == 16 * 60)
+		{
+			RunDay(Minute, Report);
+		}
+		if (DayOfWeek == 6 && TimeOfDay == 11 * 60)
+		{
+			RunWeek(Minute, Report);
+		}
+	}
+
+	void GameState::RunDay(std::int64_t Minute, TickReport& Report)
+	{
+		SyncMinistryBusiness();
+		Markets.PolicyHealthBonus = ActiveLaws().BusinessHealthBonus;
+		const Money Income = Markets.DailyUpdate(Minute, Random);
+		if (Income > 0)
+		{
+			Funds.Deposit(Income, MoneyCategory::Reward, "Business owner income", Minute);
+			Report.OwnerIncome += Income;
+		}
+		// Reputation attacks on the player's ministry come back through the mirror business.
+		if (const Business* Mirror = Markets.FindBusiness(PlayerMinistryId))
+		{
+			if (Mirror->bDissolved && PlayerMinistry.IsFounded())
+			{
+				PlayerMinistry.Dissolve();
+				Notify("Your ministry collapsed after losing the community's trust.");
+				Report.Messages.push_back("Ministry dissolved");
+			}
+		}
+		// A visible ministry draws critics; the less integrity, the more likely something sticks.
+		if (PlayerMinistry.IsFounded() && PlayerMinistry.Members() > 80 && Random.Chance(0.01 + 0.03 * (1.0 - PlayerMinistry.Integrity())))
+		{
+			const AttackKind Kind = PlayerMinistry.Doctrine() < 0.5 ? AttackKind::DoctrineExpose : (Random.Chance(0.5) ? AttackKind::SmearCampaign : AttackKind::Allegation);
+			const AttackResult Result = Attack(PlayerMinistryId, Kind);
+			Report.Messages.push_back(Result.Headline);
+		}
+		// Rare cosmic events mutate powers.
+		if (PlayerPowers.HasPowers() && Random.Chance(0.05))
+		{
+			MutationEvent Event;
+			if (PlayerPowers.Surge(Powers, Random, Event))
+			{
+				Report.bPowerSurge = true;
+				Report.Surge = Event;
+				Notify("A meteor shower lit up the sky. Your powers feel different...");
+			}
+		}
+	}
+
+	void GameState::RunWeek(std::int64_t Minute, TickReport& Report)
+	{
+		Report.bNewWeek = true;
+		if (PlayerMinistry.IsFounded())
+		{
+			Report.Offering = PlayerMinistry.CollectWeeklyOffering(Random);
+			Report.bOffering = true;
+			Funds.Deposit(Report.Offering.Salary, MoneyCategory::Ministry, "Ministry salary", Minute);
+			Notify("Sunday service: " + std::to_string(Report.Offering.Attendance) + " attended. Giving " +
+				FormatMoney(Report.Offering.Total) + ", your salary " + FormatMoney(Report.Offering.Salary) + ".");
+		}
+		if (Politics.WeeklySalary() > 0)
+		{
+			Funds.Deposit(Politics.WeeklySalary(), MoneyCategory::Job, std::string("Salary: ") + OfficeTitle(Politics.Current()), Minute);
+		}
+		for (const WeeklyRoyalty& Payment : Ip.WeeklyRoyalties(Random))
+		{
+			Funds.Deposit(Payment.Amount, MoneyCategory::Reward, "Royalties", Minute);
+			Report.Royalties += Payment.Amount;
+		}
+		if (Report.Royalties > 0)
+		{
+			Notify("Royalties this week: " + FormatMoney(Report.Royalties) + ".");
+		}
+	}
+
+	void GameState::SyncMinistryBusiness()
+	{
+		if (!PlayerMinistry.IsFounded())
+		{
+			return;
+		}
+		Business* Mirror = Markets.FindBusiness(PlayerMinistryId);
+		if (!Mirror)
+		{
+			Business Value;
+			Value.Id = PlayerMinistryId;
+			Value.Name = PlayerMinistry.Name();
+			Value.Sector = "Faith";
+			Value.PlayerEquity = 0.0; // a ministry isn't owned; the salary is paid separately
+			Markets.AddBusiness(Value);
+			Mirror = Markets.FindBusiness(PlayerMinistryId);
+		}
+		Mirror->bDissolved = false;
+		Mirror->Name = PlayerMinistry.Name();
+		Mirror->Integrity = PlayerMinistry.Integrity();
+		Mirror->Doctrine = PlayerMinistry.Doctrine();
+		Mirror->Rep.Followers = PlayerMinistry.Members();
+		Mirror->Rep.Trust = Clamp(0.5 * Mirror->Rep.Trust + 0.5 * PlayerMinistry.Integrity(), 0.0, 1.0);
+		Mirror->BaseRevenue = ToMoney(PlayerMinistry.Members() * 18.0 * 4.0);
+		Mirror->BaseCosts = Mirror->BaseRevenue;
+		Mirror->Health = 0.7;
+	}
+
+	// ==================================================================================== Vehicles
+
+	std::string GameState::GrantVehicle(const std::string& ModelId)
+	{
+		OwnedVehicle Car;
+		Car.Uid = "car-" + std::to_string(NextVehicleNumber++);
+		Car.ModelId = ModelId;
+		Garage.push_back(Car);
+		return Car.Uid;
+	}
+
+	ActionResult GameState::BuyVehicle(const std::string& ModelId)
+	{
+		const VehicleModel* Model = Vehicles.FindModel(ModelId);
+		if (!Model || Model->bEventOnly)
+		{
+			return ActionResult::Failure("That model isn't for sale.");
+		}
+		const Money Price = static_cast<Money>(std::llround(static_cast<double>(Model->MarketPrice) * ActiveLaws().VehiclePriceMul));
+		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Bought " + Model->DisplayName, Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
+		}
+		ActiveVehicleUid = GrantVehicle(ModelId);
+		return ActionResult::Success("Congratulations on your " + Model->DisplayName + "! It's parked out front.");
+	}
+
+	ActionResult GameState::SellVehicle(const std::string& Uid)
+	{
+		for (auto It = Garage.begin(); It != Garage.end(); ++It)
+		{
+			if (It->Uid == Uid)
+			{
+				const VehicleModel* Model = Vehicles.FindModel(It->ModelId);
+				Money Value = Model ? TradeInOffer(*Model, *It) : 0;
+				// Installed parts add a little resale value.
+				for (const std::string& PartId : It->Build.Parts)
+				{
+					if (const PartDef* Part = Parts.Find(PartId))
+					{
+						if (Model)
+						{
+							Value += PartPrice(*Part, *Model) / 4;
+						}
+					}
+				}
+				Funds.Deposit(Value, MoneyCategory::Vehicle, "Sold car", Clock.TotalMinutes());
+				if (ActiveVehicleUid == Uid)
+				{
+					ActiveVehicleUid.clear();
+				}
+				Garage.erase(It);
+				return ActionResult::Success("Sold for " + FormatMoney(Value) + ".");
+			}
+		}
+		return ActionResult::Failure("You don't own that car.");
+	}
+
+	OwnedVehicle* GameState::FindOwned(const std::string& Uid)
+	{
+		for (OwnedVehicle& Car : Garage)
+		{
+			if (Car.Uid == Uid) return &Car;
+		}
+		return nullptr;
+	}
+
+	const OwnedVehicle* GameState::FindOwned(const std::string& Uid) const
+	{
+		for (const OwnedVehicle& Car : Garage)
+		{
+			if (Car.Uid == Uid) return &Car;
+		}
+		return nullptr;
+	}
+
+	const OwnedVehicle* GameState::ActiveVehicle() const
+	{
+		return FindOwned(ActiveVehicleUid);
+	}
+
+	ActionResult GameState::InstallPart(const std::string& Uid, const std::string& PartId)
+	{
+		OwnedVehicle* Car = FindOwned(Uid);
+		const PartDef* Part = Parts.Find(PartId);
+		const VehicleModel* Model = Car ? Vehicles.FindModel(Car->ModelId) : nullptr;
+		if (!Car || !Part || !Model)
+		{
+			return ActionResult::Failure("Unknown car or part.");
+		}
+		if (!Parts.Fits(*Part, *Model))
+		{
+			return ActionResult::Failure(Part->Name + " doesn't fit this car.");
+		}
+		if (Car->Build.Has(PartId))
+		{
+			return ActionResult::Failure("Already installed.");
+		}
+		const Money Price = PartPrice(*Part, *Model);
+		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, Part->Name, Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
+		}
+		Car->Build.Install(Parts, *Part);
+		return ActionResult::Success(Part->Name + " installed.");
+	}
+
+	ActionResult GameState::RemovePart(const std::string& Uid, PartCategory Category)
+	{
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car)
+		{
+			return ActionResult::Failure("Unknown car.");
+		}
+		Car->Build.Remove(Parts, Category);
+		return ActionResult::Success(std::string(PartCategoryName(Category)) + " returned to stock.");
+	}
+
+	ActionResult GameState::SetTuning(const std::string& Uid, const TuningSheet& Sheet)
+	{
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car)
+		{
+			return ActionResult::Failure("Unknown car.");
+		}
+		Car->Build.Tuning = Sheet;
+		return ActionResult::Success("Tune saved.");
+	}
+
+	ActionResult GameState::Paint(const std::string& Uid, std::uint32_t Rgb, int Finish)
+	{
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car)
+		{
+			return ActionResult::Failure("Unknown car.");
+		}
+		const Money Price = static_cast<Money>(std::llround(Dollars(800) * (1.0 + 0.5 * Clamp(Finish, 0, 4)) * Economy.Goods / 0.55));
+		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Paint job", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
+		}
+		Car->Build.PaintRgb = Rgb;
+		Car->Build.PaintFinish = Clamp(Finish, 0, 4);
+		return ActionResult::Success("Fresh paint!");
+	}
+
+	ActionResult GameState::Repair(const std::string& Uid)
+	{
+		OwnedVehicle* Car = FindOwned(Uid);
+		const VehicleModel* Model = Car ? Vehicles.FindModel(Car->ModelId) : nullptr;
+		if (!Car || !Model)
+		{
+			return ActionResult::Failure("Unknown car.");
+		}
+		const Money Price = static_cast<Money>(std::llround(ToDollars(Model->MarketPrice) * 100.0 * 0.15 * (1.0 - Car->Condition)));
+		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Repairs", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("Repairs cost " + FormatMoney(Price) + ".");
+		}
+		Car->Condition = 1.0;
+		return ActionResult::Success("Good as new.");
+	}
+
+	VehicleSetup GameState::SetupFor(const std::string& ModelId, const VehicleBuild* Build) const
+	{
+		const VehicleModel* Model = Vehicles.FindModel(ModelId);
+		if (!Model)
+		{
+			return VehicleSetup();
+		}
+		static const VehicleBuild Stock;
+		return BuildSetup(*Model, Build ? *Build : Stock, Parts);
+	}
+
+	// ==================================================================================== Careers
+
+	CareerProgress* GameState::FindJob(const std::string& CareerId)
+	{
+		for (CareerProgress& Job : Jobs)
+		{
+			if (Job.CareerId == CareerId) return &Job;
+		}
+		return nullptr;
+	}
+
+	ActionResult GameState::ApplyForCareer(const std::string& CareerId)
+	{
+		if (FindJob(CareerId))
+		{
+			return ActionResult::Failure("You already work here.");
+		}
+		std::string Reason;
+		if (!Careers.CanApply(Player, CareerId, &Reason))
+		{
+			return ActionResult::Failure(Reason);
+		}
+		CareerProgress Job;
+		Job.CareerId = CareerId;
+		Jobs.push_back(Job);
+		const CareerDef* Def = Careers.FindCareer(CareerId);
+		return ActionResult::Success("You're hired as " + (Def ? Def->Levels.front().Title : CareerId) + "!");
+	}
+
+	ShiftResult GameState::WorkShift(const std::string& CareerId, double Performance, TickReport* OutTick)
+	{
+		ShiftResult Result;
+		CareerProgress* Job = FindJob(CareerId);
+		const CareerDef* Def = Careers.FindCareer(CareerId);
+		if (!Job || !Def)
+		{
+			return Result;
+		}
+		Result = Careers.ResolveShift(*Def, *Job, Player, Performance);
+		Result.Pay = static_cast<Money>(std::llround(static_cast<double>(Result.Pay) * Economy.Wages * ActiveLaws().WageMul));
+		Funds.Deposit(Result.Pay, MoneyCategory::Job, Def->Name + " shift", Clock.TotalMinutes());
+		TickReport Tick = Skip(static_cast<std::int64_t>(Result.HoursWorked) * 60);
+		if (OutTick)
+		{
+			*OutTick = Tick;
+		}
+		if (Result.bPromoted)
+		{
+			Notify("Promotion! You're now " + Result.Title + ".");
+		}
+		return Result;
+	}
+
+	ActionResult GameState::Enroll(const std::string& EducationId)
+	{
+		std::string Reason;
+		if (!Careers.CanEnroll(Player, EducationId, &Reason))
+		{
+			return ActionResult::Failure(Reason);
+		}
+		const EducationDef* Def = Careers.FindEducation(EducationId);
+		const Money Tuition = static_cast<Money>(std::llround(static_cast<double>(Def->Tuition) * ActiveLaws().TuitionMul));
+		if (!Funds.TrySpend(Tuition, MoneyCategory::Education, "Tuition: " + Def->Name, Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("Tuition is " + FormatMoney(Tuition) + ".");
+		}
+		Enrollment Study;
+		Study.EducationId = EducationId;
+		Player.SetEnrollment(Study);
+		return ActionResult::Success("Enrolled in " + Def->Name + ". Attend classes at the university.");
+	}
+
+	ClassResult GameState::AttendClass(double Performance, int Hours)
+	{
+		ClassResult Result = Careers.AttendClass(Player, Performance, Hours);
+		if (Result.bValid)
+		{
+			Skip(static_cast<std::int64_t>(Hours) * 60);
+			if (Result.bGraduated)
+			{
+				Notify("You graduated: " + Result.EducationName + "!");
+				// Ministry credentials advance ordination.
+				if (Player.HasEducation("ministry-certificate"))
+				{
+					PlayerMinistry.SetOrdination(std::max(PlayerMinistry.Ordination(), 1));
+				}
+				if (Player.HasEducation("master-of-divinity"))
+				{
+					PlayerMinistry.SetOrdination(std::max(PlayerMinistry.Ordination(), 2));
+				}
+			}
+		}
+		return Result;
+	}
+
+	ActionResult GameState::ChoosePowers(const std::vector<std::string>& Ids)
+	{
+		std::string Error;
+		if (!PlayerPowers.Choose(Powers, Ids, &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success("Your powers awaken. Use them wisely: they will change as you do.");
+	}
+
+	// ==================================================================================== Homes
+
+	ActionResult GameState::BuyHome(int BuildingId)
+	{
+		std::string Error;
+		if (!Homes.BuyProperty(PropertyIdFor(BuildingId), Funds, Clock.TotalMinutes(), &Error, ActiveLaws().HousingPriceMul))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success("The keys are yours. Welcome home!");
+	}
+
+	ActionResult GameState::OrderFurniture(const std::vector<std::string>& ItemIds, int HomeBuildingId, DeliverySpeed Speed)
+	{
+		std::string Error;
+		int OrderId = 0;
+		if (!Homes.PlaceOrder(ItemIds, PropertyIdFor(HomeBuildingId), Speed, Funds, Clock.TotalMinutes(), OrderId, &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		const FurnitureOrder* Order = Homes.FindOrder(OrderId);
+		GameClock Arrival;
+		Arrival.SetTotalMinutes(static_cast<double>(Order ? Order->DeliverMinute : 0));
+		return ActionResult::Success("Order #" + std::to_string(OrderId) + " placed. Delivery " + Arrival.Format() + ".");
+	}
+
+	// ==================================================================================== Hacking
+
+	void GameState::RefreshHackBoard()
+	{
+		HackBoard = GenerateHackContracts(5, Player.SkillLevel(Skill::Tech), Random);
+	}
+
+	ActionResult GameState::BuyHackTool(int Which)
+	{
+		int* Level = nullptr;
+		const char* Name = "";
+		switch (Which)
+		{
+		case 0: Level = &HackTools.ProbeKit; Name = "Probe Kit"; break;
+		case 1: Level = &HackTools.GhostRelay; Name = "Ghost Relay"; break;
+		case 2: Level = &HackTools.PatternEngine; Name = "Pattern Engine"; break;
+		default: return ActionResult::Failure("Unknown tool.");
+		}
+		const Money Price = HackToolPrice(*Level);
+		if (Price <= 0)
+		{
+			return ActionResult::Failure(std::string(Name) + " is fully upgraded.");
+		}
+		if (!Funds.TrySpend(Price, MoneyCategory::Tools, Name, Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
+		}
+		*Level += 1;
+		return ActionResult::Success(std::string(Name) + " upgraded to level " + std::to_string(*Level) + ".");
+	}
+
+	HackConfig GameState::ConfigFor(const HackContract& Contract) const
+	{
+		return MakeHackConfig(Contract.Tier, Player.SkillLevel(Skill::Tech), HackTools);
+	}
+
+	ActionResult GameState::CompleteHack(const std::string& ContractId, bool bSuccess)
+	{
+		for (auto It = HackBoard.begin(); It != HackBoard.end(); ++It)
+		{
+			if (It->Id != ContractId)
+			{
+				continue;
+			}
+			const HackContract Contract = *It;
+			HackBoard.erase(It);
+			Player.AddSkillXp(Skill::Tech, bSuccess ? 40 * Contract.Tier : 10);
+			if (!bSuccess)
+			{
+				if (Contract.Legality == HackLegality::Unauthorized)
+				{
+					Wanted.AddStars(std::max(1, static_cast<int>(std::lround(ActiveLaws().HackingHeatMul))));
+					return ActionResult::Failure("Traced! The police are on their way.");
+				}
+				return ActionResult::Failure("The client's defenses held. Better luck next time.");
+			}
+			Funds.Deposit(Contract.Payout, MoneyCategory::Hacking, Contract.Title, Clock.TotalMinutes());
+			if (Contract.Legality == HackLegality::Unauthorized)
+			{
+				Wanted.AddStars(std::max(1, static_cast<int>(std::lround(Contract.HeatStars * ActiveLaws().HackingHeatMul))));
+				return ActionResult::Success("Paid " + FormatMoney(Contract.Payout) + ". Someone noticed. Lay low.");
+			}
+			return ActionResult::Success("Report delivered. " + Contract.Client + " paid " + FormatMoney(Contract.Payout) + ".");
+		}
+		return ActionResult::Failure("That contract is gone.");
+	}
+
+	// ==================================================================================== Ministry
+
+	ActionResult GameState::FoundMinistry(const std::string& Name)
+	{
+		if (!PlayerMinistry.Found(Name))
+		{
+			return ActionResult::Failure(PlayerMinistry.IsFounded() ? "You already lead a ministry." : "Give your ministry a name.");
+		}
+		SyncMinistryBusiness();
+		return ActionResult::Success(Name + " is founded. Preach on Sundays, serve the city, and lead with integrity.");
+	}
+
+	SermonResult GameState::Preach(SermonTheme Theme, double Performance)
+	{
+		const SermonResult Result = PlayerMinistry.Preach(Theme, Performance, Random);
+		if (Result.bValid)
+		{
+			Player.AddSkillXp(Skill::Faith, static_cast<int>(std::lround(30.0 * (0.5 + Performance))));
+			Player.AddSkillXp(Skill::People, 10);
+		}
+		return Result;
+	}
+
+	ActionResult GameState::RunOutreach(OutreachKind Kind)
+	{
+		OutreachResult Result;
+		std::string Error;
+		if (!PlayerMinistry.RunOutreach(Kind, Random, Result, &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		Skip(static_cast<std::int64_t>(GetOutreachInfo(Kind).Hours) * 60);
+		Markets.PostNews(PlayerMinistry.Name() + " hosts a " + ToLowerAscii(GetOutreachInfo(Kind).Name), PlayerMinistryId, 0.2, Clock.TotalMinutes());
+		return ActionResult::Success(std::to_string(Result.Visitors) + " people came. " + std::to_string(Result.NewMembers) + " joined.");
+	}
+
+	ActionResult GameState::UpgradeMinistry(Facility Value)
+	{
+		std::string Error;
+		if (!PlayerMinistry.UpgradeFacility(Value, &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success(std::string(FacilityName(Value)) + " upgraded.");
+	}
+
+	ActionResult GameState::Telethon()
+	{
+		const Money Raised = PlayerMinistry.RunTelethon(Random);
+		if (Raised <= 0)
+		{
+			return ActionResult::Failure("Found a ministry first.");
+		}
+		return ActionResult::Success("The telethon raised " + FormatMoney(Raised) + ". Some members found it uncomfortable.");
+	}
+
+	ActionResult GameState::Accountability()
+	{
+		std::string Error;
+		if (!PlayerMinistry.CommitToAccountability(&Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success("Open books, an elder board and a solid teaching series. Trust is rebuilding.");
+	}
+
+	// ==================================================================================== Market
+
+	ActionResult GameState::BuyShares(const std::string& Ticker, std::int64_t Shares)
+	{
+		std::string Error;
+		if (!Markets.BuyShares(Ticker, Shares, Funds, Clock.TotalMinutes(), &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success("Bought " + std::to_string(Shares) + " shares of " + Ticker + ".");
+	}
+
+	ActionResult GameState::SellShares(const std::string& Ticker, std::int64_t Shares)
+	{
+		std::string Error;
+		if (!Markets.SellShares(Ticker, Shares, Funds, Clock.TotalMinutes(), &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success("Sold " + std::to_string(Shares) + " shares of " + Ticker + ".");
+	}
+
+	ActionResult GameState::BuyBusiness(const std::string& BusinessId)
+	{
+		std::string Error;
+		if (!Markets.BuyBusiness(BusinessId, Funds, Clock.TotalMinutes(), &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		const Business* Value = Markets.FindBusiness(BusinessId);
+		return ActionResult::Success("You now own " + (Value ? Value->Name : BusinessId) + ".");
+	}
+
+	AttackResult GameState::Attack(const std::string& BusinessId, AttackKind Kind)
+	{
+		const bool bOwnMinistry = BusinessId == PlayerMinistryId;
+		if (bOwnMinistry)
+		{
+			SyncMinistryBusiness();
+		}
+		const AttackResult Result = Markets.LaunchAttack(BusinessId, Kind, !bOwnMinistry, Clock.TotalMinutes(), Random);
+		if (bOwnMinistry && PlayerMinistry.IsFounded())
+		{
+			if (Result.TrustDelta < 0.0)
+			{
+				PlayerMinistry.ApplyScandal(-Result.TrustDelta);
+			}
+			if (Result.bCollapsed)
+			{
+				PlayerMinistry.Dissolve();
+			}
+		}
+		if (!Result.Headline.empty())
+		{
+			Notify(Result.Headline);
+		}
+		return Result;
+	}
+
+	CreativeWork& GameState::CreateWork(WorkKind Kind, const std::string& Title, int Hours, double Performance)
+	{
+		CreativeWork& Work = Ip.Create(Kind, Title, Player, Hours, Performance, Markets.PlayerReputation().Score(), Random);
+		Skip(static_cast<std::int64_t>(std::max(1, Hours)) * 60);
+		return Work;
+	}
+
+	// ==================================================================================== Events
+
+	Money GameState::EventEntryFee(EventKind Kind, int Tier) const
+	{
+		const int T = Clamp(Tier, 1, 5);
+		switch (Kind)
+		{
+		case EventKind::DragRace: return Dollars(150) * T;
+		case EventKind::DemolitionDerby: return Dollars(100) * T;
+		case EventKind::MonsterJam: return Dollars(250) * T;
+		case EventKind::Formula: return Dollars(1000) * T;
+		case EventKind::Count: break;
+		}
+		return 0;
+	}
+
+	ActionResult GameState::EnterEvent(EventKind Kind, int Tier)
+	{
+		const Money Fee = EventEntryFee(Kind, Tier);
+		if (!Funds.TrySpend(Fee, MoneyCategory::Event, std::string("Entry: ") + EventKindName(Kind), Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("Entry costs " + FormatMoney(Fee) + ".");
+		}
+		return ActionResult::Success("You're in. Good luck!");
+	}
+
+	Money GameState::FinishEvent(EventKind Kind, int Tier, int Position, int FieldSize)
+	{
+		const Money Prize = EventPrize(Kind, Tier, Position, FieldSize);
+		if (Prize > 0)
+		{
+			Funds.Deposit(Prize, MoneyCategory::Event, std::string(EventKindName(Kind)) + " prize", Clock.TotalMinutes());
+		}
+		if (Position == 1)
+		{
+			EventsWon += 1;
+			Markets.PlayerReputation().Followers += 200 * Clamp(Tier, 1, 5);
+			Player.AddSkillXp(Skill::Driving, 60);
+		}
+		else
+		{
+			Player.AddSkillXp(Skill::Driving, 25);
+		}
+		return Prize;
+	}
+
+	Money GameState::Busted()
+	{
+		const Money Fine = Wanted.BustFine(Funds.Balance());
+		if (Politics.Current() != Office::None)
+		{
+			Politics.Scandal(0.4);
+			Markets.PlayerReputation().Trust = Clamp(Markets.PlayerReputation().Trust - 0.1, 0.0, 1.0);
+		}
+		const Money Taken = Funds.Charge(Fine, MoneyCategory::Fine, "Police fine", Clock.TotalMinutes());
+		Wanted.Clear();
+		Notify("Busted. You paid " + FormatMoney(Taken) + " in fines.");
+		return Taken;
+	}
+
+	Money GameState::Hospitalized()
+	{
+		const Money Bill = Dollars(500) + std::max<Money>(0, Funds.Balance() / 10);
+		const Money Taken = Funds.Charge(Bill, MoneyCategory::Medical, "Hospital bill", Clock.TotalMinutes());
+		Wanted.Clear();
+		Notify("You woke up at Mercy General. The bill: " + FormatMoney(Taken) + ".");
+		return Taken;
+	}
+
+	Money GameState::NetWorth() const
+	{
+		Money Total = Funds.Balance() + Markets.PortfolioValue();
+		for (const OwnedVehicle& Car : Garage)
+		{
+			if (const VehicleModel* Model = Vehicles.FindModel(Car.ModelId))
+			{
+				Total += ResaleValue(*Model, Car);
+			}
+		}
+		for (const std::string& Id : Homes.OwnedProperties())
+		{
+			if (const Property* Home = Homes.FindProperty(Id))
+			{
+				Total += Home->Price;
+			}
+		}
+		for (const Business& Value : Markets.Businesses())
+		{
+			if (Value.PlayerEquity > 0.0)
+			{
+				Total += static_cast<Money>(std::llround(static_cast<double>(Markets.Valuation(Value)) * Value.PlayerEquity));
+			}
+		}
+		return Total;
+	}
+
+	// ==================================================================================== Used cars
+
+	void GameState::RefreshUsedCars()
+	{
+		UsedCars.Refresh(Vehicles, Random, 10);
+	}
+
+	HaggleResult GameState::HaggleUsed(const std::string& ListingId, Money Offer)
+	{
+		return UsedCars.Haggle(ListingId, Offer, Vehicles, Player, Random);
+	}
+
+	ActionResult GameState::BuyUsed(const std::string& ListingId, Money Price)
+	{
+		UsedListing* Listing = UsedCars.Find(ListingId);
+		if (!Listing)
+		{
+			return ActionResult::Failure("That car already sold.");
+		}
+		if (!Funds.TrySpend(Price, MoneyCategory::Vehicle, "Used car", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You need " + FormatMoney(Price) + ".");
+		}
+		OwnedVehicle Car;
+		UsedCars.Take(ListingId, Car);
+		Car.Uid = "car-" + std::to_string(NextVehicleNumber++);
+		Garage.push_back(Car);
+		ActiveVehicleUid = Car.Uid;
+		return ActionResult::Success("It's yours. Check it over in the garage before you drive it hard.");
+	}
+
+	RepairQuote GameState::Quote(const std::string& Uid, CarIssue Issue) const
+	{
+		const OwnedVehicle* Car = FindOwned(Uid);
+		const VehicleModel* Model = Car ? Vehicles.FindModel(Car->ModelId) : nullptr;
+		if (!Model)
+		{
+			return RepairQuote();
+		}
+		return QuoteRepair(*Model, Issue, Player);
+	}
+
+	RepairResult GameState::RepairDiy(const std::string& Uid, CarIssue Issue, double Performance)
+	{
+		RepairResult Result;
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car || !Car->Has(Issue))
+		{
+			return Result;
+		}
+		const RepairQuote QuoteValue = Quote(Uid, Issue);
+		if (!Funds.CanAfford(QuoteValue.Parts))
+		{
+			return Result;
+		}
+		Result = DiyRepair(*Car, Issue, QuoteValue, Player, Performance, Random);
+		Funds.TrySpend(Result.PartsSpent, MoneyCategory::Vehicle, std::string("Parts: ") + GetIssueInfo(Issue).Name, Clock.TotalMinutes());
+		Skip(static_cast<std::int64_t>(Result.Hours) * 60);
+		return Result;
+	}
+
+	ActionResult GameState::RepairAtShop(const std::string& Uid, CarIssue Issue)
+	{
+		OwnedVehicle* Car = FindOwned(Uid);
+		if (!Car || !Car->Has(Issue))
+		{
+			return ActionResult::Failure("Nothing to fix.");
+		}
+		const RepairQuote QuoteValue = Quote(Uid, Issue);
+		const Money Total = QuoteValue.Parts + QuoteValue.ShopLabor;
+		if (!Funds.TrySpend(Total, MoneyCategory::Vehicle, std::string("Shop: ") + GetIssueInfo(Issue).Name, Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("The shop wants " + FormatMoney(Total) + ".");
+		}
+		ShopRepair(*Car, Issue);
+		return ActionResult::Success(std::string(GetIssueInfo(Issue).Name) + " fixed by the shop.");
+	}
+
+	Money GameState::PrivateOffer(const std::string& Uid)
+	{
+		const OwnedVehicle* Car = FindOwned(Uid);
+		const VehicleModel* Model = Car ? Vehicles.FindModel(Car->ModelId) : nullptr;
+		return Model ? PrivateSaleOffer(*Model, *Car, Parts, Random) : 0;
+	}
+
+	ActionResult GameState::SellPrivately(const std::string& Uid, Money Price)
+	{
+		for (auto It = Garage.begin(); It != Garage.end(); ++It)
+		{
+			if (It->Uid == Uid)
+			{
+				Funds.Deposit(Price, MoneyCategory::Vehicle, "Private sale", Clock.TotalMinutes());
+				if (ActiveVehicleUid == Uid)
+				{
+					ActiveVehicleUid.clear();
+				}
+				Garage.erase(It);
+				Player.AddSkillXp(Skill::Business, 15);
+				return ActionResult::Success("Sold for " + FormatMoney(Price) + ".");
+			}
+		}
+		return ActionResult::Failure("You don't own that car.");
+	}
+
+	VehicleSetup GameState::SetupForOwned(const OwnedVehicle& Car) const
+	{
+		VehicleSetup Setup = SetupFor(Car.ModelId, &Car.Build);
+		ApplyIssues(Setup, Car.Issues);
+		return Setup;
+	}
+
+	// ==================================================================================== Politics
+
+	const LawDef* GameState::FindLaw(const std::string& Id) const
+	{
+		for (const LawDef& Law : LawBook)
+		{
+			if (Law.Id == Id) return &Law;
+		}
+		return nullptr;
+	}
+
+	LawEffects GameState::ActiveLaws() const
+	{
+		return CombineLaws(LawBook, Politics.EnactedLaws());
+	}
+
+	ActionResult GameState::RunForOffice(Office Target)
+	{
+		std::string Error;
+		const Reputation& Rep = Markets.PlayerReputation();
+		if (!Politics.StartCampaign(Target, Rep.Followers, Rep.Trust, Rep.Score(), Funds, Clock.TotalMinutes(), Random, &Error))
+		{
+			return ActionResult::Failure(Error);
+		}
+		return ActionResult::Success(std::string("You're officially running for ") + OfficeTitle(Target) + " against " +
+			Politics.ActiveCampaign().Opponent + ". Election in " + std::to_string(GetOfficeInfo(Target).CampaignDays) + " days.");
+	}
+
+	ActionResult GameState::CampaignRally(double Performance)
+	{
+		const double Gain = Politics.Rally(Performance);
+		if (Gain <= 0.0)
+		{
+			return ActionResult::Failure("You aren't campaigning.");
+		}
+		Markets.PlayerReputation().Followers += static_cast<int>(400 * Performance) + 50;
+		Skip(120);
+		return ActionResult::Success("The crowd loved it. Support up " + std::to_string(static_cast<int>(std::lround(Gain * 1000.0)) / 10.0).substr(0, 4) + " points.");
+	}
+
+	ActionResult GameState::CampaignAds(Money Amount)
+	{
+		const double Gain = Politics.RunAds(Amount, Funds, Clock.TotalMinutes());
+		if (Gain <= 0.0)
+		{
+			return ActionResult::Failure("The ad buy didn't happen.");
+		}
+		return ActionResult::Success("Ads are running across the state.");
+	}
+
+	ActionResult GameState::CampaignDebate(double Performance)
+	{
+		if (!Politics.ActiveCampaign().bActive)
+		{
+			return ActionResult::Failure("You aren't campaigning.");
+		}
+		const double Gain = Politics.Debate(Performance);
+		Player.AddSkillXp(Skill::People, 30);
+		return Gain >= 0.0 ? ActionResult::Success("You won the debate.") : ActionResult::Failure("The debate went badly.");
+	}
+
+	MatrixGame GameState::CampaignMatrix() const
+	{
+		return CampaignGame(Player.SkillLevel(Skill::People), Player.SkillLevel(Skill::Creativity), Markets.PlayerReputation().Trust);
+	}
+
+	CampaignRound GameState::CampaignStrategy(int Choice, double Performance)
+	{
+		const CampaignRound Round = Politics.PlayStrategy(CampaignMatrix(), Choice, Performance, Random);
+		if (Round.bPlayed)
+		{
+			Skip(240);
+		}
+		return Round;
+	}
+
+	LawVote GameState::ProposeLaw(const std::string& LawId)
+	{
+		const LawDef* Law = FindLaw(LawId);
+		if (!Law)
+		{
+			LawVote Vote;
+			Vote.Message = "Unknown bill.";
+			return Vote;
+		}
+		LawVote Vote = Politics.Propose(*Law, Random);
+		Notify(Vote.Message);
+		return Vote;
+	}
+
+	LawVote GameState::LobbyForLaw(const std::string& LawId, Money Amount)
+	{
+		const LawDef* Law = FindLaw(LawId);
+		if (!Law)
+		{
+			LawVote Vote;
+			Vote.Message = "Unknown bill.";
+			return Vote;
+		}
+		LawVote Vote = Politics.Lobby(*Law, Amount, Funds, Clock.TotalMinutes(), Random);
+		Notify(Vote.Message);
+		return Vote;
+	}
+
+	void GameState::ReportCrime(Crime Value, bool bPoliceWitness, bool bCivilianWitness)
+	{
+		const LawEffects Laws = ActiveLaws();
+		if (Value == Crime::Speeding && Laws.SpeedingHeatMul < 1.0 && !Random.Chance(Laws.SpeedingHeatMul))
+		{
+			return; // relaxed speed limits: most speeding goes unpunished
+		}
+		Wanted.ReportCrime(Value, bPoliceWitness, bCivilianWitness, Random);
+		if (Value == Crime::Speeding && Laws.SpeedingHeatMul > 1.0 && bPoliceWitness)
+		{
+			Wanted.ReportCrime(Value, true, false, Random); // stricter enforcement: counts twice
+		}
+	}
+
+	double GameState::PolicePatrolChance(double CrimeGain) const
+	{
+		// Inspection game: fines scale with the player's means; patrols cost the city, crime costs residents.
+		const double Fine = std::max(500.0, ToDollars(Funds.Balance()) * 0.05);
+		const InspectionResult Result = InspectionGame(std::max(1.0, CrimeGain), Fine, 200.0, 1000.0);
+		return Clamp(Result.InspectProbability * ActiveLaws().PoliceUnitsMul, 0.02, 0.95);
+	}
+
+	void GameState::Notify(const std::string& Text)
+	{
+		PendingNotifications.push_back(Text);
+		if (PendingNotifications.size() > 32)
+		{
+			PendingNotifications.erase(PendingNotifications.begin());
+		}
+	}
+
+	std::vector<std::string> GameState::TakeNotifications()
+	{
+		std::vector<std::string> Out;
+		Out.swap(PendingNotifications);
+		return Out;
+	}
+
+}

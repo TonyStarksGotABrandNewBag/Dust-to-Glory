@@ -1,0 +1,35 @@
+// Furniture catalog (1995 prices). Each store gets its own building in the city.
+// w/d/h are metres; color is the graybox color until real meshes are added.
+{
+  "items": [
+    { "id": "sofa-plaid", "name": "Plaid Three-Seat Sofa", "store": "Hearth & Home", "category": "Living Room", "price": 549, "w": 2.1, "d": 0.9, "h": 0.85, "color": "#8B5A2B" },
+    { "id": "sofa-sectional", "name": "Leather Sectional", "store": "Hearth & Home", "category": "Living Room", "price": 1299, "w": 2.8, "d": 2.1, "h": 0.85, "color": "#3E2723" },
+    { "id": "recliner", "name": "Overstuffed Recliner", "store": "Hearth & Home", "category": "Living Room", "price": 399, "w": 0.95, "d": 1.0, "h": 1.05, "color": "#6D4C41" },
+    { "id": "coffee-table", "name": "Oak Coffee Table", "store": "Hearth & Home", "category": "Living Room", "price": 179, "w": 1.2, "d": 0.6, "h": 0.45, "color": "#A1887F" },
+    { "id": "tv-27", "name": "27-inch Color TV", "store": "Hearth & Home", "category": "Electronics", "price": 449, "w": 0.75, "d": 0.55, "h": 0.6, "color": "#212121" },
+    { "id": "tv-console", "name": "Big-Screen Projection TV", "store": "Hearth & Home", "category": "Electronics", "price": 1999, "w": 1.3, "d": 0.7, "h": 1.4, "color": "#1B1B1B" },
+    { "id": "stereo", "name": "Five-Disc CD Stereo", "store": "Hearth & Home", "category": "Electronics", "price": 329, "w": 0.5, "d": 0.4, "h": 0.9, "color": "#263238" },
+    { "id": "pc-desk", "name": "Computer Desk with Pentium PC", "store": "Hearth & Home", "category": "Office", "price": 2199, "w": 1.4, "d": 0.7, "h": 1.2, "color": "#CFD8DC" },
+    { "id": "bookshelf", "name": "Five-Shelf Bookcase", "store": "Hearth & Home", "category": "Office", "price": 129, "w": 0.9, "d": 0.3, "h": 1.8, "color": "#795548" },
+    { "id": "bed-queen", "name": "Queen Bed with Headboard", "store": "Hearth & Home", "category": "Bedroom", "price": 699, "w": 1.6, "d": 2.1, "h": 1.1, "color": "#8D6E63" },
+    { "id": "bed-water", "name": "King Waterbed", "store": "Hearth & Home", "category": "Bedroom", "price": 899, "w": 1.95, "d": 2.2, "h": 0.6, "color": "#4E342E" },
+    { "id": "dresser", "name": "Six-Drawer Dresser", "store": "Hearth & Home", "category": "Bedroom", "price": 349, "w": 1.5, "d": 0.5, "h": 0.8, "color": "#A1887F" },
+    { "id": "lava-lamp", "name": "Lava Lamp", "store": "Hearth & Home", "category": "Decor", "price": 29, "w": 0.15, "d": 0.15, "h": 0.4, "color": "#E040FB" },
+    { "id": "rug-persian", "name": "Persian-Style Rug", "store": "Hearth & Home", "category": "Decor", "price": 249, "w": 2.4, "d": 1.7, "h": 0.02, "color": "#880E4F" },
+
+    { "id": "dining-set", "name": "Six-Seat Dining Set", "store": "Oakline Furnishings", "category": "Dining", "price": 899, "w": 1.9, "d": 1.0, "h": 0.76, "color": "#5D4037" },
+    { "id": "china-hutch", "name": "China Hutch", "store": "Oakline Furnishings", "category": "Dining", "price": 799, "w": 1.4, "d": 0.45, "h": 2.0, "color": "#4E342E" },
+    { "id": "fridge", "name": "Side-by-Side Refrigerator", "store": "Oakline Furnishings", "category": "Kitchen", "price": 1099, "w": 0.9, "d": 0.8, "h": 1.75, "color": "#ECEFF1" },
+    { "id": "washer-dryer", "name": "Washer and Dryer Pair", "store": "Oakline Furnishings", "category": "Laundry", "price": 899, "w": 1.4, "d": 0.7, "h": 1.0, "color": "#FAFAFA" },
+    { "id": "piano", "name": "Upright Piano", "store": "Oakline Furnishings", "category": "Music", "price": 2499, "w": 1.5, "d": 0.6, "h": 1.25, "color": "#1A1A1A" },
+    { "id": "pool-table", "name": "Slate Pool Table", "store": "Oakline Furnishings", "category": "Game Room", "price": 1799, "w": 2.5, "d": 1.4, "h": 0.8, "color": "#1B5E20" },
+    { "id": "arcade", "name": "Upright Arcade Cabinet", "store": "Oakline Furnishings", "category": "Game Room", "price": 1299, "w": 0.7, "d": 0.8, "h": 1.8, "color": "#311B92" },
+    { "id": "aquarium", "name": "75-Gallon Aquarium", "store": "Oakline Furnishings", "category": "Decor", "price": 499, "w": 1.2, "d": 0.45, "h": 1.4, "color": "#0277BD" },
+    { "id": "desk-exec", "name": "Executive Desk", "store": "Oakline Furnishings", "category": "Office", "price": 1199, "w": 1.8, "d": 0.9, "h": 0.76, "color": "#3E2723" },
+    { "id": "armchair-wing", "name": "Wingback Armchair", "store": "Oakline Furnishings", "category": "Living Room", "price": 599, "w": 0.85, "d": 0.9, "h": 1.15, "color": "#1A237E" },
+    { "id": "grandfather-clock", "name": "Grandfather Clock", "store": "Oakline Furnishings", "category": "Decor", "price": 1399, "w": 0.55, "d": 0.35, "h": 2.0, "color": "#4E342E" },
+    { "id": "patio-set", "name": "Patio Table and Umbrella", "store": "Oakline Furnishings", "category": "Outdoor", "price": 449, "w": 1.5, "d": 1.5, "h": 2.2, "color": "#F9A825" },
+    { "id": "grill", "name": "Kettle Charcoal Grill", "store": "Oakline Furnishings", "category": "Outdoor", "price": 129, "w": 0.6, "d": 0.6, "h": 1.0, "color": "#212121" },
+    { "id": "bunk-bed", "name": "Twin Bunk Bed", "store": "Oakline Furnishings", "category": "Bedroom", "price": 399, "w": 1.05, "d": 2.0, "h": 1.65, "color": "#8D6E63" }
+  ]
+}

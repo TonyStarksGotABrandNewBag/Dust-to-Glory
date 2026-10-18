@@ -1,0 +1,27 @@
+// Public companies on the Dust Valley Exchange and the region's ministries.
+// revenue/costs are monthly 1995 dollars; price is per share. An office tower whose name starts with a
+// public company's name becomes that company's headquarters in the city.
+{
+  "public": [
+    { "id": "brightwater", "name": "Brightwater Logistics", "ticker": "BWL", "sector": "Logistics", "price": 24.5, "shares": 40000000, "volatility": 0.018, "revenue": 60000000, "costs": 55000000, "integrity": 0.8 },
+    { "id": "halcyon", "name": "Halcyon Health", "ticker": "HLH", "sector": "Health", "price": 41.0, "shares": 60000000, "volatility": 0.015, "revenue": 120000000, "costs": 108000000, "integrity": 0.75 },
+    { "id": "sable", "name": "Sable Media", "ticker": "SBLM", "sector": "Media", "price": 18.25, "shares": 50000000, "volatility": 0.025, "revenue": 45000000, "costs": 41000000, "integrity": 0.55 },
+    { "id": "keystone", "name": "Keystone Utilities", "ticker": "KEYU", "sector": "Energy", "price": 33.0, "shares": 80000000, "volatility": 0.009, "revenue": 150000000, "costs": 132000000, "integrity": 0.85 },
+    { "id": "summit", "name": "Summit Insurance", "ticker": "SMIT", "sector": "Finance", "price": 52.75, "shares": 35000000, "volatility": 0.012, "revenue": 90000000, "costs": 80000000, "integrity": 0.7 },
+    { "id": "cardinal", "name": "Cardinal Freight", "ticker": "CRDF", "sector": "Logistics", "price": 15.5, "shares": 30000000, "volatility": 0.022, "revenue": 30000000, "costs": 28500000, "integrity": 0.65, "health": 0.45 },
+    { "id": "orchard", "name": "Orchard Robotics", "ticker": "ORCH", "sector": "Tech", "price": 12.0, "shares": 45000000, "volatility": 0.04, "revenue": 20000000, "costs": 19000000, "integrity": 0.8 },
+    { "id": "copperline", "name": "Copperline Telecom", "ticker": "CPLN", "sector": "Tech", "price": 29.0, "shares": 70000000, "volatility": 0.02, "revenue": 110000000, "costs": 98000000, "integrity": 0.6 },
+    { "id": "atlas", "name": "Atlas Engineering", "ticker": "ATLE", "sector": "Energy", "price": 38.5, "shares": 25000000, "volatility": 0.014, "revenue": 50000000, "costs": 45000000, "integrity": 0.85 },
+    { "id": "pioneer", "name": "Pioneer Analytics", "ticker": "PION", "sector": "Tech", "price": 8.75, "shares": 20000000, "volatility": 0.05, "revenue": 6000000, "costs": 6200000, "integrity": 0.7, "health": 0.4 },
+    { "id": "ardent-motors", "name": "Ardent Motors", "ticker": "ARDT", "sector": "Auto", "price": 46.0, "shares": 120000000, "volatility": 0.016, "revenue": 900000000, "costs": 860000000, "integrity": 0.7 },
+    { "id": "takumi-motors", "name": "Takumi Motors", "ticker": "TKMI", "sector": "Auto", "price": 61.0, "shares": 100000000, "volatility": 0.013, "revenue": 1100000000, "costs": 1020000000, "integrity": 0.85 },
+    { "id": "kessler-ag", "name": "Kessler AG", "ticker": "KSLR", "sector": "Auto", "price": 88.0, "shares": 30000000, "volatility": 0.017, "revenue": 300000000, "costs": 265000000, "integrity": 0.8 },
+    { "id": "vanta-electric", "name": "Vanta Electric", "ticker": "VNTA", "sector": "Auto", "price": 6.5, "shares": 60000000, "volatility": 0.06, "revenue": 4000000, "costs": 7000000, "integrity": 0.65, "health": 0.35 }
+  ],
+  "ministries": [
+    { "id": "grace-harbor", "name": "Grace Harbor Church", "building": "Church", "giving": 26000, "integrity": 0.9, "doctrine": 0.95, "followers": 650, "trust": 0.85 },
+    { "id": "new-covenant", "name": "New Covenant Chapel", "giving": 9000, "integrity": 0.85, "doctrine": 0.9, "followers": 220, "trust": 0.8 },
+    { "id": "riverside-bible", "name": "Riverside Bible Fellowship", "giving": 14000, "integrity": 0.8, "doctrine": 0.85, "followers": 380, "trust": 0.78 },
+    { "id": "abundance-center", "name": "Abundance Prosperity Center", "giving": 60000, "integrity": 0.35, "doctrine": 0.3, "followers": 2400, "trust": 0.55 }
+  ]
+}

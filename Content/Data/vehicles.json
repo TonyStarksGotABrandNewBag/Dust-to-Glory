@@ -1,0 +1,174 @@
+// Fictional manufacturers and their model lines. Each nameplate expands into every generation built
+// between "first" and "last" (0 = still in production); stats, engines and prices are derived per era.
+// body: Sedan, Coupe, Hatchback, Wagon, Convertible, SUV, Pickup, Van, Muscle, Sports, Supercar, Luxury,
+//       Truck, OpenWheel, MonsterTruck, Dragster, Bus
+// drive: FWD, RWD, AWD.  Optional: engine (I3..V12, V8Crossplane, V8Flatplane, Flat4, Flat6, Rotary),
+//       aspiration (Natural, Turbo, TwinTurbo, Supercharged), position (Front, Mid, Rear), electricFrom (year).
+{
+  "brands": [
+    {
+      "id": "ardent", "name": "Ardent Motors", "country": "USA", "founded": 1903, "prestige": 0.3, "performance": 0.1,
+      "color": "#2A4D8F", "tagline": "Built for the long road.",
+      "nameplates": [
+        { "name": "Meridian", "body": "Sedan", "drive": "RWD", "first": 1955, "genYears": 7, "tier": 0.45 },
+        { "name": "Stallion", "body": "Muscle", "drive": "RWD", "first": 1964, "last": 1979, "genYears": 5, "tier": 0.75 },
+        { "name": "Stallion GT", "body": "Muscle", "drive": "RWD", "first": 2005, "genYears": 7, "tier": 0.85 },
+        { "name": "Bullhorn", "body": "Pickup", "drive": "RWD", "first": 1948, "genYears": 8, "tier": 0.5 },
+        { "name": "Wayfarer", "body": "Wagon", "drive": "RWD", "first": 1958, "last": 1996, "genYears": 8, "tier": 0.45 },
+        { "name": "Homestead", "body": "SUV", "drive": "AWD", "first": 1984, "genYears": 6, "tier": 0.5 },
+        { "name": "Wren", "body": "Hatchback", "drive": "FWD", "first": 1974, "last": 1992, "genYears": 6, "tier": 0.2 },
+        { "name": "Roadhome", "body": "Van", "drive": "RWD", "first": 1961, "genYears": 9, "tier": 0.4 }
+      ]
+    },
+    {
+      "id": "rook", "name": "Rook Performance", "country": "USA", "founded": 1962, "prestige": 0.45, "performance": 0.8,
+      "color": "#B3261E", "tagline": "Loud on purpose.",
+      "nameplates": [
+        { "name": "Brute", "body": "Muscle", "drive": "RWD", "first": 1966, "last": 1974, "genYears": 4, "tier": 0.9 },
+        { "name": "Brute", "body": "Muscle", "drive": "RWD", "first": 1999, "genYears": 6, "tier": 0.9, "aspiration": "Supercharged" },
+        { "name": "Hellfire", "body": "Sports", "drive": "RWD", "first": 1992, "genYears": 7, "tier": 0.95, "engine": "V10" }
+      ]
+    },
+    {
+      "id": "dominion", "name": "Dominion", "country": "USA", "founded": 1908, "prestige": 0.7, "performance": 0.1,
+      "color": "#1C1C1C", "tagline": "Quiet confidence.",
+      "nameplates": [
+        { "name": "Majestic", "body": "Luxury", "drive": "RWD", "first": 1949, "genYears": 7, "tier": 0.8 },
+        { "name": "Baron", "body": "Coupe", "drive": "RWD", "first": 1956, "last": 1993, "genYears": 7, "tier": 0.7 },
+        { "name": "Prospector", "body": "SUV", "drive": "AWD", "first": 1999, "genYears": 6, "tier": 0.85 }
+      ]
+    },
+    {
+      "id": "packwell", "name": "Packwell", "country": "USA", "founded": 1899, "defunct": 1958, "prestige": 0.75, "performance": 0.0,
+      "color": "#5B4636", "tagline": "Elegance, built to last.",
+      "nameplates": [
+        { "name": "Chancellor", "body": "Luxury", "drive": "RWD", "first": 1925, "genYears": 6, "tier": 0.85 },
+        { "name": "Roadster", "body": "Convertible", "drive": "RWD", "first": 1930, "genYears": 6, "tier": 0.7 }
+      ]
+    },
+    {
+      "id": "kessler", "name": "Kessler", "country": "Germany", "founded": 1931, "prestige": 0.8, "performance": 0.7,
+      "color": "#C9A227", "tagline": "Engineered without compromise.", "signatureEngine": "Flat6",
+      "nameplates": [
+        { "name": "Falke", "body": "Sports", "drive": "RWD", "first": 1964, "genYears": 8, "tier": 0.75 },
+        { "name": "Falke Turbo", "body": "Sports", "drive": "AWD", "first": 1975, "genYears": 8, "tier": 0.95, "aspiration": "TwinTurbo" },
+        { "name": "Reisen", "body": "Luxury", "drive": "AWD", "first": 1972, "genYears": 7, "tier": 0.7 },
+        { "name": "Sturm", "body": "SUV", "drive": "AWD", "first": 2002, "genYears": 7, "tier": 0.7 },
+        { "name": "Ring", "body": "Supercar", "drive": "RWD", "first": 2003, "genYears": 8, "tier": 0.95, "position": "Mid", "engine": "V8Flatplane" }
+      ]
+    },
+    {
+      "id": "montecara", "name": "Montecara", "country": "Italy", "founded": 1947, "prestige": 0.95, "performance": 1.0,
+      "color": "#D21F1F", "tagline": "Passione, sempre.", "signatureEngine": "V12",
+      "nameplates": [
+        { "name": "Tempesta", "body": "Supercar", "drive": "RWD", "first": 1966, "genYears": 9, "tier": 0.95 },
+        { "name": "Furia", "body": "Supercar", "drive": "RWD", "first": 1975, "genYears": 8, "tier": 0.75, "engine": "V8Flatplane" },
+        { "name": "Viaggio", "body": "Coupe", "drive": "RWD", "first": 1958, "genYears": 9, "tier": 0.8, "position": "Front" },
+        { "name": "Fulmine", "body": "Supercar", "drive": "AWD", "first": 2019, "genYears": 7, "tier": 1.0, "electricFrom": 2019 }
+      ]
+    },
+    {
+      "id": "fabbro", "name": "Fabbro", "country": "Italy", "founded": 1899, "prestige": 0.3, "performance": 0.2,
+      "color": "#3E8E41", "tagline": "Little cars, big hearts.",
+      "nameplates": [
+        { "name": "Pulcino", "body": "Hatchback", "drive": "RWD", "first": 1957, "last": 1975, "genYears": 9, "tier": 0.1, "position": "Rear" },
+        { "name": "Pulcino", "body": "Hatchback", "drive": "FWD", "first": 2007, "genYears": 9, "tier": 0.2 },
+        { "name": "Fulgore", "body": "Coupe", "drive": "RWD", "first": 1966, "last": 1985, "genYears": 7, "tier": 0.6 },
+        { "name": "Famiglia", "body": "Wagon", "drive": "FWD", "first": 1978, "genYears": 8, "tier": 0.35 }
+      ]
+    },
+    {
+      "id": "bellwether", "name": "Bellwether", "country": "United Kingdom", "founded": 1919, "prestige": 0.9, "performance": 0.3,
+      "color": "#1F3D2B", "tagline": "Effortless, at any speed.",
+      "nameplates": [
+        { "name": "Regalia", "body": "Luxury", "drive": "RWD", "first": 1948, "genYears": 9, "tier": 0.95, "engine": "V12" },
+        { "name": "Whitby", "body": "Convertible", "drive": "RWD", "first": 1950, "last": 1975, "genYears": 7, "tier": 0.7, "engine": "I6" },
+        { "name": "Mercia GT", "body": "Coupe", "drive": "AWD", "first": 2003, "genYears": 8, "tier": 0.9, "aspiration": "TwinTurbo" }
+      ]
+    },
+    {
+      "id": "apex", "name": "Apex Racing Works", "country": "United Kingdom", "founded": 1958, "prestige": 0.7, "performance": 0.9,
+      "color": "#F2C230", "tagline": "Light is right.", "signatureEngine": "I4",
+      "nameplates": [
+        { "name": "Feather", "body": "Sports", "drive": "RWD", "first": 1962, "genYears": 9, "tier": 0.5 },
+        { "name": "GP", "body": "OpenWheel", "drive": "RWD", "first": 1958, "genYears": 4, "tier": 0.95, "eventOnly": true }
+      ]
+    },
+    {
+      "id": "nordvik", "name": "Nordvik", "country": "Sweden", "founded": 1927, "prestige": 0.5, "performance": -0.1,
+      "color": "#2F5D7C", "tagline": "Safe. Sensible. Surprisingly quick.", "signatureEngine": "I5",
+      "nameplates": [
+        { "name": "Fjord", "body": "Wagon", "drive": "RWD", "first": 1966, "genYears": 9, "tier": 0.5 },
+        { "name": "Runa", "body": "Sedan", "drive": "FWD", "first": 1974, "genYears": 8, "tier": 0.55 },
+        { "name": "Isbjorn", "body": "SUV", "drive": "AWD", "first": 2002, "genYears": 8, "tier": 0.6, "electricFrom": 2023 }
+      ]
+    },
+    {
+      "id": "lumiere", "name": "Lumiere", "country": "France", "founded": 1898, "prestige": 0.35, "performance": 0.1,
+      "color": "#F5C400", "tagline": "Joie de conduire.",
+      "nameplates": [
+        { "name": "Cigale", "body": "Hatchback", "drive": "FWD", "first": 1961, "genYears": 8, "tier": 0.25 },
+        { "name": "Etoile", "body": "Sedan", "drive": "FWD", "first": 1968, "genYears": 8, "tier": 0.45 },
+        { "name": "Rallye", "body": "Hatchback", "drive": "AWD", "first": 1984, "last": 1995, "genYears": 5, "tier": 0.95, "aspiration": "Turbo" }
+      ]
+    },
+    {
+      "id": "takumi", "name": "Takumi Motors", "country": "Japan", "founded": 1937, "prestige": 0.4, "performance": 0.3,
+      "color": "#B71C1C", "tagline": "Craft in motion.", "signatureEngine": "I6",
+      "nameplates": [
+        { "name": "Sora", "body": "Sedan", "drive": "FWD", "first": 1966, "genYears": 6, "tier": 0.4 },
+        { "name": "Hikari", "body": "Hatchback", "drive": "FWD", "first": 1972, "genYears": 6, "tier": 0.3 },
+        { "name": "Raiden", "body": "Sports", "drive": "RWD", "first": 1969, "last": 2002, "genYears": 7, "tier": 0.85, "aspiration": "TwinTurbo" },
+        { "name": "Raiden", "body": "Sports", "drive": "RWD", "first": 2019, "genYears": 7, "tier": 0.85, "aspiration": "Turbo" },
+        { "name": "Kame", "body": "SUV", "drive": "AWD", "first": 1980, "genYears": 7, "tier": 0.45 },
+        { "name": "Kaizen", "body": "Pickup", "drive": "AWD", "first": 1968, "genYears": 9, "tier": 0.4 }
+      ]
+    },
+    {
+      "id": "hayate", "name": "Hayate", "country": "Japan", "founded": 1920, "prestige": 0.4, "performance": 0.4,
+      "color": "#6A1B9A", "tagline": "Feel the wind.", "signatureEngine": "Rotary",
+      "nameplates": [
+        { "name": "Kaze", "body": "Sports", "drive": "RWD", "first": 1967, "last": 2002, "genYears": 7, "tier": 0.7 },
+        { "name": "Kaze Spirit", "body": "Sports", "drive": "RWD", "first": 2003, "last": 2012, "genYears": 9, "tier": 0.6 },
+        { "name": "Tsubasa", "body": "Sedan", "drive": "FWD", "first": 1970, "genYears": 6, "tier": 0.4, "engine": "I4" },
+        { "name": "Roadster", "body": "Convertible", "drive": "RWD", "first": 1989, "genYears": 8, "tier": 0.4, "engine": "I4" }
+      ]
+    },
+    {
+      "id": "hanbit", "name": "Hanbit Motors", "country": "South Korea", "founded": 1967, "prestige": 0.25, "performance": 0.0,
+      "color": "#0D47A1", "tagline": "Bright ideas, honest prices.",
+      "nameplates": [
+        { "name": "Nuri", "body": "Sedan", "drive": "FWD", "first": 1985, "genYears": 6, "tier": 0.35 },
+        { "name": "Byeol", "body": "Hatchback", "drive": "FWD", "first": 1975, "genYears": 6, "tier": 0.2 },
+        { "name": "Saebyeok", "body": "SUV", "drive": "AWD", "first": 2000, "genYears": 6, "tier": 0.45, "electricFrom": 2021 }
+      ]
+    },
+    {
+      "id": "vanta", "name": "Vanta Electric", "country": "USA", "founded": 2008, "prestige": 0.6, "performance": 0.6,
+      "color": "#212121", "tagline": "The future arrived early.",
+      "nameplates": [
+        { "name": "Arc", "body": "Sedan", "drive": "AWD", "first": 2012, "genYears": 7, "tier": 0.7, "electricFrom": 2008 },
+        { "name": "Halo", "body": "SUV", "drive": "AWD", "first": 2015, "genYears": 7, "tier": 0.65, "electricFrom": 2008 },
+        { "name": "Surge", "body": "Supercar", "drive": "AWD", "first": 2020, "genYears": 7, "tier": 0.95, "electricFrom": 2008 }
+      ]
+    },
+    {
+      "id": "ironhorse", "name": "Ironhorse", "country": "USA", "founded": 1915, "prestige": 0.3, "performance": -0.2,
+      "color": "#E65100", "tagline": "Work never stops.",
+      "nameplates": [
+        { "name": "Hauler", "body": "Truck", "drive": "RWD", "first": 1935, "genYears": 10, "tier": 0.5 },
+        { "name": "Citybus", "body": "Bus", "drive": "RWD", "first": 1946, "genYears": 12, "tier": 0.5 },
+        { "name": "Packhorse", "body": "Van", "drive": "RWD", "first": 1958, "genYears": 10, "tier": 0.4 }
+      ]
+    },
+    {
+      "id": "thunderdome", "name": "Thunderdome Motorsports", "country": "USA", "founded": 1981, "prestige": 0.5, "performance": 1.0,
+      "color": "#FF6F00", "tagline": "Crush. Fly. Repeat.",
+      "nameplates": [
+        { "name": "Behemoth", "body": "MonsterTruck", "drive": "AWD", "first": 1982, "genYears": 6, "tier": 0.9, "eventOnly": true },
+        { "name": "Nitro Rail", "body": "Dragster", "drive": "RWD", "first": 1981, "genYears": 6, "tier": 0.9, "eventOnly": true },
+        { "name": "Pro Mod", "body": "Muscle", "drive": "RWD", "first": 1995, "genYears": 8, "tier": 1.0, "aspiration": "Supercharged" }
+      ]
+    }
+  ]
+}

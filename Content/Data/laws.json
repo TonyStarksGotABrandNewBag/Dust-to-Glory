@@ -1,0 +1,37 @@
+// Bills the player can propose in office or lobby for. Effects change how other systems behave.
+// minimumOffice: CityCouncil, Mayor, StateRepresentative, Governor, Senator, President
+// popularity -1..1 changes how likely it passes and how approval moves.
+{
+  "laws": [
+    { "id": "lower-speed-limits", "name": "Safer Streets Act", "minimumOffice": "CityCouncil", "popularity": 0.1,
+      "description": "Lower speed limits citywide. Speeding draws more police attention.", "effects": { "speedingHeatMul": 1.5 } },
+    { "id": "raise-speed-limits", "name": "Open Road Act", "minimumOffice": "CityCouncil", "popularity": 0.2,
+      "description": "Higher limits on arterials. Most speeding goes unpunished.", "effects": { "speedingHeatMul": 0.5 } },
+    { "id": "sanctioned-street-racing", "name": "Legal Street Racing Nights", "minimumOffice": "CityCouncil", "popularity": -0.2,
+      "description": "Closed-course street races on weekend nights, with permits.", "effects": { "streetRacingLegal": true, "speedingHeatMul": 0.8 } },
+    { "id": "police-funding-increase", "name": "Public Safety Funding", "minimumOffice": "Mayor", "popularity": 0.0,
+      "description": "More officers on patrol. Pursuits are bigger.", "effects": { "policeUnitsMul": 1.4 } },
+    { "id": "police-funding-cut", "name": "Police Budget Reform", "minimumOffice": "Mayor", "popularity": -0.1,
+      "description": "Fewer patrols, money moved to other services.", "effects": { "policeUnitsMul": 0.7 } },
+    { "id": "small-business-tax-cut", "name": "Main Street Tax Relief", "minimumOffice": "Mayor", "popularity": 0.3,
+      "description": "Lower local taxes for small businesses.", "effects": { "businessHealthBonus": 0.05 } },
+    { "id": "transit-funding", "name": "Rapid Transit Plan", "minimumOffice": "Mayor", "popularity": 0.2,
+      "description": "Buses and rail take cars off the road.", "effects": { "trafficDensityMul": 0.7 } },
+    { "id": "housing-development", "name": "Housing For All Act", "minimumOffice": "Mayor", "popularity": 0.2,
+      "description": "Zoning reform and new construction lower home prices.", "effects": { "housingPriceMul": 0.85 } },
+    { "id": "minimum-wage-increase", "name": "Living Wage Act", "minimumOffice": "StateRepresentative", "popularity": 0.3,
+      "description": "Higher minimum wage. Pay rises; some businesses feel the squeeze.", "effects": { "wageMul": 1.15, "businessHealthBonus": -0.02 } },
+    { "id": "cyber-crime-act", "name": "Computer Crimes Act", "minimumOffice": "StateRepresentative", "popularity": 0.2,
+      "description": "Tougher penalties for unauthorized hacking.", "effects": { "hackingHeatMul": 2.0 } },
+    { "id": "free-community-college", "name": "Free Community College", "minimumOffice": "Governor", "popularity": 0.4,
+      "description": "Halves tuition at public colleges.", "effects": { "tuitionMul": 0.5 } },
+    { "id": "emissions-standards", "name": "Clean Air Standards", "minimumOffice": "Senator", "popularity": 0.0,
+      "description": "Stricter emissions rules raise new car prices.", "effects": { "vehiclePriceMul": 1.1 } },
+    { "id": "auto-import-tariffs", "name": "Auto Import Tariffs", "minimumOffice": "President", "popularity": -0.1,
+      "description": "Tariffs on imported cars. Prices climb.", "effects": { "vehiclePriceMul": 1.2 } },
+    { "id": "infrastructure-act", "name": "National Infrastructure Act", "minimumOffice": "President", "popularity": 0.3,
+      "description": "Roads, bridges and broadband. Traffic eases and business grows.", "effects": { "trafficDensityMul": 0.8, "businessHealthBonus": 0.03 } },
+    { "id": "tax-relief-act", "name": "Middle Class Tax Relief", "minimumOffice": "President", "popularity": 0.4,
+      "description": "Lower taxes for workers and businesses.", "effects": { "businessHealthBonus": 0.06, "wageMul": 1.05 } }
+  ]
+}
