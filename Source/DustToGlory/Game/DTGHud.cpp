@@ -445,6 +445,13 @@ TArray<FString> ADTGHud::BuildOptions() const
 		Options.Add(TEXT("Walk away"));
 		break;
 	}
+	case EDTGScreen::Service:
+		for (const FServiceRow& Row : ServiceRows())
+		{
+			Options.Add(Row.Label);
+		}
+		Options.Add(TEXT("Back"));
+		break;
 	case EDTGScreen::Events:
 		for (int32 Kind = 0; Kind < static_cast<int32>(EventKind::Count); ++Kind)
 		{
@@ -546,6 +553,14 @@ void ADTGHud::DrawMenu()
 			}
 		}
 		break;
+	case EDTGScreen::Service:
+	{
+		Title = ServiceName;
+		const BuildingPlan* Where = Sim.City.FindBuilding(ContextId);
+		Subtitle = Where ? FString::Printf(TEXT("%s  --  %s"), *Utf8(Where->Name), *Cash(Sim.Funds.Balance()))
+						 : Cash(Sim.Funds.Balance());
+		break;
+	}
 	case EDTGScreen::Events:
 		Title = TEXT("What's on");
 		Subtitle = TEXT("You race in whatever you drove here");
@@ -612,6 +627,7 @@ void ADTGHud::Choose(int32 Index)
 	case EDTGScreen::Talk: RunTalkOption(Selection); break;
 	case EDTGScreen::Title: RunTitleOption(Selection); break;
 	case EDTGScreen::Events: RunEventOption(Selection); break;
+	case EDTGScreen::Service: RunServiceOption(Selection); break;
 	case EDTGScreen::Court: RunCourtOption(Selection); break;
 	case EDTGScreen::Jail: RunJailOption(Selection); break;
 	case EDTGScreen::Phone:
@@ -687,7 +703,17 @@ void ADTGHud::RunBuildingService(int32 Index)
 		return;
 	}
 	const FString Service = Utf8(Services[static_cast<std::size_t>(Index)]);
-	// The service names come from the simulation, so this is a straight hand-off to it.
+	// Services that are a list of things -- the job board, the showroom floor, the stock desk -- open
+	// a screen of their own. The rest act here.
+	ServiceName = Service;
+	if (ServiceRows().Num() > 0)
+	{
+		Selection = 0;
+		InvalidateOptions();
+		Open(EDTGScreen::Service, ContextId);
+		return;
+	}
+	ServiceName.Reset();
 	if (Service == TEXT("Serve your time") || Service == TEXT("Plan a way out"))
 	{
 		Open(EDTGScreen::Jail);
@@ -733,21 +759,157 @@ void ADTGHud::RunBuildingService(int32 Index)
 		OnNotice(TEXT("You don't work here. The career center has the job board."));
 		return;
 	}
+	// The everyday reasons to walk in somewhere. The simulation owns what each costs and gives.
+	using Amenity = GameState::Amenity;
+	static const TMap<FString, Amenity> Amenities = {
+		{TEXT("Eat"), Amenity::Meal},
+		{TEXT("Rent a room"), Amenity::Lodging},
+		{TEXT("Get treated"), Amenity::Treatment},
+		{TEXT("Pay fines"), Amenity::Fines},
+		{TEXT("Train"), Amenity::Gym},
+		{TEXT("Compete"), Amenity::Track},
+		{TEXT("Tryouts and games"), Amenity::Track},
+		{TEXT("Study"), Amenity::Library},
+		{TEXT("Attend service"), Amenity::Service},
+		{TEXT("Watch a game"), Amenity::Leisure},
+		{TEXT("Explore exhibits"), Amenity::Leisure},
+		{TEXT("Browse"), Amenity::Leisure},
+		{TEXT("Shop plants"), Amenity::Leisure},
+		{TEXT("Gadgets"), Amenity::Leisure},
+	};
+	if (const Amenity* Kind = Amenities.Find(Service))
+	{
+		OnNotice(Utf8(Sim.UseAmenity(*Kind).Message));
+		return;
+	}
+	if (Service == TEXT("Attend class"))
+	{
+		const ClassResult Result = Sim.AttendClass(0.7);
+		OnNotice(Result.bValid
+			? FString::Printf(TEXT("%d hours of %s.%s"), Result.HoursAdded, *Utf8(Result.EducationName),
+				Result.bGraduated ? TEXT(" And that's the qualification finished.") : TEXT(""))
+			: FString(TEXT("You're not enrolled in anything.")));
+		return;
+	}
+	if (Service == TEXT("Career advice"))
+	{
+		FString Best;
+		int BestLevel = -1;
+		for (int32 Which = 0; Which < static_cast<int32>(Skill::Count); ++Which)
+		{
+			const int Level = Sim.Player.SkillLevel(static_cast<Skill>(Which));
+			if (Level > BestLevel)
+			{
+				BestLevel = Level;
+				Best = UTF8_TO_TCHAR(SkillName(static_cast<Skill>(Which)));
+			}
+		}
+		OnNotice(FString::Printf(TEXT("Your best card is %s at level %d. The board has what it'll open."), *Best, BestLevel));
+		return;
+	}
+	if (Service == TEXT("Account summary"))
+	{
+		OnNotice(FString::Printf(TEXT("%s in the account, %s in shares."), *Cash(Sim.Funds.Balance()),
+			*Cash(Sim.Markets.PortfolioValue())));
+		return;
+	}
+	if (Service == TEXT("Dyno"))
+	{
+		const OwnedVehicle* Car = Sim.ActiveVehicle();
+		const VehicleSetup Setup = Car ? Sim.SetupFor(Car->Uid) : VehicleSetup();
+		OnNotice(Car ? FString::Printf(TEXT("%.0f hp at the wheels, %.0f Nm, redline %.0f."),
+			Setup.Engine.PeakPowerKw * 1.341, Setup.Engine.PeakTorqueNm, Setup.Engine.RedlineRpm)
+			: FString(TEXT("Nothing on the rollers.")));
+		return;
+	}
+	if (Service == TEXT("Track deliveries"))
+	{
+		if (Sim.Homes.Orders().empty())
+		{
+			OnNotice(TEXT("Nothing on its way."));
+			return;
+		}
+		const FurnitureOrder& Latest = Sim.Homes.Orders().back();
+		const std::int64_t Left = Latest.DeliverMinute - Sim.Clock.TotalMinutes();
+		OnNotice(Left > 0
+			? FString::Printf(TEXT("%d items, arriving in about %lld hours."), static_cast<int32>(Latest.Items.size()), Left / 60)
+			: FString(TEXT("It's been delivered.")));
+		return;
+	}
+	if (Service == TEXT("Recruit a lab contact"))
+	{
+		// Whoever is nearest: the scheme needs somebody who can reach a sample.
+		const ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn());
+		const FString Who = Player ? Player->Focus().MindId : FString();
+		OnNotice(Who.IsEmpty()
+			? FString(TEXT("Nobody here to ask. Find somebody who works in the building."))
+			: Utf8(Sim.RecruitInsider(TCHAR_TO_UTF8(*Who), InsiderRole::LabTech).Message));
+		return;
+	}
+	if (Service == TEXT("Restoration shop"))
+	{
+		const OwnedVehicle* Car = Sim.ActiveVehicle();
+		if (!Car)
+		{
+			OnNotice(TEXT("Bring the car in and they'll quote it."));
+			return;
+		}
+		const RestorationQuote Quote = Sim.QuoteRestore(Car->Uid, RestorationLevel::Driver, false);
+		if (!Quote.bAllowed)
+		{
+			OnNotice(Utf8(Quote.Reason));
+			return;
+		}
+		OnNotice(FString::Printf(TEXT("A driver-quality restoration: %s, %d days."), *Cash(Quote.ShopCost), Quote.ShopDays));
+		OnNotice(Utf8(Sim.RestoreAtShop(Car->Uid, RestorationLevel::Driver, false).Message));
+		return;
+	}
+	if (Service == TEXT("Arrange furniture"))
+	{
+		OnNotice(FString::Printf(TEXT("%d pieces in this place."), static_cast<int32>(Sim.Homes.Orders().size())));
+		return;
+	}
+	if (Service == TEXT("Business consulting"))
+	{
+		// Somebody failing who would rather pay for help than go under.
+		for (const Business& Company : Sim.Markets.Businesses())
+		{
+			if (Company.IsFailing() && !Company.bDissolved)
+			{
+				const TurnaroundOffer Offer = Sim.Markets.ProposeTurnaround(Company.Id);
+				OnNotice(FString::Printf(TEXT("%s is in trouble. They'll pay %s, or %.0f%% of the business."),
+					*Utf8(Company.Name), *Cash(Offer.Cash), Offer.Equity * 100.0));
+				return;
+			}
+		}
+		OnNotice(TEXT("Nobody's asking for help this week."));
+		return;
+	}
+	if (Service == TEXT("Volunteer"))
+	{
+		OnNotice(Utf8(Sim.RunOutreach(OutreachKind::CommunityCleanup).Message));
+		return;
+	}
+	if (Service == TEXT("Visit") || Service == TEXT("Visit a neighbor"))
+	{
+		OnNotice(Utf8(Sim.UseAmenity(Amenity::Leisure).Message));
+		return;
+	}
 	OnNotice(FString::Printf(TEXT("%s: %s"), *Utf8(Building->Name), *Service));
 }
 
 void ADTGHud::OpenTalk(const FString& MindId)
 {
+	if (!Game || !Game->IsContentLoaded())
+	{
+		return;
+	}
 	TalkingTo = MindId;
 	LastReply.Reset();
 	GameState& Sim = Game->Sim();
 	// Meeting somebody properly settles where they are from and who they know, which is what gives
 	// them a town to have an opinion about and people to carry what you say to them.
-	FVector2D Where(0.0, 0.0);
-	if (PlayerOwner && PlayerOwner->GetPawn())
-	{
-		Where = Game->ToSim(PlayerOwner->GetPawn()->GetActorLocation());
-	}
+	const FVector2D Where = Game->ToSim(ADTGCharacter::InterestPointFor(GetOwningPawn()));
 	NpcMind& Mind = Sim.Meet(TCHAR_TO_UTF8(*MindId), Where.X, Where.Y);
 	LastReply = Utf8(Sim.Npcs.Line(Mind, Sim.Random));
 	Open(EDTGScreen::Talk);
@@ -788,6 +950,498 @@ void ADTGHud::RunTalkOption(int32 Index)
 		// They have walked off. The last thing they said is worth showing on the way out.
 		OnNotice(LastReply);
 		Close();
+	}
+}
+
+
+// ================================================================================ Building services
+//
+// Everything a building offers is a list of things the simulation can actually do. ServiceRows builds
+// that list and RunServiceOption acts on it by index, both from the same function, so the row the
+// player is looking at and the row the game acts on cannot drift apart.
+
+TArray<ADTGHud::FServiceRow> ADTGHud::ServiceRows() const
+{
+	TArray<FServiceRow> Rows;
+	if (!Game || !Game->IsContentLoaded())
+	{
+		return Rows;
+	}
+	GameState& Sim = Game->Sim();
+	const BuildingPlan* Building = Sim.City.FindBuilding(ContextId);
+	const FString& What = ServiceName;
+
+	// ---- Work and study
+	if (What == TEXT("Job board"))
+	{
+		for (const CareerDef& Career : Sim.Careers.Careers())
+		{
+			std::string Why;
+			if (!Sim.Careers.CanApply(Sim.Player, Career.Id, &Why))
+			{
+				continue;
+			}
+			bool bHave = false;
+			for (const CareerProgress& Job : Sim.Jobs)
+			{
+				bHave = bHave || Job.CareerId == Career.Id;
+			}
+			if (bHave)
+			{
+				continue;
+			}
+			const Money Wage = Career.Levels.empty() ? Money(0) : Career.Levels.front().HourlyPay;
+			Rows.Add({FString::Printf(TEXT("%s  --  %s an hour, %s"), *Utf8(Career.Name), *Cash(Wage),
+				UTF8_TO_TCHAR(SkillName(Career.PrimarySkill))), Utf8(Career.Id), 0});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("Nothing here you qualify for yet."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Enroll"))
+	{
+		for (const EducationDef& Course : Sim.Careers.Educations())
+		{
+			std::string Why;
+			if (Sim.Player.HasEducation(Course.Id) || !Sim.Careers.CanEnroll(Sim.Player, Course.Id, &Why))
+			{
+				continue;
+			}
+			Rows.Add({FString::Printf(TEXT("%s  --  %s, %d class hours"), *Utf8(Course.Name), *Cash(Course.Tuition),
+				Course.StudyHours), Utf8(Course.Id), Course.Tuition});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("Nothing left here to enroll in."), FString(), 0});
+		}
+		return Rows;
+	}
+
+	// ---- Cars
+	if (What == TEXT("Browse every model") || What == TEXT("Test drive"))
+	{
+		// What this showroom's own brands sell new. The whole catalog would be two thousand rows.
+		const std::string ShowroomId = Building ? Building->Param : std::string();
+		for (const Brand* Make : Sim.BrandsAtShowroom(ShowroomId))
+		{
+			if (!Make)
+			{
+				continue;
+			}
+			for (const VehicleModel& Model : Sim.Vehicles.Models())
+			{
+				if (Model.BrandId != Make->Id || !Model.IsCurrent() || Model.bEventOnly)
+				{
+					continue;
+				}
+				const Money Price = Sim.NewCarPrice(Model);
+				Rows.Add({FString::Printf(TEXT("%s  --  %s"), *Utf8(Model.DisplayName), *Cash(Price)), Utf8(Model.Id), Price});
+			}
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("The floor is empty this week."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Browse used cars") || What == TEXT("Browse classics") || What == TEXT("Used car lot"))
+	{
+		for (const UsedListing& Listing : Sim.UsedCars.Listings())
+		{
+			const VehicleModel* Model = Sim.Vehicles.FindModel(Listing.ModelId);
+			Rows.Add({FString::Printf(TEXT("%s  --  %s, %.0fk km, condition %.0f%%"),
+				Model ? *Utf8(Model->DisplayName) : *Utf8(Listing.ModelId), *Cash(Listing.AskingPrice),
+				Listing.MileageKm / 1000.0, Listing.Condition * 100.0), Utf8(Listing.Id), Listing.AskingPrice});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("Nothing on the lot right now."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Sell a car"))
+	{
+		for (const OwnedVehicle& Car : Sim.Garage)
+		{
+			const VehicleModel* Model = Sim.Vehicles.FindModel(Car.ModelId);
+			Rows.Add({FString::Printf(TEXT("%s  --  they'll give you %s"),
+				Model ? *Utf8(Model->DisplayName) : *Utf8(Car.ModelId),
+				Model ? *Cash(TradeInOffer(*Model, Car)) : TEXT("an offer")), Utf8(Car.Uid), 0});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("You have nothing to sell."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Parts and tuning") || What == TEXT("DIY garage"))
+	{
+		const OwnedVehicle* Car = Sim.ActiveVehicle();
+		const VehicleModel* Model = Car ? Sim.Vehicles.FindModel(Car->ModelId) : nullptr;
+		if (!Car || !Model)
+		{
+			Rows.Add({TEXT("Bring a car and they'll fit something to it."), FString(), 0});
+			return Rows;
+		}
+		for (const PartDef& Part : Sim.Parts.All())
+		{
+			if (Part.bEvOnly != Model->bElectric && (Part.bEvOnly || Part.bIceOnly))
+			{
+				continue;
+			}
+			const Money Price = PartPrice(Part, *Model);
+			Rows.Add({FString::Printf(TEXT("%s %s  --  %s"), *Utf8(Part.Maker), *Utf8(Part.Name), *Cash(Price)),
+				Utf8(Part.Id), Price});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Paint shop"))
+	{
+		static const TCHAR* const Names[] = {TEXT("Black"), TEXT("White"), TEXT("Red"), TEXT("Blue"), TEXT("Silver"), TEXT("Green")};
+		static const uint32 Colours[] = {0x101014u, 0xe8e8e8u, 0xa8171cu, 0x1b3f8bu, 0xb4b8bcu, 0x1d5c36u};
+		for (int32 Index = 0; Index < static_cast<int32>(UE_ARRAY_COUNT(Names)); ++Index)
+		{
+			Rows.Add({Names[Index], FString::Printf(TEXT("%u"), Colours[Index]), Dollars(400)});
+		}
+		return Rows;
+	}
+
+	// ---- Money
+	if (What == TEXT("Stock exchange"))
+	{
+		for (const Stock& Listed : Sim.Markets.Stocks())
+		{
+			const int64 Held = static_cast<int64>(Sim.Markets.SharesHeld(Listed.Ticker));
+			const double Move = Listed.PreviousClose > 0.0
+				? 100.0 * (Listed.Price - Listed.PreviousClose) / Listed.PreviousClose : 0.0;
+			Rows.Add({FString::Printf(TEXT("%s  $%.2f  %+.1f%%%s"), *Utf8(Listed.Ticker), Listed.Price, Move,
+				Held > 0 ? *FString::Printf(TEXT("   you hold %lld"), Held) : TEXT("")), Utf8(Listed.Ticker), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Buy a business"))
+	{
+		for (const Business& Company : Sim.Markets.Businesses())
+		{
+			if (Company.bDissolved || Company.PlayerEquity > 0.99)
+			{
+				continue;
+			}
+			const Money Ask = Sim.Markets.AskingPrice(Company.Id);
+			Rows.Add({FString::Printf(TEXT("%s  --  %s, %s"), *Utf8(Company.Name), *Utf8(Company.Sector), *Cash(Ask)),
+				Utf8(Company.Id), Ask});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("Nothing for sale today."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Browse homes"))
+	{
+		const FVector2D Here = Game->ToSim(ADTGCharacter::InterestPointFor(GetOwningPawn()));
+		for (const BuildingPlan* Home : Sim.City.BuildingsNear(Here.X, Here.Y, 3000.0))
+		{
+			if (!Home || !IsResidential(Home->Role) || Sim.Homes.OwnsProperty(Sim.PropertyIdFor(Home->Id)))
+			{
+				continue;
+			}
+			Rows.Add({FString::Printf(TEXT("%s  --  %s"), *Utf8(Home->Address.empty() ? Home->Name : Home->Address),
+				*Cash(Home->Price)), FString::FromInt(Home->Id), Home->Price});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("Nothing listed nearby."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Shop furniture"))
+	{
+		for (const FurnitureItem& Item : Sim.Homes.Items())
+		{
+			Rows.Add({FString::Printf(TEXT("%s  --  %s, %s"), *Utf8(Item.Name), *Utf8(Item.Category), *Cash(Item.Price)),
+				Utf8(Item.Id), Item.Price});
+		}
+		return Rows;
+	}
+
+	// ---- Work of your own
+	if (What == TEXT("Hacking contracts"))
+	{
+		for (const HackContract& Job : Sim.HackBoard)
+		{
+			Rows.Add({FString::Printf(TEXT("%s  --  %s for %s, tier %d"), *Utf8(Job.Title), *Utf8(Job.Client),
+				*Cash(Job.Payout), Job.Tier), Utf8(Job.Id), 0});
+		}
+		if (Rows.IsEmpty())
+		{
+			Rows.Add({TEXT("The board is empty. Try tomorrow."), FString(), 0});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Hacking tools"))
+	{
+		Rows.Add({TEXT("Probe kit"), TEXT("0"), 0});
+		Rows.Add({TEXT("Ghost relay"), TEXT("1"), 0});
+		Rows.Add({TEXT("Pattern engine"), TEXT("2"), 0});
+		return Rows;
+	}
+	if (What == TEXT("Create IP"))
+	{
+		Rows.Add({TEXT("Write a song"), TEXT("0"), 0});
+		Rows.Add({TEXT("Write a book"), TEXT("1"), 0});
+		Rows.Add({TEXT("Make a film"), TEXT("2"), 0});
+		Rows.Add({TEXT("Build an app"), TEXT("3"), 0});
+		Rows.Add({TEXT("Design an invention"), TEXT("4"), 0});
+		return Rows;
+	}
+	if (What == TEXT("Research a medicine"))
+	{
+		Rows.Add({TEXT("A general treatment"), TEXT("general"), 0});
+		if (Sim.Outbreak.IsActive())
+		{
+			Rows.Add({FString::Printf(TEXT("Target %s -- fast-tracked while the outbreak runs"),
+				*Utf8(Sim.Outbreak.Strain().Name)), TEXT("outbreak"), 0});
+		}
+		return Rows;
+	}
+
+	// ---- Office
+	if (What == TEXT("Run for office"))
+	{
+		for (int32 Which = 1; Which < static_cast<int32>(Office::Count); ++Which)
+		{
+			const OfficeInfo& Info = GetOfficeInfo(static_cast<Office>(Which));
+			Rows.Add({FString::Printf(TEXT("%s  --  filing fee %s, %d followers needed"), UTF8_TO_TCHAR(Info.Title),
+				*Cash(Info.FilingFee), Info.FollowersNeeded), FString::FromInt(Which), Info.FilingFee});
+		}
+		return Rows;
+	}
+	if (What == TEXT("Legislature"))
+	{
+		for (const LawDef& Law : Sim.LawBook)
+		{
+			Rows.Add({FString::Printf(TEXT("%s%s"), *Utf8(Law.Name),
+				Sim.Politics.IsEnacted(Law.Id) ? TEXT("   (in force)") : TEXT("   -- lobby for it")), Utf8(Law.Id), 0});
+		}
+		return Rows;
+	}
+
+	// ---- Faith
+	if (What == TEXT("Ministry office"))
+	{
+		if (Sim.PlayerMinistry.Name.empty())
+		{
+			Rows.Add({TEXT("Found a ministry here"), TEXT("found"), 0});
+			return Rows;
+		}
+		for (int32 Kind = 0; Kind < static_cast<int32>(OutreachKind::Count); ++Kind)
+		{
+			const OutreachInfo& Info = GetOutreachInfo(static_cast<OutreachKind>(Kind));
+			Rows.Add({FString::Printf(TEXT("%s  --  %s, %d hours"), UTF8_TO_TCHAR(Info.Name), *Cash(Info.Cost), Info.Hours),
+				FString::Printf(TEXT("outreach:%d"), Kind), Info.Cost});
+		}
+		Rows.Add({TEXT("Hold a telethon"), TEXT("telethon"), 0});
+		Rows.Add({TEXT("Open the books"), TEXT("accountability"), 0});
+		return Rows;
+	}
+	return Rows;
+}
+
+void ADTGHud::RunServiceOption(int32 Index)
+{
+	GameState& Sim = Game->Sim();
+	const TArray<FServiceRow> Rows = ServiceRows();
+	if (Index < 0 || Index >= Rows.Num())
+	{
+		// The row past the end is "Back".
+		Open(EDTGScreen::Building, ContextId);
+		return;
+	}
+	const FServiceRow& Row = Rows[Index];
+	if (Row.Key.IsEmpty())
+	{
+		return; // an explanatory line, not a choice
+	}
+	const std::string Key = TCHAR_TO_UTF8(*Row.Key);
+	const FString& What = ServiceName;
+	InvalidateOptions();
+
+	if (What == TEXT("Job board"))
+	{
+		OnNotice(Utf8(Sim.ApplyForCareer(Key).Message));
+		return;
+	}
+	if (What == TEXT("Enroll"))
+	{
+		OnNotice(Utf8(Sim.Enroll(Key).Message));
+		return;
+	}
+	if (What == TEXT("Browse every model"))
+	{
+		OnNotice(Utf8(Sim.BuyVehicle(Key).Message));
+		return;
+	}
+	if (What == TEXT("Test drive"))
+	{
+		// A showroom car brought round for a lap of the block: configured from the catalog, not owned,
+		// so it is not in the garage and cannot be driven away for good.
+		if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetOwningPawn()))
+		{
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			if (ADTGVehicle* Demo = GetWorld()->SpawnActor<ADTGVehicle>(ADTGVehicle::StaticClass(), FTransform::Identity, Params))
+			{
+				Demo->ConfigureFromModel(Row.Key);
+				const FVector At = Player->GetActorLocation() + Player->GetActorForwardVector() * 450.0f;
+				Demo->PlaceAt(At, Player->GetActorRotation().Yaw);
+				OnNotice(FString::Printf(TEXT("They've brought the %s round. It's outside."), *Row.Label));
+				Close();
+				return;
+			}
+		}
+		OnNotice(TEXT("No room out front for a demonstrator."));
+		return;
+	}
+	if (What == TEXT("Browse used cars") || What == TEXT("Browse classics") || What == TEXT("Used car lot"))
+	{
+		// Offer nine tenths of the asking price: the simulation decides whether they take it.
+		const HaggleResult Haggled = Sim.HaggleUsed(Key, (Row.Cost * 9) / 10);
+		OnNotice(Utf8(Haggled.Reply));
+		// A counter is a price they named, so taking it is the sale; walking away is not.
+		if (Haggled.Outcome != HaggleOutcome::WalkedAway)
+		{
+			OnNotice(Utf8(Sim.BuyUsed(Key, Haggled.Price).Message));
+		}
+		return;
+	}
+	if (What == TEXT("Sell a car"))
+	{
+		OnNotice(Utf8(Sim.SellVehicle(Key).Message));
+		return;
+	}
+	if (What == TEXT("Parts and tuning") || What == TEXT("DIY garage"))
+	{
+		const OwnedVehicle* Car = Sim.ActiveVehicle();
+		OnNotice(Car ? Utf8(Sim.InstallPart(Car->Uid, Key).Message) : FString(TEXT("No car here to work on.")));
+		return;
+	}
+	if (What == TEXT("Paint shop"))
+	{
+		const OwnedVehicle* Car = Sim.ActiveVehicle();
+		if (!Car)
+		{
+			OnNotice(TEXT("Bring the car round and they'll shoot it."));
+			return;
+		}
+		OnNotice(Utf8(Sim.Paint(Car->Uid, static_cast<uint32>(FCString::Strtoui64(*Row.Key, nullptr, 10)), 0).Message));
+		return;
+	}
+	if (What == TEXT("Stock exchange"))
+	{
+		// Ten shares a press: enough to build a position without a number entry box.
+		OnNotice(Utf8(Sim.BuyShares(Key, 10).Message));
+		return;
+	}
+	if (What == TEXT("Buy a business"))
+	{
+		OnNotice(Utf8(Sim.BuyBusiness(Key).Message));
+		return;
+	}
+	if (What == TEXT("Browse homes"))
+	{
+		OnNotice(Utf8(Sim.BuyHome(FCString::Atoi(*Row.Key)).Message));
+		return;
+	}
+	if (What == TEXT("Shop furniture"))
+	{
+		const int32 HomeId = Sim.Homes.OwnedProperties().empty() ? -1 : ContextId;
+		OnNotice(Utf8(Sim.OrderFurniture({Key}, HomeId, DeliverySpeed::Standard).Message));
+		return;
+	}
+	if (What == TEXT("Hacking contracts"))
+	{
+		// The simulation says what the job needs; whether the player's tools and skill are up to it
+		// decides whether it lands.
+		const HackContract* Contract = nullptr;
+		for (const HackContract& Job : Sim.HackBoard)
+		{
+			if (Job.Id == Key)
+			{
+				Contract = &Job;
+				break;
+			}
+		}
+		if (!Contract)
+		{
+			OnNotice(TEXT("That one's been taken."));
+			return;
+		}
+		// The job's own difficulty against what the player brought to it: more layers and a longer
+		// code are what the toolkit and the skill level have to cover.
+		const HackConfig Setup = Sim.ConfigFor(*Contract);
+		const int32 Needed = Setup.Layers * Setup.CodeLength;
+		const int32 Brought = (1 + Sim.Player.SkillLevel(Skill::Tech)) * (2 + Setup.PreRevealed);
+		OnNotice(Utf8(Sim.CompleteHack(Key, Brought >= Needed).Message));
+		return;
+	}
+	if (What == TEXT("Hacking tools"))
+	{
+		OnNotice(Utf8(Sim.BuyHackTool(FCString::Atoi(*Row.Key)).Message));
+		return;
+	}
+	if (What == TEXT("Create IP"))
+	{
+		static const WorkKind Kinds[] = {WorkKind::Song, WorkKind::Book, WorkKind::Film, WorkKind::App, WorkKind::Invention};
+		const int32 Which = FMath::Clamp(FCString::Atoi(*Row.Key), 0, static_cast<int32>(UE_ARRAY_COUNT(Kinds)) - 1);
+		const CreativeWork& Made = Sim.CreateWork(Kinds[Which], TCHAR_TO_UTF8(*FString::Printf(TEXT("Untitled %s"), *Row.Label)),
+			4, 0.7 + 0.03 * Sim.Player.SkillLevel(Skill::Creativity));
+		OnNotice(FString::Printf(TEXT("Four hours on %s. Quality %.0f%%."), *Utf8(Made.Title), Made.Quality * 100.0));
+		return;
+	}
+	if (What == TEXT("Research a medicine"))
+	{
+		const bool bTarget = Row.Key == TEXT("outbreak");
+		OnNotice(Utf8(Sim.DevelopMedicine(bTarget ? "Targeted antiviral" : "General treatment", 6,
+			0.6 + 0.05 * Sim.Player.SkillLevel(Skill::Medicine), bTarget).Message));
+		return;
+	}
+	if (What == TEXT("Run for office"))
+	{
+		OnNotice(Utf8(Sim.RunForOffice(static_cast<Office>(FCString::Atoi(*Row.Key))).Message));
+		return;
+	}
+	if (What == TEXT("Legislature"))
+	{
+		const LawVote Vote = Sim.LobbyForLaw(Key, Dollars(2500));
+		OnNotice(Utf8(Vote.Message));
+		return;
+	}
+	if (What == TEXT("Ministry office"))
+	{
+		if (Row.Key == TEXT("found"))
+		{
+			OnNotice(Utf8(Sim.FoundMinistry(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s Fellowship"), *Utf8(Sim.PlayerName)))).Message));
+			return;
+		}
+		if (Row.Key == TEXT("telethon"))
+		{
+			OnNotice(Utf8(Sim.Telethon().Message));
+			return;
+		}
+		if (Row.Key == TEXT("accountability"))
+		{
+			OnNotice(Utf8(Sim.Accountability().Message));
+			return;
+		}
+		if (Row.Key.StartsWith(TEXT("outreach:")))
+		{
+			const int32 Kind = FCString::Atoi(*Row.Key.RightChop(9));
+			OnNotice(Utf8(Sim.RunOutreach(static_cast<OutreachKind>(Kind)).Message));
+			return;
+		}
 	}
 }
 

@@ -306,3 +306,53 @@ DTG_TEST(WantedLevelAndSearch)
 	EXPECT(Wanted.Stars() == 0);
 	EXPECT(Wanted.BustFine(Dollars(10000)) > 0);
 }
+
+DTG_TEST(TheOrdinaryThingsCostTimeAndMoney)
+{
+	GameState State = dtg_test::FreshGame(77);
+	const Money Before = State.Funds.Balance();
+	const std::int64_t Started = State.Clock.TotalMinutes();
+
+	// A meal: cheap, quick, and it actually leaves the wallet and the clock different.
+	const GameState::AmenityOffer Lunch = State.QuoteAmenity(GameState::Amenity::Meal);
+	EXPECT(Lunch.bAvailable);
+	EXPECT(Lunch.Cost > 0);
+	EXPECT(State.UseAmenity(GameState::Amenity::Meal).bOk);
+	EXPECT(State.Funds.Balance() == Before - Lunch.Cost);
+	EXPECT(State.Clock.TotalMinutes() == Started + Lunch.Minutes);
+
+	// An hour in the gym is an hour of fitness, and it gets harder to gain as the level climbs.
+	const int FirstLevel = State.Player.SkillLevel(Skill::Fitness);
+	const int FirstXp = State.Player.SkillXp(Skill::Fitness);
+	EXPECT(State.UseAmenity(GameState::Amenity::Gym).bOk);
+	const int Gained = State.Player.SkillXp(Skill::Fitness) - FirstXp;
+	EXPECT(Gained > 0);
+	for (int Hour = 0; Hour < 40; ++Hour)
+	{
+		State.UseAmenity(GameState::Amenity::Gym);
+	}
+	EXPECT(State.Player.SkillLevel(Skill::Fitness) > FirstLevel);
+	const int HighXp = State.Player.SkillXp(Skill::Fitness);
+	State.UseAmenity(GameState::Amenity::Gym);
+	EXPECT(State.Player.SkillXp(Skill::Fitness) - HighXp < Gained); // diminishing returns
+
+	// A doctor is only worth paying when something is wrong with you.
+	EXPECT(!State.QuoteAmenity(GameState::Amenity::Treatment).bAvailable);
+	State.Fights.Hurt(40.0);
+	EXPECT(State.Fights.PlayerHealth() < CombatSystem::PlayerMaxHealth);
+	EXPECT(State.QuoteAmenity(GameState::Amenity::Treatment).bAvailable);
+	EXPECT(State.UseAmenity(GameState::Amenity::Treatment).bOk);
+	EXPECT(State.Fights.PlayerHealth() == CombatSystem::PlayerMaxHealth);
+
+	// And you cannot pay a fine you do not owe.
+	EXPECT(!State.QuoteAmenity(GameState::Amenity::Fines).bAvailable);
+
+	// Nothing is on offer with no money for it.
+	GameState Broke = dtg_test::FreshGame(78);
+	Broke.Funds.Charge(Broke.Funds.Balance(), MoneyCategory::Other, "test", 0);
+	EXPECT(!Broke.QuoteAmenity(GameState::Amenity::Lodging).bAvailable);
+	EXPECT(!Broke.UseAmenity(GameState::Amenity::Lodging).bOk);
+	// Except the things that are free.
+	EXPECT(Broke.QuoteAmenity(GameState::Amenity::Library).bAvailable);
+	EXPECT(Broke.UseAmenity(GameState::Amenity::Library).bOk);
+}

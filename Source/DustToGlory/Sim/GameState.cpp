@@ -1870,6 +1870,145 @@ namespace dtg::sim
 		return Turn;
 	}
 
+
+	// ==================================================================================== Amenities
+
+	GameState::AmenityOffer GameState::QuoteAmenity(Amenity Kind) const
+	{
+		AmenityOffer Offer;
+		Offer.bAvailable = true;
+		// Prices are in 1990s money like everything else the player buys, and scale with the economy.
+		const double Index = Economy.Goods;
+		auto Price = [Index](int Dollars1990) { return Dollars(static_cast<std::int64_t>(Dollars1990 * Index)); };
+		switch (Kind)
+		{
+		case Amenity::Meal:
+			Offer.Cost = Price(7);
+			Offer.Minutes = 45;
+			break;
+		case Amenity::Lodging:
+			Offer.Cost = Price(45);
+			Offer.Minutes = 8 * 60;
+			break;
+		case Amenity::Treatment:
+			Offer.Cost = Price(120);
+			Offer.Minutes = 2 * 60;
+			if (Fights.PlayerHealth() >= CombatSystem::PlayerMaxHealth)
+			{
+				Offer.bAvailable = false;
+				Offer.Reason = "There's nothing wrong with you.";
+			}
+			break;
+		case Amenity::Fines:
+			Offer.Cost = Justice.Case().Fine;
+			Offer.Minutes = 30;
+			if (Justice.Case().Fine <= 0)
+			{
+				Offer.bAvailable = false;
+				Offer.Reason = "You don't owe anything.";
+			}
+			break;
+		case Amenity::Gym:
+			Offer.Cost = Price(5);
+			Offer.Minutes = 60;
+			Offer.Trains = Skill::Fitness;
+			Offer.bTrains = true;
+			break;
+		case Amenity::Track:
+			Offer.Cost = 0;
+			Offer.Minutes = 60;
+			Offer.Trains = Skill::Athletics;
+			Offer.bTrains = true;
+			break;
+		case Amenity::Library:
+			Offer.Cost = 0;
+			Offer.Minutes = 60;
+			Offer.Trains = Skill::Science;
+			Offer.bTrains = true;
+			break;
+		case Amenity::Service:
+			Offer.Cost = 0;
+			Offer.Minutes = 60;
+			Offer.Trains = Skill::Faith;
+			Offer.bTrains = true;
+			break;
+		case Amenity::Leisure:
+			Offer.Cost = Price(6);
+			Offer.Minutes = 90;
+			Offer.Trains = Skill::People;
+			Offer.bTrains = true;
+			break;
+		case Amenity::Count:
+			Offer.bAvailable = false;
+			break;
+		}
+		if (Offer.bAvailable && Offer.Cost > 0 && !Funds.CanAfford(Offer.Cost))
+		{
+			Offer.bAvailable = false;
+			Offer.Reason = "You can't afford it.";
+		}
+		if (Offer.bAvailable && Justice.Jail().bInJail)
+		{
+			Offer.bAvailable = false;
+			Offer.Reason = "Not from in here.";
+		}
+		return Offer;
+	}
+
+	ActionResult GameState::UseAmenity(Amenity Kind)
+	{
+		const AmenityOffer Offer = QuoteAmenity(Kind);
+		if (!Offer.bAvailable)
+		{
+			return ActionResult::Failure(Offer.Reason.empty() ? std::string("Not now.") : Offer.Reason);
+		}
+		if (Offer.Cost > 0 && !Funds.TrySpend(Offer.Cost, MoneyCategory::Other, "Spent in town", Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("You can't afford it.");
+		}
+		std::string Said;
+		switch (Kind)
+		{
+		case Amenity::Meal:
+			Said = "A plate of something hot and a cup of coffee.";
+			break;
+		case Amenity::Lodging:
+			Said = "A room for the night. You sleep properly for once.";
+			Fights.Recover(Offer.Minutes, Player.SkillLevel(Skill::Fitness));
+			break;
+		case Amenity::Treatment:
+			Fights.ReviveAtHospital();
+			Said = "Patched up and sent home.";
+			break;
+		case Amenity::Fines:
+			Said = "Paid in full. The clerk stamps it and that's that.";
+			Justice.PayFine();
+			break;
+		case Amenity::Gym:
+		case Amenity::Track:
+		case Amenity::Library:
+		case Amenity::Service:
+		case Amenity::Leisure:
+		case Amenity::Count:
+			break;
+		}
+		if (Offer.bTrains)
+		{
+			// An hour of honest practice. What it is worth falls off as the skill gets high, which is
+			// what makes a career or a course the way up from here.
+			const int Level = Player.SkillLevel(Offer.Trains);
+			const int Xp = static_cast<int>(std::lround(40.0 / (1.0 + 0.35 * Level)));
+			const int Gained = Player.AddSkillXp(Offer.Trains, Xp);
+			Said = std::string("An hour of ") + SkillName(Offer.Trains) + ".";
+			if (Gained > 0)
+			{
+				Said += " Something clicked: level " + std::to_string(Player.SkillLevel(Offer.Trains)) + ".";
+			}
+		}
+		Skip(Offer.Minutes);
+		return ActionResult::Success(Said);
+	}
+
 	// ==================================================================================== Homes
 
 	ActionResult GameState::BuyHome(int BuildingId)

@@ -261,6 +261,41 @@ namespace dtg::sim
 		/** Introduces a stranger to the game: names where they live and gives them people they know. */
 		NpcMind& Meet(const std::string& NpcId, double X, double Y);
 
+		// ---------------------------------------------------------------- The ordinary things
+		/**
+		 * The everyday reasons to walk into a building: a meal, a night in a hotel, an hour in the
+		 * gym or the library, a doctor, a window at the police station.
+		 *
+		 * These cost money and time and give something back, and all of that belongs here rather
+		 * than in whatever menu happens to offer them -- the simulation owns the clock, the wallet
+		 * and the player's skills, and a second set of numbers in the interface would drift from it.
+		 */
+		enum class Amenity : int
+		{
+			Meal,          // a diner: cheap, an hour, settles you
+			Lodging,       // a hotel room for the night
+			Treatment,     // a doctor: costs, and puts you back together after a fight
+			Fines,         // the window at the police station: pay what you owe
+			Gym,           // an hour on the weights
+			Track,         // an hour on the track
+			Library,       // an hour with a book
+			Service,       // an hour in church
+			Leisure,       // a game, a museum, a browse: time spent, nothing owed
+			Count
+		};
+		/** What it costs and what it gives, before deciding to do it. */
+		struct AmenityOffer
+		{
+			bool bAvailable = false;
+			std::string Reason;     // why not, when it is not
+			Money Cost = 0;
+			int Minutes = 60;
+			Skill Trains = Skill::People;
+			bool bTrains = false;
+		};
+		AmenityOffer QuoteAmenity(Amenity Kind) const;
+		ActionResult UseAmenity(Amenity Kind);
+
 		// ---------------------------------------------------------------- Homes and furniture
 		ActionResult BuyHome(int BuildingId);
 		std::string PropertyIdFor(int BuildingId) const { return "bldg-" + std::to_string(BuildingId); }

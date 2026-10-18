@@ -29,6 +29,7 @@ enum class EDTGScreen : uint8
 	Garage,     // the player's cars
 	Talk,       // a conversation with someone in the street
 	Events,     // what's on at the venues, and entering it
+	Service,    // one building service: the job board, the showroom floor, the stock desk
 	Title       // the front end: new game, continue, slots
 };
 
@@ -87,6 +88,23 @@ private:
 	void RunTalkOption(int32 Index);
 	void RunTitleOption(int32 Index);
 	void RunEventOption(int32 Index);
+	void RunServiceOption(int32 Index);
+
+	/**
+	 * One row of a service screen: what it says and what doing it needs.
+	 *
+	 * Built once and used for both drawing and acting, so the row the player is looking at and the
+	 * row the game acts on cannot drift apart -- which is what happens when a menu is listed in one
+	 * place and dispatched by index in another.
+	 */
+	struct FServiceRow
+	{
+		FString Label;
+		FString Key;        // a model id, a career id, a ticker, a law id -- whatever the action needs
+		Money Cost = 0;
+	};
+	/** The rows of the service currently open. */
+	TArray<FServiceRow> ServiceRows() const;
 	/** Clears away everything standing in the old world and puts the player where the new one starts. */
 	void RestartWorld(bool bRebuildTerrain);
 
@@ -102,6 +120,8 @@ private:
 	EDTGScreen Current = EDTGScreen::None;
 	int32 ContextId = -1;
 	FString TalkingTo;
+	/** Which service of the open building is showing, e.g. "Job board". */
+	FString ServiceName;
 	FString LastReply;
 	int32 Selection = 0;
 	TArray<FNotice> Notices;

@@ -146,6 +146,8 @@ namespace dtg::sim
 		bool Arrest(const std::vector<Crime>& Charges, double Evidence, const std::string& CoDefendantId, const std::string& CoDefendantName,
 			Money Balance);
 		void HireLawyer() { OpenCase.bLawyer = true; }
+		/** Settles a fine-only matter at the window: it is paid, so there is nothing left to answer. */
+		void PayFine() { OpenCase = CourtCase(); }
 		static Money LawyerFee(int TrialDays);
 		double ConvictionChance(int PeopleSkill) const;
 		/** The prosecutor's offer: the Nash bargain between the expected trial sentence, its cost and its risk. */

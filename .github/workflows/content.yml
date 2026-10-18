@@ -14,3 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Parse every data file
         run: python3 Tests/check_content.py
+      # A building service the interface does not recognise is a menu row that does nothing. Nothing
+      # else catches it: it compiles, it draws, and it tells the player the name of what it did not do.
+      - name: Every building service reaches the simulation
+        run: python3 Tests/check_services.py
