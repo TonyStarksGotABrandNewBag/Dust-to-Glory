@@ -859,6 +859,7 @@ namespace dtg::sim
 		Justice = JusticeSystem();
 		OpenCharges.clear();
 		Outbreak = OutbreakSystem();
+		Scheme = ConspiracySystem();
 		Phone = Inbox();
 		NextOfferId = 1;
 		bManualTransmission = false;
@@ -1268,6 +1269,41 @@ namespace dtg::sim
 		{
 			Markets.PostNews("The " + Outbreak.Strain().Name + " outbreak is over", "", 0.2, Minute);
 		}
+		// On the run: the manhunt cools while the player keeps out of sight and heats up when they don't.
+		if (Justice.IsFugitive())
+		{
+			const bool bLayingLow = !Wanted.IsWanted() && Jobs.empty();
+			if (Justice.AdvanceManhunt(bLayingLow, Random))
+			{
+				Notify("Deputies ran your plate at a gas station. They know roughly where you are.");
+				Wanted.AddStars(3);
+				Report.Messages.push_back("The manhunt found your trail");
+			}
+		}
+		// The scheme: investigators build their case, and insiders decide whether to talk.
+		if (Scheme.IsLive())
+		{
+			const double Anger = Clamp(1.0 - Markets.PlayerReputation().Trust, 0.0, 1.0) * (Outbreak.IsActive() ? 1.0 : 0.4);
+			const SchemeDay Day = Scheme.DailyUpdate(Outbreak.IsActive(), Anger, Random);
+			if (Day.bFlipped)
+			{
+				Notify(Day.FlippedName + " has been seen going into the sheriff's office with a lawyer.");
+			}
+			if (!Day.Headline.empty())
+			{
+				Markets.PostNews(Day.Headline, "", -0.5, Minute);
+				Report.Messages.push_back(Day.Headline);
+			}
+			if (Day.bExposed)
+			{
+				SchemeExposed(Minute);
+			}
+			else if (Scheme.Stage() == SchemeStage::GotAway)
+			{
+				Notify("The file on the outbreak's origin is closed. You got away with it.");
+			}
+		}
+		// A health official on the payroll keeps the state's response slow.
 		Markets.DemandDrag = Outbreak.EconomicDrag();
 		Markets.PolicyHealthBonus = ActiveLaws().BusinessHealthBonus;
 		const Money Income = Markets.DailyUpdate(Minute, Random);
@@ -1600,6 +1636,10 @@ namespace dtg::sim
 		if (InJail())
 		{
 			return ActionResult::Failure("Not from a jail cell.");
+		}
+		if (Justice.IsFugitive())
+		{
+			return ActionResult::Failure("Every application runs your name. You're a wanted escapee.");
 		}
 		CareerProgress Job;
 		Job.CareerId = CareerId;
@@ -1978,6 +2018,12 @@ namespace dtg::sim
 		const Money Production = Quote.CostPerDose * static_cast<Money>(Quote.Doses);
 		Funds.Deposit(Revenue - Production, MoneyCategory::Business, "Treatment contract", Clock.TotalMinutes());
 		Outbreak.DeployTreatment(0.6);
+		if (Scheme.IsLive())
+		{
+			// The crew bargained for a share of exactly this money, and they're watching the news too.
+			Scheme.SharePayout(Revenue - Production, false);
+			Notify("Your crew saw the contract announcement. They want their cuts.");
+		}
 		Reputation& Rep = Markets.PlayerReputation();
 		const std::int64_t Minute = Clock.TotalMinutes();
 		const std::string Count = std::to_string(Quote.Doses);
@@ -2014,6 +2060,308 @@ namespace dtg::sim
 			break;
 		}
 		return ActionResult::Success("Contract signed: " + Count + " doses at " + FormatMoney(Price) + " each. Clinics start treating patients today.");
+	}
+
+	// ==================================================================================== Breaking out
+
+	namespace
+	{
+		/** The strongest power the player has, as a rough 0..3 potency, for escape odds. */
+		double EscapePotency(const PowerSet& Powers, const PowerRoster& Roster)
+		{
+			double Best = 0.0;
+			for (const PowerInstance& Slot : Powers.Slots())
+			{
+				const EffectivePower Power = Roster.Evaluate(Slot);
+				if (!Power.Def)
+				{
+					continue;
+				}
+				// Powers that move you or move walls are what matter behind a locked door.
+				double Fit = 0.3;
+				switch (Power.Def->Effect)
+				{
+				case PowerEffect::Teleport:
+				case PowerEffect::Phasing: Fit = 1.0; break;
+				case PowerEffect::SuperStrength:
+				case PowerEffect::Invisibility: Fit = 0.8; break;
+				case PowerEffect::Flight:
+				case PowerEffect::Shapeshift:
+				case PowerEffect::TimeSlow: Fit = 0.7; break;
+				case PowerEffect::Telekinesis:
+				case PowerEffect::SuperSpeed:
+				case PowerEffect::Grapple: Fit = 0.6; break;
+				default: Fit = 0.3; break;
+				}
+				Best = std::max(Best, Fit * (0.5 + 0.1 * Slot.Level) * std::max(0.5, Power.Potency));
+			}
+			return Best;
+		}
+	}
+
+	EscapeOdds GameState::QuoteEscape(EscapePlan Plan) const
+	{
+		return Justice.QuoteEscape(Plan, Player, EscapePotency(PlayerPowers, Powers), Funds.Balance());
+	}
+
+	ActionResult GameState::PlanEscape(EscapePlan Plan)
+	{
+		const EscapeOdds Odds = QuoteEscape(Plan);
+		if (!Odds.bAvailable)
+		{
+			return ActionResult::Failure(Odds.Reason.empty() ? "You can't work that angle." : Odds.Reason);
+		}
+		bool bPaid = true;
+		if (Odds.Cost > 0)
+		{
+			const char* What = Plan == EscapePlan::BribeGuard ? "Payment to a correctional officer" : "Payment to an outside crew";
+			if (!Funds.TrySpend(Odds.Cost, MoneyCategory::Other, What, Clock.TotalMinutes()))
+			{
+				return ActionResult::Failure("That costs " + FormatMoney(Odds.Cost) + ".");
+			}
+			if (Plan == EscapePlan::BribeGuard)
+			{
+				// Handing money to an officer is its own felony, whether or not the escape ever happens.
+				OpenCharges.push_back(Crime::Bribery);
+			}
+		}
+		Justice.StartEscape(Plan, bPaid);
+		return ActionResult::Success(std::string(EscapePlanName(Plan)) + ": " + std::to_string(Odds.PrepDays) +
+			" night(s) of groundwork, then roughly " + std::to_string(static_cast<int>(std::lround(Odds.Success * 100.0))) + "% odds.");
+	}
+
+	ActionResult GameState::AbandonEscape()
+	{
+		if (Justice.Escape().Plan == EscapePlan::None)
+		{
+			return ActionResult::Failure("You have nothing going.");
+		}
+		Justice.AbandonEscape();
+		return ActionResult::Success("You let it go. Money spent stays spent.");
+	}
+
+	EscapeResult GameState::PrepareEscape()
+	{
+		const EscapeResult Result = Justice.PrepareEscape(Player, EscapePotency(PlayerPowers, Powers), Funds.Balance(), Random);
+		if (!Result.Summary.empty())
+		{
+			Notify(Result.Summary);
+		}
+		Player.AddSkillXp(Skill::Trades, 8);
+		Skip(GameClock::MinutesPerDay);
+		return Result;
+	}
+
+	EscapeResult GameState::AttemptEscape()
+	{
+		const bool bPowerBreak = Justice.Escape().Plan == EscapePlan::PowerBreak;
+		const EscapeResult Result = Justice.AttemptEscape(Player, EscapePotency(PlayerPowers, Powers), Funds.Balance(), Random);
+		if (!Result.Summary.empty())
+		{
+			Notify(Result.Summary);
+		}
+		if (Result.bEscaped)
+		{
+			// Out, wanted, and the whole state hears about it.
+			Wanted.AddStars(bPowerBreak ? 5 : 4);
+			Markets.PlayerReputation().Trust = Clamp(Markets.PlayerReputation().Trust - 0.2, 0.0, 1.0);
+			Markets.PostNews("Manhunt underway after escape from the county detention center", "", -0.4, Clock.TotalMinutes());
+			if (!Jobs.empty())
+			{
+				Jobs.clear(); // no employer keeps a fugitive on the books
+				Notify("Your employer let you go the moment your name was on the news.");
+			}
+			if (Politics.Current() != Office::None)
+			{
+				Politics.Scandal(1.0);
+				Politics.Leave();
+				Notify("You were removed from office the same morning.");
+			}
+			SendEmail(MessageTopic::General, "Horry County Sheriff's Office", "tips@sheriff.example", "Wanted: you",
+				"Your face is on the evening news. Deputies are checking the places you're known to go. Lie low, leave the county, or walk "
+				"into the courthouse and hand yourself in before they find you.");
+		}
+		else
+		{
+			Skip(GameClock::MinutesPerDay);
+		}
+		return Result;
+	}
+
+	ActionResult GameState::Surrender()
+	{
+		if (!Justice.IsFugitive())
+		{
+			return ActionResult::Failure("There's nothing to turn yourself in for.");
+		}
+		Justice.Surrender(Clock.TotalMinutes());
+		Wanted.Clear();
+		Markets.PlayerReputation().Trust = Clamp(Markets.PlayerReputation().Trust + 0.05, 0.0, 1.0);
+		return ActionResult::Success("You walked into the courthouse with your hands visible. The judge noted it: " +
+			std::to_string(Justice.Jail().SentenceDays) + " days.");
+	}
+
+	// ==================================================================================== The scheme
+
+	RecruitQuote GameState::QuoteInsider(const std::string& NpcId, InsiderRole Role) const
+	{
+		const NpcMind* Mind = Npcs.Find(NpcId);
+		if (!Mind)
+		{
+			RecruitQuote Quote;
+			Quote.Reason = "You don't know anyone like that.";
+			return Quote;
+		}
+		const CreativeWork* Best = nullptr;
+		for (const CreativeWork& Work : Ip.Works())
+		{
+			if (Work.Kind == WorkKind::Medicine && (!Best || Work.Quality > Best->Quality))
+			{
+				Best = &Work;
+			}
+		}
+		return Scheme.QuoteInsider(Role, Mind->Name, Mind->Affinity, Mind->Awareness, Player.SkillLevel(Skill::Business),
+			Best ? Best->Quality : 0.3, Funds.Balance());
+	}
+
+	ActionResult GameState::RecruitInsider(const std::string& NpcId, InsiderRole Role)
+	{
+		if (Scheme.Stage() == SchemeStage::Exposed)
+		{
+			return ActionResult::Failure("Everyone who knows you is talking to investigators already.");
+		}
+		const RecruitQuote Terms = QuoteInsider(NpcId, Role);
+		if (!Terms.bAvailable)
+		{
+			return ActionResult::Failure(Terms.Reason);
+		}
+		NpcMind& Mind = Npcs.GetOrCreate(NpcId);
+		if (Terms.Retainer > 0 && !Funds.TrySpend(Terms.Retainer, MoneyCategory::Other, "Retainer: " + Mind.Name, Clock.TotalMinutes()))
+		{
+			return ActionResult::Failure("They want " + FormatMoney(Terms.Retainer) + " up front.");
+		}
+		Scheme.Recruit(NpcId, Mind.Name, Role, Terms);
+		OpenCharges.push_back(Crime::Conspiracy);
+		return ActionResult::Success(Mind.Name + " is in as your " + ToLowerAscii(InsiderRoleName(Role)) + ", for " +
+			std::to_string(static_cast<int>(std::lround(Terms.Cut * 100.0))) + "% of the take.");
+	}
+
+	MatrixGame GameState::InsiderDilemma(const std::string& NpcId) const
+	{
+		const CreativeWork* Best = nullptr;
+		for (const CreativeWork& Work : Ip.Works())
+		{
+			if (Work.Kind == WorkKind::Medicine && (!Best || Work.Quality > Best->Quality))
+			{
+				Best = &Work;
+			}
+		}
+		for (const Insider& Member : Scheme.Insiders())
+		{
+			if (Member.NpcId == NpcId)
+			{
+				return Scheme.InsiderDilemma(Member, Best ? Best->Quality : 0.3, Funds.Balance());
+			}
+		}
+		return MatrixGame();
+	}
+
+	ActionResult GameState::ReleaseStrain()
+	{
+		std::string Reason;
+		if (!Scheme.CanRelease(&Reason))
+		{
+			return ActionResult::Failure(Reason);
+		}
+		if (Outbreak.IsActive())
+		{
+			return ActionResult::Failure("One is already going around. Sell into that one instead.");
+		}
+		Outbreak.Begin(Random);
+		// A deliberate release spreads faster and hits harder than a seasonal bug.
+		Scheme.Release();
+		const std::string Name = Outbreak.Strain().Name;
+		Markets.PostNews("Health officials confirm an outbreak of " + Name, "", -0.3, Clock.TotalMinutes());
+		SendEmail(MessageTopic::General, "State Health Department", "alerts@health.example", "Health alert: " + Name,
+			"Cases of " + Name + " are climbing unusually fast. Researchers with a promising treatment can apply for fast-track trials.");
+		Notify("It's out. Nobody but your crew knows where it came from -- for now.");
+		return ActionResult::Success("The strain is loose. Your treatment had better be ready.");
+	}
+
+	ActionResult GameState::PayTheCrew(bool bPay)
+	{
+		if (Scheme.Insiders().empty())
+		{
+			return ActionResult::Failure("There's nobody to pay.");
+		}
+		Money Owed = 0;
+		for (const Insider& Member : Scheme.Insiders())
+		{
+			if (!Member.bFlipped)
+			{
+				Owed += ToMoney(ToDollars(Scheme.Take()) * Member.Cut);
+			}
+		}
+		if (!bPay)
+		{
+			Scheme.SharePayout(0, false);
+			return ActionResult::Success("You kept all of it. They'll notice.");
+		}
+		if (!Funds.TrySpend(Owed, MoneyCategory::Other, "Crew payout", Clock.TotalMinutes()))
+		{
+			Scheme.SharePayout(0, false);
+			return ActionResult::Failure("Their cuts come to " + FormatMoney(Owed) + " and you don't have it. They've been told.");
+		}
+		Scheme.SharePayout(0, true);
+		return ActionResult::Success("Paid in full: " + FormatMoney(Owed) + ". Everyone has a reason to stay quiet.");
+	}
+
+	ActionResult GameState::CallOffScheme()
+	{
+		if (!Scheme.IsActive())
+		{
+			return ActionResult::Failure("There's nothing to call off.");
+		}
+		if (Scheme.IsLive())
+		{
+			return ActionResult::Failure("It's already out. You can't put it back.");
+		}
+		Scheme.Close();
+		OpenCharges.erase(std::remove(OpenCharges.begin(), OpenCharges.end(), Crime::Conspiracy), OpenCharges.end());
+		return ActionResult::Success("You walked it back before anything happened. The retainers are gone.");
+	}
+
+	void GameState::SchemeExposed(std::int64_t Minute)
+	{
+		Scheme.MarkExposed();
+		Markets.PostNews("Investigators: the " + Outbreak.Strain().Name + " outbreak was deliberate", "", -1.0, Minute);
+		Reputation& Rep = Markets.PlayerReputation();
+		Rep.Trust = Clamp(Rep.Trust - 0.6, 0.0, 1.0);
+		Rep.Sentiment = Clamp(Rep.Sentiment - 1.0, -1.0, 1.0);
+		Rep.Followers = std::max(0, Rep.Followers / 4);
+		if (Politics.Current() != Office::None)
+		{
+			Politics.Scandal(1.0);
+			Politics.Leave();
+		}
+		if (PlayerMinistry.IsFounded())
+		{
+			PlayerMinistry.ApplyScandal(0.6);
+		}
+		// Every treatment contract is void, and the state wants its money back.
+		const Money Clawback = std::min(Funds.Balance(), Scheme.Take());
+		if (Clawback > 0)
+		{
+			Funds.Charge(Clawback, MoneyCategory::Fine, "Voided treatment contract", Minute);
+		}
+		for (const Crime Charge : Scheme.Charges())
+		{
+			OpenCharges.push_back(Charge);
+		}
+		Wanted.AddStars(5);
+		SendEmail(MessageTopic::General, "State Attorney General", "cases@ag.example", "You are under indictment",
+			"A grand jury has returned charges connected to the origin of the outbreak. Surrender yourself and retain counsel.");
+		Notify("It's over. The state knows what you did, and they're coming with everything.");
 	}
 
 	// ==================================================================================== Events
@@ -2068,6 +2416,17 @@ namespace dtg::sim
 		{
 			Politics.Scandal(0.4);
 			Markets.PlayerReputation().Trust = Clamp(Markets.PlayerReputation().Trust - 0.1, 0.0, 1.0);
+		}
+		if (Justice.IsFugitive())
+		{
+			// Picked up on the run: the escape goes on the record and the rest of the sentence resumes,
+			// on top of whatever they were caught doing today.
+			Justice.Recapture(Clock.TotalMinutes());
+			Wanted.Clear();
+			OpenCharges.clear();
+			Notify("They caught up with you. You're back inside, and the escape charge is on your record: " +
+				std::to_string(Justice.Jail().SentenceDays) + " days.");
+			return 0;
 		}
 		std::vector<Crime> Charges = OpenCharges;
 		if (Charges.empty())
@@ -2537,6 +2896,10 @@ namespace dtg::sim
 		{
 			return ActionResult::Failure("A felony conviction keeps you off the ballot unless it's expunged or pardoned.");
 		}
+		if (Justice.IsFugitive())
+		{
+			return ActionResult::Failure("You're a wanted escapee. Filing papers would be filing your own location.");
+		}
 		const Reputation& Rep = Markets.PlayerReputation();
 		if (!Politics.StartCampaign(Target, Rep.Followers, Rep.Trust, Rep.Score(), Funds, Clock.TotalMinutes(), Random, &Error))
 		{
@@ -2646,7 +3009,9 @@ namespace dtg::sim
 		// Inspection game: fines scale with the player's means; patrols cost the city, crime costs residents.
 		const double Fine = std::max(500.0, ToDollars(Funds.Balance()) * 0.05);
 		const InspectionResult Result = InspectionGame(std::max(1.0, CrimeGain), Fine, 200.0, 1000.0);
-		return Clamp(Result.InspectProbability * ActiveLaws().PoliceUnitsMul, 0.02, 0.95);
+		// An active manhunt puts far more cars on the road looking for one person.
+		const double Hunt = Justice.IsFugitive() ? 1.0 + 1.5 * Justice.Escape().Manhunt : 1.0;
+		return Clamp(Result.InspectProbability * ActiveLaws().PoliceUnitsMul * Hunt, 0.02, 0.95);
 	}
 
 	void GameState::Notify(const std::string& Text)

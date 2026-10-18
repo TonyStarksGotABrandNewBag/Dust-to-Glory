@@ -521,6 +521,17 @@ namespace dtg::sim
 			JailJson.Set("programs", Num(Court.Jail.ProgramsCompleted));
 			JailJson.Set("parole", Num(static_cast<double>(Court.Jail.NextParoleMinute)));
 			JusticeJson.Set("jail", JailJson);
+			JsonValue EscapeJson = JsonValue::MakeObject();
+			EscapeJson.Set("plan", Num(static_cast<int>(Court.Escape.Plan)));
+			EscapeJson.Set("prep", Num(Court.Escape.PrepDone));
+			EscapeJson.Set("suspicion", Num(Court.Escape.Suspicion));
+			EscapeJson.Set("paid", Bool(Court.Escape.bPaid));
+			EscapeJson.Set("failed", Num(Court.Escape.FailedAttempts));
+			EscapeJson.Set("fugitive", Bool(Court.Escape.bFugitive));
+			EscapeJson.Set("atLarge", Num(Court.Escape.DaysAtLarge));
+			EscapeJson.Set("owed", Num(Court.Escape.OwedDays));
+			EscapeJson.Set("manhunt", Num(Court.Escape.Manhunt));
+			JusticeJson.Set("escape", EscapeJson);
 			JsonValue OpenJson = JsonValue::MakeArray();
 			for (const Crime Charge : OpenCharges)
 			{
@@ -547,6 +558,31 @@ namespace dtg::sim
 			OutbreakJson.Set("treated", Bool(Data.bTreated));
 			OutbreakJson.Set("boost", Num(Data.TreatmentBoost));
 			Root.Set("outbreak", OutbreakJson);
+		}
+		{
+			const ConspiracySystem::Snapshot Data = Scheme.Save();
+			JsonValue SchemeJson = JsonValue::MakeObject();
+			SchemeJson.Set("stage", Num(static_cast<int>(Data.Stage)));
+			SchemeJson.Set("heat", Num(Data.Heat));
+			SchemeJson.Set("days", Num(Data.Days));
+			SchemeJson.Set("outlay", Num(static_cast<double>(Data.Outlay)));
+			SchemeJson.Set("proceeds", Num(static_cast<double>(Data.Proceeds)));
+			SchemeJson.Set("shared", Bool(Data.bShared));
+			JsonValue CrewJson = JsonValue::MakeArray();
+			for (const Insider& Member : Data.Crew)
+			{
+				JsonValue Item = JsonValue::MakeObject();
+				Item.Set("id", Str(Member.NpcId));
+				Item.Set("name", Str(Member.Name));
+				Item.Set("role", Num(static_cast<int>(Member.Role)));
+				Item.Set("cut", Num(Member.Cut));
+				Item.Set("retainer", Num(static_cast<double>(Member.Retainer)));
+				Item.Set("loyalty", Num(Member.Loyalty));
+				Item.Set("flipped", Bool(Member.bFlipped));
+				CrewJson.Push(Item);
+			}
+			SchemeJson.Set("crew", CrewJson);
+			Root.Set("scheme", SchemeJson);
 		}
 		Root.Set("phoneNumber", Str(PhoneNumber));
 		JsonValue CarsJson = JsonValue::MakeArray();
@@ -968,6 +1004,16 @@ namespace dtg::sim
 			Court.Jail.ProgramDays = JailJson.GetInt("programDays");
 			Court.Jail.ProgramsCompleted = JailJson.GetInt("programs");
 			Court.Jail.NextParoleMinute = JailJson.GetInt64("parole");
+			const JsonValue& EscapeJson = JusticeJson.Get("escape");
+			Court.Escape.Plan = static_cast<EscapePlan>(Clamp(EscapeJson.GetInt("plan"), 0, static_cast<int>(EscapePlan::Count) - 1));
+			Court.Escape.PrepDone = EscapeJson.GetInt("prep");
+			Court.Escape.Suspicion = EscapeJson.GetNumber("suspicion");
+			Court.Escape.bPaid = EscapeJson.GetBool("paid");
+			Court.Escape.FailedAttempts = EscapeJson.GetInt("failed");
+			Court.Escape.bFugitive = EscapeJson.GetBool("fugitive");
+			Court.Escape.DaysAtLarge = EscapeJson.GetInt("atLarge");
+			Court.Escape.OwedDays = EscapeJson.GetInt("owed");
+			Court.Escape.Manhunt = EscapeJson.GetNumber("manhunt");
 			Justice.Load(Court);
 			OpenCharges.clear();
 			for (const JsonValue& Item : JusticeJson.Get("openCharges").Items())
@@ -993,6 +1039,29 @@ namespace dtg::sim
 			Data.bTreated = OutbreakJson.GetBool("treated");
 			Data.TreatmentBoost = OutbreakJson.GetNumber("boost", 0.0);
 			Outbreak.Load(Data);
+		}
+		{
+			const JsonValue& SchemeJson = Root.Get("scheme");
+			ConspiracySystem::Snapshot Data;
+			Data.Stage = static_cast<SchemeStage>(Clamp(SchemeJson.GetInt("stage"), 0, static_cast<int>(SchemeStage::Count) - 1));
+			Data.Heat = SchemeJson.GetNumber("heat");
+			Data.Days = SchemeJson.GetInt("days");
+			Data.Outlay = SchemeJson.GetInt64("outlay");
+			Data.Proceeds = SchemeJson.GetInt64("proceeds");
+			Data.bShared = SchemeJson.GetBool("shared", true);
+			for (const JsonValue& Item : SchemeJson.Get("crew").Items())
+			{
+				Insider Member;
+				Member.NpcId = Item.GetString("id");
+				Member.Name = Item.GetString("name");
+				Member.Role = static_cast<InsiderRole>(Clamp(Item.GetInt("role"), 0, static_cast<int>(InsiderRole::Count) - 1));
+				Member.Cut = Item.GetNumber("cut");
+				Member.Retainer = Item.GetInt64("retainer");
+				Member.Loyalty = Item.GetNumber("loyalty", 0.5);
+				Member.bFlipped = Item.GetBool("flipped");
+				Data.Crew.push_back(Member);
+			}
+			Scheme.Load(Data);
 		}
 		PhoneNumber = Root.GetString("phoneNumber", "(843) 555-0100");
 		PrivateCars.clear();

@@ -17,6 +17,9 @@ namespace dtg::sim
 		UnauthorizedHack,
 		Assault,            // fighting civilians or heroes
 		Fraud,              // smear campaigns and scams, found by investigators
+		Bribery,            // paying off an official
+		Escape,             // breaking out of county jail
+		Conspiracy,         // orchestrating an outbreak to sell the cure
 		Count
 	};
 

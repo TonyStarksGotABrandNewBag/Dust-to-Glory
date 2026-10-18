@@ -234,6 +234,18 @@ namespace dtg::sim
 		return nullptr;
 	}
 
+	const NpcMind* NpcPopulation::Find(const std::string& Id) const
+	{
+		for (const NpcMind& Mind : Minds)
+		{
+			if (Mind.Id == Id)
+			{
+				return &Mind;
+			}
+		}
+		return nullptr;
+	}
+
 	int NpcPopulation::CountAtLeast(AwarenessStage Stage) const
 	{
 		int Count = 0;

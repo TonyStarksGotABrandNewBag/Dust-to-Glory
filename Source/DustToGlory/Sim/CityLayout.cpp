@@ -182,7 +182,7 @@ namespace dtg::sim
 		case LotRole::Apartment: return {"Visit a neighbor", "Buy or enter apartment", "Arrange furniture"};
 		case LotRole::Dealership: return {"Browse every model", "Test drive", "Used car lot", "Sell a car"};
 		case LotRole::Church: return {"Ministry office", "Attend service", "Volunteer"};
-		case LotRole::Hospital: return {"Work a shift", "Get treated", "Research a medicine"};
+		case LotRole::Hospital: return {"Work a shift", "Get treated", "Research a medicine", "Recruit a lab contact"};
 		case LotRole::University: return {"Enroll", "Attend class", "Work a shift", "Research a medicine"};
 		case LotRole::CareerCenter: return {"Job board", "Career advice"};
 		case LotRole::Office: return {"Work a shift", "Hacking contracts", "Business consulting"};
@@ -198,7 +198,7 @@ namespace dtg::sim
 		case LotRole::Diner: return {"Eat", "Work a shift"};
 		case LotRole::Gym: return {"Train", "Work a shift"};
 		case LotRole::Library: return {"Study", "Create IP"};
-		case LotRole::Courthouse: return {"Run for office", "Legislature", "Public records", "Work a shift"};
+		case LotRole::Courthouse: return {"Run for office", "Legislature", "Public records", "Turn yourself in", "Work a shift"};
 		case LotRole::Stadium: return {"Tryouts and games", "Watch a game"};
 		case LotRole::TrackField: return {"Train", "Compete"};
 		case LotRole::RealEstate: return {"Browse homes", "Buy a business"};
@@ -209,7 +209,7 @@ namespace dtg::sim
 		case LotRole::Studio: return {"Create IP", "Work a shift"};
 		case LotRole::ClassicDealer: return {"Browse classics", "Restoration shop", "Sell a car"};
 		case LotRole::UsedCarLot: return {"Browse used cars", "Sell a car"};
-		case LotRole::Jail: return {"Visit", "Court and records"};
+		case LotRole::Jail: return {"Visit", "Serve your time", "Plan a way out", "Court and records"};
 		case LotRole::Count: break;
 		}
 		return {"Visit"};

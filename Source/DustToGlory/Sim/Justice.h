@@ -1,7 +1,9 @@
 // Courts and sentences. Minor arrests end with a fine; serious ones go to court, where the player takes a plea
 // (the Nash bargain between both sides' expected trial outcomes) or goes to trial. A case with a co-defendant is
 // a prisoner's dilemma. Time is served in county jail, where good behavior, classes, parole hearings and appeals
-// shorten it. A record follows the player: some careers and public offices need a clean one.
+// shorten it -- or where the player plans a way out: a tunnel, a bribed guard, a crew on the outside, a medical
+// transfer or their own powers. Breaking out makes them a fugitive with a manhunt behind them. A record follows
+// the player: some careers and public offices need a clean one.
 #pragma once
 
 #include "Sim/Careers.h"
@@ -82,6 +84,54 @@ namespace dtg::sim
 		Money Earned = 0;
 	};
 
+	/** How the player gets out early the hard way. */
+	enum class EscapePlan : int
+	{
+		None,
+		Tunnel,        // dig from the cell over several nights, between shakedowns
+		BribeGuard,    // buy a night shift's blind eye
+		OutsideCrew,   // pay a crew to stage a breakout at the fence
+		MedicalRun,    // fake an illness and slip away during the hospital transfer
+		PowerBreak,    // go through the wall with your own powers
+		Count
+	};
+	const char* EscapePlanName(EscapePlan Plan);
+	const char* EscapePlanDescription(EscapePlan Plan);
+
+	/** What a plan would take and what it's worth trying, before the player commits to it. */
+	struct EscapeOdds
+	{
+		bool bAvailable = false;
+		std::string Reason;      // why not, when unavailable
+		Money Cost = 0;          // bribe or crew fee, paid when the plan starts
+		int PrepDays = 0;        // nights of preparation before an attempt is worth making
+		double Success = 0.0;    // chance an attempt from full preparation works
+		double SearchChance = 0.0; // chance per prep day the guards look (inspection-game equilibrium)
+		double GuardCut = 0.0;   // bribe only: the guard's share of the Nash surplus
+	};
+
+	struct EscapeState
+	{
+		EscapePlan Plan = EscapePlan::None;
+		int PrepDone = 0;
+		double Suspicion = 0.0;   // 0..1: how closely the guards are watching
+		bool bPaid = false;
+		int FailedAttempts = 0;
+		bool bFugitive = false;
+		int DaysAtLarge = 0;
+		int OwedDays = 0;         // sentence left to serve when recaptured
+		double Manhunt = 0.0;     // 0..1 how hard police are still looking
+	};
+
+	struct EscapeResult
+	{
+		bool bAttempted = false;
+		bool bEscaped = false;
+		bool bCaught = false;
+		int SolitaryDays = 0;     // days added to the sentence after a failure
+		std::string Summary;
+	};
+
 	class JusticeSystem
 	{
 	public:
@@ -107,6 +157,25 @@ namespace dtg::sim
 		Verdict CoDefendantVerdict(bool bPlayerTestifies, bool bOtherTestifies, std::int64_t Now);
 
 		void BeginSentence(int Days, std::int64_t Now);
+
+		// ------------------------------------------------------------ Breaking out
+		const EscapeState& Escape() const { return EscapeValue; }
+		bool IsFugitive() const { return EscapeValue.bFugitive; }
+		/** What a plan would cost and its odds, given the player's skills, powers and cash. */
+		EscapeOdds QuoteEscape(EscapePlan Plan, const Profile& Player, double PowerPotency, Money Balance) const;
+		/** Commits to a plan (the caller charges Cost first). Replaces any plan in progress. */
+		bool StartEscape(EscapePlan Plan, bool bPaid);
+		void AbandonEscape();
+		/** A night of preparation. The guards inspect at the game's equilibrium rate; being found means solitary. */
+		EscapeResult PrepareEscape(const Profile& Player, double PowerPotency, Money Balance, Rng& Random);
+		/** Goes tonight. Success makes the player a fugitive; failure means solitary and a tighter watch. */
+		EscapeResult AttemptEscape(const Profile& Player, double PowerPotency, Money Balance, Rng& Random);
+		/** A day on the run: the manhunt cools when lying low, heats up when the player is seen. Returns true if police close in. */
+		bool AdvanceManhunt(bool bLayingLow, Rng& Random);
+		/** Picked up again: the escape goes on the record and the remaining sentence resumes. */
+		void Recapture(std::int64_t Now);
+		/** Walks into the courthouse voluntarily: the remaining time, plus a smaller escape sentence. */
+		void Surrender(std::int64_t Now);
 		JailDayResult ServeDay(JailActivity Activity, Profile& Player, std::int64_t Now);
 		double ParoleChance() const;
 		bool CanRequestParole(std::int64_t Now) const;
@@ -124,20 +193,25 @@ namespace dtg::sim
 			std::vector<RecordEntry> Entries;
 			CourtCase OpenCase;
 			JailState Jail;
+			EscapeState Escape;
 		};
-		Snapshot Save() const { return Snapshot{Entries, OpenCase, JailValue}; }
+		Snapshot Save() const { return Snapshot{Entries, OpenCase, JailValue, EscapeValue}; }
 		void Load(const Snapshot& Data)
 		{
 			Entries = Data.Entries;
 			OpenCase = Data.OpenCase;
 			JailValue = Data.Jail;
+			EscapeValue = Data.Escape;
 		}
 
 	private:
 		Verdict Convict(int Days, const std::string& Summary, std::int64_t Now);
+		void Solitary(int Days);
+		void GoOnTheRun();
 
 		std::vector<RecordEntry> Entries;
 		CourtCase OpenCase;
 		JailState JailValue;
+		EscapeState EscapeValue;
 	};
 }

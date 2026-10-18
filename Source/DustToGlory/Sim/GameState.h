@@ -6,6 +6,7 @@
 #include "Sim/CityLayout.h"
 #include "Sim/Careers.h"
 #include "Sim/Clock.h"
+#include "Sim/Conspiracy.h"
 #include "Sim/Economy.h"
 #include "Sim/Events.h"
 #include "Sim/Furniture.h"
@@ -145,6 +146,7 @@ namespace dtg::sim
 		bool bManualTransmission = false;
 		JusticeSystem Justice;
 		OutbreakSystem Outbreak;
+		ConspiracySystem Scheme;
 		std::vector<Crime> OpenCharges;          // crimes reported during the current police chase
 		std::string PhoneNumber;                 // written on notes left for car owners
 		std::vector<PrivateCar> PrivateCars;     // parked cars the player has dealt with (others are regenerated)
@@ -296,6 +298,33 @@ namespace dtg::sim
 		ActionResult FileAppeal();
 		ActionResult ExpungeRecord();
 		bool InJail() const { return Justice.Jail().bInJail; }
+
+		// ---------------------------------------------------------------- Breaking out
+		/** What each way out would cost and its odds right now. */
+		EscapeOdds QuoteEscape(EscapePlan Plan) const;
+		/** Commits to a plan, paying any up-front cost (a bribe, a crew). */
+		ActionResult PlanEscape(EscapePlan Plan);
+		ActionResult AbandonEscape();
+		/** A night of prep: the day passes, and the guards may find what you're doing. */
+		EscapeResult PrepareEscape();
+		/** Goes tonight. Success puts the player on the street as a wanted fugitive. */
+		EscapeResult AttemptEscape();
+		bool IsFugitive() const { return Justice.IsFugitive(); }
+		/** Hand yourself in: less time than being dragged back. */
+		ActionResult Surrender();
+
+		// ---------------------------------------------------------------- The scheme
+		/** What an NPC would want to join a scheme in that role. */
+		RecruitQuote QuoteInsider(const std::string& NpcId, InsiderRole Role) const;
+		ActionResult RecruitInsider(const std::string& NpcId, InsiderRole Role);
+		/** The prisoner's dilemma one of your insiders is looking at. */
+		MatrixGame InsiderDilemma(const std::string& NpcId) const;
+		/** Releases the strain. Needs a lab tech on the crew; starts an outbreak immediately. */
+		ActionResult ReleaseStrain();
+		/** Pays the crew their agreed cuts out of the last treatment money (or doesn't). */
+		ActionResult PayTheCrew(bool bPay);
+		/** Walks away: the crew is paid off and the sample stays where it is. */
+		ActionResult CallOffScheme();
 		/** Knocked out (lost a fight or a crash): hospital bill. */
 		Money Hospitalized();
 
@@ -316,6 +345,7 @@ namespace dtg::sim
 		ActionResult BuyPrivateCar(PrivateCar& Car, Money Price);
 		void Deliver(Message Value, TickReport* Report);
 		void ApplyVerdict(const Verdict& Result);
+		void SchemeExposed(std::int64_t Minute);
 
 		std::vector<std::string> PendingNotifications;
 		JsonValue CompaniesData;

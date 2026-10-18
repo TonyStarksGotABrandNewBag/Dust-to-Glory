@@ -141,6 +141,7 @@ namespace dtg::sim
 		/** Returns the mind for an id, generating a deterministic new one the first time it is seen. */
 		NpcMind& GetOrCreate(const std::string& Id);
 		NpcMind* Find(const std::string& Id);
+		const NpcMind* Find(const std::string& Id) const;
 		const std::vector<NpcMind>& All() const { return Minds; }
 		int CountAtLeast(AwarenessStage Stage) const;
 

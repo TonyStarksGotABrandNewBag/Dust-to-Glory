@@ -17,6 +17,9 @@ namespace dtg::sim
 			case Crime::UnauthorizedHack: return 100.0;
 			case Crime::Assault: return 80.0;
 			case Crime::Fraud: return 150.0;
+			case Crime::Bribery: return 120.0;
+			case Crime::Escape: return 400.0;
+			case Crime::Conspiracy: return 500.0;
 			case Crime::Count: break;
 			}
 			return 0.0;
@@ -48,6 +51,9 @@ namespace dtg::sim
 		case Crime::UnauthorizedHack: return "Unauthorized hacking";
 		case Crime::Assault: return "Assault";
 		case Crime::Fraud: return "Fraud";
+		case Crime::Bribery: return "Bribing an official";
+		case Crime::Escape: return "Escape from custody";
+		case Crime::Conspiracy: return "Criminal conspiracy";
 		case Crime::Count: break;
 		}
 		return "Crime";
