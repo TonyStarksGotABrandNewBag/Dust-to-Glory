@@ -80,20 +80,9 @@ void ADTGCharacter::UpdateFocus()
 	const CityPlan& City = Game->Sim().City;
 	const FVector2D Here = Game->ToSim(GetActorLocation());
 
-	// Every building has a door and a service list, so any of them can be walked into.
-	const BuildingPlan* Nearest = nullptr;
-	double Best = ReachM * ReachM;
-	for (const BuildingPlan& Building : City.Buildings)
-	{
-		const double Dx = Building.DoorX - Here.X;
-		const double Dy = Building.DoorY - Here.Y;
-		const double Distance = Dx * Dx + Dy * Dy;
-		if (Distance < Best)
-		{
-			Best = Distance;
-			Nearest = &Building;
-		}
-	}
+	// Every building has a door and a service list, so any of them can be walked into. The plan's own
+	// index answers this, rather than walking a state's worth of buildings every frame.
+	const BuildingPlan* Nearest = City.NearestBuilding(Here.X, Here.Y, ReachM);
 	if (Nearest)
 	{
 		Current.BuildingId = Nearest->Id;

@@ -925,3 +925,78 @@ DTG_TEST(PriceGougingHasAPublicCost)
 	EXPECT(State.Funds.Balance() > CashBefore);
 	EXPECT(State.Markets.PlayerReputation().Trust < TrustBefore - 0.2);
 }
+
+DTG_TEST(LookingAroundYouIsCheap)
+{
+	// The game asks "what's near me?" several times a frame, so it comes off a grid rather than a walk
+	// through every building in the state.
+	const GameState& State = dtg_test::LoadedState();
+	const CityPlan& City = State.City;
+	EXPECT(City.Buildings.size() > 500);
+
+	// Whatever the index says is near had better be what a full search would have found.
+	Rng Random(99);
+	for (int Trial = 0; Trial < 25; ++Trial)
+	{
+		const BuildingPlan& Pick = City.Buildings[Random.Index(City.Buildings.size())];
+		const double X = Pick.DoorX + Random.Range(-40.0, 40.0);
+		const double Y = Pick.DoorY + Random.Range(-40.0, 40.0);
+		const double Radius = 60.0;
+
+		std::vector<const BuildingPlan*> Expected;
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			const double Dx = Building.DoorX - X;
+			const double Dy = Building.DoorY - Y;
+			if (Dx * Dx + Dy * Dy <= Radius * Radius)
+			{
+				Expected.push_back(&Building);
+			}
+		}
+		const std::vector<const BuildingPlan*> Found = City.BuildingsNear(X, Y, Radius);
+		EXPECT(Found.size() == Expected.size());
+		// And the first one back is the closest, which is what the interaction prompt uses.
+		const BuildingPlan* Nearest = City.NearestBuilding(X, Y, Radius);
+		if (!Expected.empty())
+		{
+			const BuildingPlan* Closest = Expected.front();
+			double Best = 1e18;
+			for (const BuildingPlan* Building : Expected)
+			{
+				const double Dx = Building->DoorX - X;
+				const double Dy = Building->DoorY - Y;
+				if (Dx * Dx + Dy * Dy < Best)
+				{
+					Best = Dx * Dx + Dy * Dy;
+					Closest = Building;
+				}
+			}
+			EXPECT(Nearest == Closest);
+		}
+		else
+		{
+			EXPECT(Nearest == nullptr);
+		}
+	}
+
+	// The road graph is looked up the same way, and still finds the true nearest junction -- including
+	// from out in the country, where the nearest one is a long way off.
+	for (int Trial = 0; Trial < 15; ++Trial)
+	{
+		const double X = Random.Range(City.Bounds.MinX, City.Bounds.MaxX);
+		const double Y = Random.Range(City.Bounds.MinY, City.Bounds.MaxY);
+		int Expected = -1;
+		double Best = 1e18;
+		for (const Intersection& Node : City.Intersections)
+		{
+			const double Dx = Node.X - X;
+			const double Dy = Node.Y - Y;
+			if (Dx * Dx + Dy * Dy < Best)
+			{
+				Best = Dx * Dx + Dy * Dy;
+				Expected = Node.Id;
+			}
+		}
+		EXPECT(City.NearestIntersection(X, Y) == Expected);
+	}
+}

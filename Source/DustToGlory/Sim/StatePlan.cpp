@@ -1237,6 +1237,8 @@ namespace dtg::sim
 		World.Highways = Highways;
 		World.Venues = VenueLayouts;
 		World.Bounds = Bounds;
+		// The merges above indexed each city against its own bounds; one more pass covers the whole state.
+		World.Index();
 		return World;
 	}
 }

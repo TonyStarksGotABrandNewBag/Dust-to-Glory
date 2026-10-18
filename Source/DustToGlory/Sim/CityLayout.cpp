@@ -264,11 +264,139 @@ namespace dtg::sim
 		return nullptr;
 	}
 
+	int CityPlan::Grid::CellFor(double X, double Y) const
+	{
+		if (!Ready())
+		{
+			return -1;
+		}
+		const int Column = static_cast<int>(std::floor((X - OriginX) / CellSizeM));
+		const int Row = static_cast<int>(std::floor((Y - OriginY) / CellSizeM));
+		if (Column < 0 || Row < 0 || Column >= Stride || Row >= Rows)
+		{
+			return -1;
+		}
+		return Column + Row * Stride;
+	}
+
+	void CityPlan::Grid::CellsNear(double X, double Y, double RadiusM, std::vector<int>& Out) const
+	{
+		Out.clear();
+		if (!Ready())
+		{
+			return;
+		}
+		const int Reach = static_cast<int>(std::ceil(RadiusM / CellSizeM));
+		const int Column = static_cast<int>(std::floor((X - OriginX) / CellSizeM));
+		const int Row = static_cast<int>(std::floor((Y - OriginY) / CellSizeM));
+		for (int J = Row - Reach; J <= Row + Reach; ++J)
+		{
+			if (J < 0 || J >= Rows)
+			{
+				continue;
+			}
+			for (int I = Column - Reach; I <= Column + Reach; ++I)
+			{
+				if (I >= 0 && I < Stride)
+				{
+					Out.push_back(I + J * Stride);
+				}
+			}
+		}
+	}
+
+	void CityPlan::Index()
+	{
+		// One pass over everything, so the thousands of "what's near me?" questions after it are cheap.
+		auto Setup = [this](Grid& Target)
+		{
+			Target.OriginX = Bounds.MinX - CellSizeM;
+			Target.OriginY = Bounds.MinY - CellSizeM;
+			Target.Stride = std::max(1, static_cast<int>(std::ceil((Bounds.Width() + 2.0 * CellSizeM) / CellSizeM)));
+			Target.Rows = std::max(1, static_cast<int>(std::ceil((Bounds.Depth() + 2.0 * CellSizeM) / CellSizeM)));
+			Target.Cells.assign(static_cast<std::size_t>(Target.Stride) * static_cast<std::size_t>(Target.Rows), {});
+		};
+		if (Bounds.Width() <= 0.0 || Bounds.Depth() <= 0.0)
+		{
+			BuildingGrid = Grid();
+			NodeGrid = Grid();
+			return;
+		}
+		Setup(BuildingGrid);
+		Setup(NodeGrid);
+		for (std::size_t Which = 0; Which < Buildings.size(); ++Which)
+		{
+			const int Cell = BuildingGrid.CellFor(Buildings[Which].DoorX, Buildings[Which].DoorY);
+			if (Cell >= 0)
+			{
+				BuildingGrid.Cells[static_cast<std::size_t>(Cell)].push_back(static_cast<int>(Which));
+			}
+		}
+		for (std::size_t Which = 0; Which < Intersections.size(); ++Which)
+		{
+			const int Cell = NodeGrid.CellFor(Intersections[Which].X, Intersections[Which].Y);
+			if (Cell >= 0)
+			{
+				NodeGrid.Cells[static_cast<std::size_t>(Cell)].push_back(static_cast<int>(Which));
+			}
+		}
+	}
+
+	std::vector<const BuildingPlan*> CityPlan::BuildingsNear(double X, double Y, double RadiusM) const
+	{
+		std::vector<std::pair<double, const BuildingPlan*>> Found;
+		const double Reach = RadiusM * RadiusM;
+		auto Consider = [&](const BuildingPlan& Building)
+		{
+			const double Dx = Building.DoorX - X;
+			const double Dy = Building.DoorY - Y;
+			const double Distance = Dx * Dx + Dy * Dy;
+			if (Distance <= Reach)
+			{
+				Found.emplace_back(Distance, &Building);
+			}
+		};
+		if (BuildingGrid.Ready())
+		{
+			std::vector<int> Cells;
+			BuildingGrid.CellsNear(X, Y, RadiusM, Cells);
+			for (const int Cell : Cells)
+			{
+				for (const int Which : BuildingGrid.Cells[static_cast<std::size_t>(Cell)])
+				{
+					Consider(Buildings[static_cast<std::size_t>(Which)]);
+				}
+			}
+		}
+		else
+		{
+			// No index (a hand-built plan in a test): correct, just slower.
+			for (const BuildingPlan& Building : Buildings)
+			{
+				Consider(Building);
+			}
+		}
+		std::sort(Found.begin(), Found.end(), [](const auto& A, const auto& B) { return A.first < B.first; });
+		std::vector<const BuildingPlan*> Out;
+		Out.reserve(Found.size());
+		for (const auto& Entry : Found)
+		{
+			Out.push_back(Entry.second);
+		}
+		return Out;
+	}
+
+	const BuildingPlan* CityPlan::NearestBuilding(double X, double Y, double RadiusM) const
+	{
+		const std::vector<const BuildingPlan*> Near = BuildingsNear(X, Y, RadiusM);
+		return Near.empty() ? nullptr : Near.front();
+	}
+
 	int CityPlan::NearestIntersection(double X, double Y) const
 	{
 		int Best = -1;
 		double BestDistance = 1e18;
-		for (const Intersection& Node : Intersections)
+		auto Consider = [&](const Intersection& Node)
 		{
 			const double Dx = Node.X - X;
 			const double Dy = Node.Y - Y;
@@ -278,6 +406,31 @@ namespace dtg::sim
 				BestDistance = Distance;
 				Best = Node.Id;
 			}
+		};
+		if (NodeGrid.Ready())
+		{
+			// Widen the search until something turns up: out in the country the nearest junction is far.
+			std::vector<int> Cells;
+			for (double Radius = CellSizeM; Radius < Bounds.Width() + Bounds.Depth(); Radius *= 2.0)
+			{
+				NodeGrid.CellsNear(X, Y, Radius, Cells);
+				for (const int Cell : Cells)
+				{
+					for (const int Which : NodeGrid.Cells[static_cast<std::size_t>(Cell)])
+					{
+						Consider(Intersections[static_cast<std::size_t>(Which)]);
+					}
+				}
+				// A hit inside the searched radius is the nearest; anything outside it might not be.
+				if (Best >= 0 && BestDistance <= Radius * Radius)
+				{
+					return Best;
+				}
+			}
+		}
+		for (const Intersection& Node : Intersections)
+		{
+			Consider(Node);
 		}
 		return Best;
 	}
@@ -340,6 +493,7 @@ namespace dtg::sim
 			Bounds.MaxX = std::max(Bounds.MaxX, Other.Bounds.MaxX);
 			Bounds.MaxY = std::max(Bounds.MaxY, Other.Bounds.MaxY);
 		}
+		Index();
 	}
 
 	double HighwayPlan::LengthM() const
@@ -812,6 +966,7 @@ namespace dtg::sim
 
 		if (!Config.bVenues)
 		{
+			Plan.Index();
 			return Plan;
 		}
 		// Venues outside the grid, each with a connector road.
@@ -902,6 +1057,7 @@ namespace dtg::sim
 			Connector.Name = "Circuit Rd";
 			Plan.Roads.push_back(Connector);
 		}
+		Plan.Index();
 		return Plan;
 	}
 

@@ -208,6 +208,38 @@ namespace dtg::sim
 		const CityInfo* FindCity(const std::string& Name) const;
 		/** Appends another city's plan (ids must already be unique). */
 		void Merge(const CityPlan& Other);
+
+		// ---------------------------------------------------------------- Looking around you
+		//
+		// A state has thousands of buildings and road nodes, and the game asks "what's near me?" several
+		// times a frame. These answer from a uniform grid rather than walking everything.
+
+		/** Side of one lookup cell, in metres. */
+		static constexpr double CellSizeM = 120.0;
+		/** Builds the lookup grid. Called by GenerateCity and Merge; call it again after editing by hand. */
+		void Index();
+		/** Buildings whose door is within Radius of a point, nearest first. */
+		std::vector<const BuildingPlan*> BuildingsNear(double X, double Y, double RadiusM) const;
+		/** The nearest building door within Radius, or null. */
+		const BuildingPlan* NearestBuilding(double X, double Y, double RadiusM) const;
+
+	private:
+		/** Cell -> indices into Buildings and Intersections. A cell is Index(x) + Index(y) * Stride. */
+		struct Grid
+		{
+			std::vector<std::vector<int>> Cells;
+			double OriginX = 0.0;
+			double OriginY = 0.0;
+			int Stride = 0;
+			int Rows = 0;
+
+			bool Ready() const { return Stride > 0 && Rows > 0; }
+			int CellFor(double X, double Y) const;
+			/** Appends every cell index within Radius of a point. */
+			void CellsNear(double X, double Y, double RadiusM, std::vector<int>& Out) const;
+		};
+		Grid BuildingGrid;
+		Grid NodeGrid;
 	};
 
 	CityPlan GenerateCity(const CityConfig& Config);

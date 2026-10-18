@@ -423,15 +423,11 @@ void ADTGTrafficDirector::UpdateParkedCars(const FVector& Around)
 		return;
 	}
 	const FVector2D Here = Game->ToSim(Around);
-	for (const BuildingPlan& Building : Game->Sim().City.Buildings)
+	// Only the houses near the player, from the plan's index.
+	for (const BuildingPlan* Found : Game->Sim().City.BuildingsNear(Here.X, Here.Y, SpawnRadiusM))
 	{
+		const BuildingPlan& Building = *Found;
 		if (Building.Role != LotRole::Home)
-		{
-			continue;
-		}
-		const double Dx = Building.DoorX - Here.X;
-		const double Dy = Building.DoorY - Here.Y;
-		if (Dx * Dx + Dy * Dy > FMath::Square(SpawnRadiusM))
 		{
 			continue;
 		}
