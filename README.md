@@ -129,6 +129,11 @@ are real — that's the point of a map of South Carolina — but nothing in them
 - [docs/ROADMAP.md](docs/ROADMAP.md) — what's done and what's next
 - [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md) — editing the data files
 - [docs/AUDIO.md](docs/AUDIO.md) — how the engine sound is made
+- [CLAUDE.md](CLAUDE.md) — the working agreement: constraints, conventions, how work gets verified
+- [docs/HANDOFF.md](docs/HANDOFF.md) — state of play: what is done, what is not, what the first
+  Unreal build will probably throw
+- [Tools/README.md](Tools/README.md) — the profilers and offline renderers that verify this
+  project without an engine
 - [docs/SUNDOWN.md](docs/SUNDOWN.md) — the cheat codes, and the survival mode behind the last one
 - [docs/REALISM.md](docs/REALISM.md) — the honest ledger against the photoreal target: what the code
   reaches on its own, and what needs the editor and art
