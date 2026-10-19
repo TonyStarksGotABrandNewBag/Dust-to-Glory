@@ -626,6 +626,79 @@ namespace dtg::sim
 			Root.Set("outbreak", OutbreakJson);
 		}
 		{
+			// Cheats. bEverUsed is deliberately saved and never cleared: a save where a quarter
+			// million was dialled in should not be indistinguishable from one where it was earned.
+			const CheatBook::Snapshot Data = Cheats.Save();
+			JsonValue CheatJson = JsonValue::MakeObject();
+			CheatJson.Set("everUsed", Bool(Data.bEverUsed));
+			CheatJson.Set("entered", Num(Data.Entered));
+			JsonValue OnJson = JsonValue::MakeArray();
+			for (const int Which : Data.On)
+			{
+				OnJson.Push(Num(Which));
+			}
+			CheatJson.Set("on", OnJson);
+			Root.Set("cheats", CheatJson);
+		}
+		{
+			const SundownState::Snapshot Data = Sundown.Save();
+			JsonValue DownJson = JsonValue::MakeObject();
+			DownJson.Set("active", Bool(Data.bActive));
+			DownJson.Set("day", Num(Data.DayNumber));
+			DownJson.Set("cure", Num(Data.Cure));
+			DownJson.Set("doses", Num(Data.DoseCount));
+			DownJson.Set("deployed", Bool(Data.bDeployed));
+			DownJson.Set("dread", Num(Data.DreadValue));
+			DownJson.Set("population", Num(Data.Population));
+			JsonValue HeldJson = JsonValue::MakeObject();
+			HeldJson.Set("food", Num(Data.Held.Food));
+			HeldJson.Set("water", Num(Data.Held.Water));
+			HeldJson.Set("fuel", Num(Data.Held.Fuel));
+			HeldJson.Set("ammo", Num(Data.Held.Ammo));
+			HeldJson.Set("medical", Num(Data.Held.Medical));
+			HeldJson.Set("parts", Num(Data.Held.Parts));
+			DownJson.Set("held", HeldJson);
+			JsonValue HomeJson = JsonValue::MakeObject();
+			HomeJson.Set("building", Num(Data.Home.BuildingId));
+			HomeJson.Set("barricade", Num(Data.Home.Barricade));
+			HomeJson.Set("generator", Bool(Data.Home.bGenerator));
+			HomeJson.Set("generatorFuel", Num(Data.Home.GeneratorFuel));
+			DownJson.Set("home", HomeJson);
+			JsonValue NestsJson = JsonValue::MakeArray();
+			for (const Nest& Value : Data.NestList)
+			{
+				JsonValue Item = JsonValue::MakeObject();
+				Item.Set("building", Num(Value.BuildingId));
+				Item.Set("occupants", Num(Value.Occupants));
+				Item.Set("alpha", Bool(Value.bAlpha));
+				Item.Set("cleared", Bool(Value.bCleared));
+				Item.Set("clearedDay", Num(Value.ClearedOnDay));
+				NestsJson.Push(Item);
+			}
+			DownJson.Set("nests", NestsJson);
+			JsonValue PatternsJson = JsonValue::MakeArray();
+			for (const Pattern& Value : Data.Patterns)
+			{
+				JsonValue Item = JsonValue::MakeObject();
+				Item.Set("block", Num(Value.BlockKey));
+				Item.Set("visits", Num(Value.Visits));
+				Item.Set("lastDay", Num(Value.LastVisitDay));
+				Item.Set("expectation", Num(Value.Expectation));
+				PatternsJson.Push(Item);
+			}
+			DownJson.Set("patterns", PatternsJson);
+			JsonValue PickedJson = JsonValue::MakeArray();
+			for (const std::pair<int, double>& Entry : Data.PickedOver)
+			{
+				JsonValue Item = JsonValue::MakeObject();
+				Item.Set("building", Num(Entry.first));
+				Item.Set("stripped", Num(Entry.second));
+				PickedJson.Push(Item);
+			}
+			DownJson.Set("picked", PickedJson);
+			Root.Set("sundown", DownJson);
+		}
+		{
 			const ConspiracySystem::Snapshot Data = Scheme.Save();
 			JsonValue SchemeJson = JsonValue::MakeObject();
 			SchemeJson.Set("stage", Num(static_cast<int>(Data.Stage)));
@@ -1178,6 +1251,64 @@ namespace dtg::sim
 			Data.bTreated = OutbreakJson.GetBool("treated");
 			Data.TreatmentBoost = OutbreakJson.GetNumber("boost", 0.0);
 			Outbreak.Load(Data);
+		}
+		{
+			const JsonValue& CheatJson = Root.Get("cheats");
+			CheatBook::Snapshot CheatData;
+			CheatData.bEverUsed = CheatJson.GetBool("everUsed");
+			CheatData.Entered = CheatJson.GetInt("entered");
+			for (const JsonValue& Item : CheatJson.Get("on").Items())
+			{
+				CheatData.On.push_back(Item.AsInt());
+			}
+			Cheats.Load(CheatData);
+		}
+		{
+			const JsonValue& DownJson = Root.Get("sundown");
+			SundownState::Snapshot DownData;
+			DownData.bActive = DownJson.GetBool("active");
+			DownData.DayNumber = DownJson.GetInt("day");
+			DownData.Cure = DownJson.GetNumber("cure");
+			DownData.DoseCount = DownJson.GetInt("doses");
+			DownData.bDeployed = DownJson.GetBool("deployed");
+			DownData.DreadValue = DownJson.GetNumber("dread");
+			DownData.Population = DownJson.GetNumber("population");
+			const JsonValue& HeldJson = DownJson.Get("held");
+			DownData.Held.Food = HeldJson.GetInt("food");
+			DownData.Held.Water = HeldJson.GetInt("water");
+			DownData.Held.Fuel = HeldJson.GetInt("fuel");
+			DownData.Held.Ammo = HeldJson.GetInt("ammo");
+			DownData.Held.Medical = HeldJson.GetInt("medical");
+			DownData.Held.Parts = HeldJson.GetInt("parts");
+			const JsonValue& HomeJson = DownJson.Get("home");
+			DownData.Home.BuildingId = HomeJson.GetInt("building", -1);
+			DownData.Home.Barricade = HomeJson.GetNumber("barricade");
+			DownData.Home.bGenerator = HomeJson.GetBool("generator");
+			DownData.Home.GeneratorFuel = HomeJson.GetNumber("generatorFuel");
+			for (const JsonValue& Item : DownJson.Get("nests").Items())
+			{
+				Nest Value;
+				Value.BuildingId = Item.GetInt("building");
+				Value.Occupants = Item.GetInt("occupants");
+				Value.bAlpha = Item.GetBool("alpha");
+				Value.bCleared = Item.GetBool("cleared");
+				Value.ClearedOnDay = Item.GetInt("clearedDay", -1);
+				DownData.NestList.push_back(Value);
+			}
+			for (const JsonValue& Item : DownJson.Get("patterns").Items())
+			{
+				Pattern Value;
+				Value.BlockKey = Item.GetInt("block");
+				Value.Visits = Item.GetInt("visits");
+				Value.LastVisitDay = Item.GetInt("lastDay", -1);
+				Value.Expectation = Item.GetNumber("expectation");
+				DownData.Patterns.push_back(Value);
+			}
+			for (const JsonValue& Item : DownJson.Get("picked").Items())
+			{
+				DownData.PickedOver.emplace_back(Item.GetInt("building"), Item.GetNumber("stripped"));
+			}
+			Sundown.Load(DownData);
 		}
 		{
 			const JsonValue& SchemeJson = Root.Get("scheme");

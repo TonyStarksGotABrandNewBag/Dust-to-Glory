@@ -1261,6 +1261,12 @@ namespace dtg::sim
 		// Overnight the town talks: what people heard yesterday fades a little and the parts worth
 		// repeating reach somebody new. Patience with the player's questions comes back too.
 		Npcs.TownTalks(Minute, Random);
+		if (Sundown.IsActive())
+		{
+			// A day in Sundown is its own thing: eat, drink, let the Alpha forget a little of what
+			// it learned, and let any nest that was cleared long enough ago fill back up.
+			Sundown.NewDay(Random);
+		}
 		const int OutbreakChange = Outbreak.DailyUpdate(Random);
 		if (OutbreakChange > 0)
 		{
@@ -2888,6 +2894,232 @@ namespace dtg::sim
 			return ActionResult::Success("Conviction overturned on appeal! You're released and your record is cleared.");
 		}
 		return ActionResult::Success("The appeals court upheld your conviction.");
+	}
+
+	// ---------------------------------------------------------------------- Cheats
+
+	ActionResult GameState::EnterCheat(const std::string& Typed)
+	{
+		const CheatDef* Def = FindCheat(Typed);
+		if (Def == nullptr)
+		{
+			return ActionResult::Failure("That number rings out.");
+		}
+		const std::int64_t Now = Clock.TotalMinutes();
+		auto Confirm = [&](const std::string& What)
+		{
+			// Every cheat answers. There is no state the player cannot see.
+			Deliver(Message{}, nullptr);
+			return ActionResult::Success(What);
+		};
+
+		switch (Def->Which)
+		{
+		case Cheat::Payday:
+		{
+			const Money Amount = Dollars(250000);
+			Funds.Deposit(Amount, MoneyCategory::Other, "Payday", Now);
+			Cheats.Fired(Def->Which);
+			return Confirm(FormatMoney(Amount) + " in the account. Nobody asked where from.");
+		}
+		case Cheat::Landslide:
+		{
+			const int Next = static_cast<int>(Politics.Current()) + 1;
+			if (Next >= static_cast<int>(Office::Count))
+			{
+				Cheats.Fired(Def->Which);
+				return Confirm("There is no higher office to hand you.");
+			}
+			Politics.WinNow(static_cast<Office>(Next));
+			Cheats.Fired(Def->Which);
+			return Confirm(std::string("Sworn in. You are ") + OfficeTitle(Politics.Current()) + " now.");
+		}
+		case Cheat::Showroom:
+		{
+			OwnedVehicle* Car = nullptr;
+			for (OwnedVehicle& Owned : Garage)
+			{
+				if (Owned.Uid == ActiveVehicleUid)
+				{
+					Car = &Owned;
+					break;
+				}
+			}
+			if (Car == nullptr && !Garage.empty())
+			{
+				Car = &Garage.front();
+			}
+			if (Car == nullptr)
+			{
+				return ActionResult::Failure("You do not have a car.");
+			}
+			Car->Condition = 1.0;
+			Car->Issues.clear();
+			Cheats.Fired(Def->Which);
+			return Confirm("Straight, clean and running right again.");
+		}
+		case Cheat::BarnFind:
+		{
+			// Something genuinely old, so it arrives as a project rather than a prize.
+			const VehicleModel* Pick = nullptr;
+			int Oldest = 9999;
+			for (const VehicleModel& Model : Vehicles.Models())
+			{
+				if (Model.bEventOnly || Model.YearStart <= 0)
+				{
+					continue;
+				}
+				const int Jitter = Random.RangeInt(0, 40);
+				if (Model.YearStart + Jitter < Oldest)
+				{
+					Oldest = Model.YearStart + Jitter;
+					Pick = &Model;
+				}
+			}
+			if (Pick == nullptr)
+			{
+				return ActionResult::Failure("Nothing turned up.");
+			}
+			const std::string Uid = GrantVehicle(Pick->Id);
+			for (OwnedVehicle& Owned : Garage)
+			{
+				if (Owned.Uid == Uid)
+				{
+					Owned.Condition = 0.18 + 0.12 * Random.NextDouble();
+					Owned.MileageKm = 140000.0 + 90000.0 * Random.NextDouble();
+				}
+			}
+			Cheats.Fired(Def->Which);
+			return Confirm("There is a " + Pick->DisplayName + " under a tarp in your garage. It does not run.");
+		}
+		case Cheat::ColdCase:
+			Wanted.Clear();
+			OpenCharges.clear();
+			Cheats.Fired(Def->Which);
+			return Confirm("The radios went quiet. Nobody is looking for you.");
+		case Cheat::MostWanted:
+			Wanted.AddStars(WantedSystem::MaxStars);
+			Cheats.Fired(Def->Which);
+			return Confirm("Every unit in the county, and they all know the car.");
+		case Cheat::TimeServed:
+			if (!Justice.Jail().bInJail)
+			{
+				return ActionResult::Failure("You are not in jail.");
+			}
+			Justice.Release();
+			Cheats.Fired(Def->Which);
+			return Confirm("The gate opened. The conviction is still on your record.");
+		case Cheat::CleanSlate:
+			Justice.Pardon();
+			Cheats.Fired(Def->Which);
+			return Confirm("Sealed, all of it. On paper you have never been arrested.");
+		case Cheat::AllThree:
+		{
+			if (PlayerPowers.HasPowers())
+			{
+				return ActionResult::Failure("You already have your three.");
+			}
+			std::vector<std::string> Picks;
+			for (const PowerDef& Power : Powers.Powers())
+			{
+				if (Picks.size() < PowerSet::SlotCount)
+				{
+					Picks.push_back(Power.Id);
+				}
+			}
+			std::string Error;
+			if (Picks.size() < PowerSet::SlotCount || !PlayerPowers.Choose(Powers, Picks, &Error))
+			{
+				return ActionResult::Failure(Error.empty() ? "The powers did not take." : Error);
+			}
+			Cheats.Fired(Def->Which);
+			return Confirm("All three, at once. That is not how it is supposed to work.");
+		}
+		case Cheat::FullCharge:
+		{
+			if (!PlayerPowers.HasPowers())
+			{
+				return ActionResult::Failure("You have no powers to charge.");
+			}
+			// Instability is the real price of using them, and this is what wipes it.
+			std::vector<PowerInstance> Slots = PlayerPowers.Slots();
+			for (PowerInstance& Slot : Slots)
+			{
+				Slot.Instability = 0.0;
+			}
+			PlayerPowers.Restore(std::move(Slots));
+			Cheats.Fired(Def->Which);
+			return Confirm("Steady again. Nothing is straining.");
+		}
+		case Cheat::Reroll:
+		{
+			if (!PlayerPowers.HasPowers())
+			{
+				return ActionResult::Failure("You have no powers to re-roll.");
+			}
+			MutationEvent Event;
+			int Changed = 0;
+			for (int Attempt = 0; Attempt < PowerSet::SlotCount; ++Attempt)
+			{
+				if (PlayerPowers.Surge(Powers, Random, Event))
+				{
+					++Changed;
+				}
+			}
+			Cheats.Fired(Def->Which);
+			return Confirm(Changed > 0
+				? "Something shifted. They are not quite what they were."
+				: "Nothing took this time.");
+		}
+		case Cheat::FourSeasons:
+		{
+			const int Next = (static_cast<int>(Weather.Current()) + 1) % static_cast<int>(dtg::sim::Weather::Count);
+			Weather.Force(static_cast<dtg::sim::Weather>(Next), Now, 180);
+			Cheats.Fired(Def->Which);
+			return Confirm("The sky changed its mind.");
+		}
+		case Cheat::KeysToTheCity:
+		{
+			const bool bOn = Cheats.Toggle(Def->Which);
+			if (bOn)
+			{
+				RefreshDealerStock();
+			}
+			return Confirm(bOn
+				? "Every lot in the state just found the keys to everything."
+				: "The lots went back to their usual stock.");
+		}
+		case Cheat::Sundown:
+		{
+			const bool bOn = Cheats.Toggle(Def->Which);
+			if (bOn)
+			{
+				Sundown.Begin(City, &Outbreak, Clock.Day(), Random);
+				return Confirm("The power went out an hour ago and it is not coming back on. "
+					"Whatever you are going to do, do it before dark.");
+			}
+			Sundown.End();
+			return Confirm("The lights are back. Everyone is where they were.");
+		}
+		// The rest are read by the engine layer rather than acted on here: physics, traffic density,
+		// the clock, what a showroom will sell you. The simulation only has to remember which are on.
+		case Cheat::BlueChip:
+		case Cheat::GroundFloor:
+		case Cheat::Titanium:
+		case Cheat::StickyTires:
+		case Cheat::HighNoon:
+		case Cheat::FeatherFall:
+		case Cheat::HalfSpeed:
+		case Cheat::GhostTown:
+		case Cheat::RushHour:
+		{
+			const bool bOn = Cheats.Toggle(Def->Which);
+			return Confirm(std::string(Def->Title) + (bOn ? ": on." : ": off."));
+		}
+		case Cheat::Count:
+			break;
+		}
+		return ActionResult::Failure("That number rings out.");
 	}
 
 	ActionResult GameState::ExpungeRecord()

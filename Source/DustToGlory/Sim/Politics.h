@@ -109,6 +109,19 @@ namespace dtg::sim
 	{
 	public:
 		Office Current() const { return CurrentOffice; }
+		/**
+		 * Hands the player an office outright, skipping the campaign. The only caller is the
+		 * LANDSLIDE cheat -- nothing in normal play reaches this, because the whole point of the
+		 * political ladder is the climb.
+		 */
+		void WinNow(Office Target)
+		{
+			CurrentOffice = Target;
+			if (static_cast<int>(Target) > static_cast<int>(HighestOffice))
+			{
+				HighestOffice = Target;
+			}
+		}
 		Office Highest() const { return HighestOffice; }
 		double Approval() const { return ApprovalValue; }
 		const Campaign& ActiveCampaign() const { return Run; }

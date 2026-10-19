@@ -84,7 +84,7 @@ instead — including a whole new state.
 ## Before you build it
 
 The simulation core — the rules, the physics, the economy, the game theory, all of it — is tested and
-runs anywhere: 111 tests, green on Linux, macOS and Windows, and clean under the address and
+runs anywhere: 120 tests, green on Linux, macOS and Windows, and clean under the address and
 undefined-behaviour sanitizers. That half you can trust.
 
 The Unreal layer has never been compiled, because it was written somewhere without an engine installed.
@@ -129,6 +129,7 @@ are real — that's the point of a map of South Carolina — but nothing in them
 - [docs/ROADMAP.md](docs/ROADMAP.md) — what's done and what's next
 - [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md) — editing the data files
 - [docs/AUDIO.md](docs/AUDIO.md) — how the engine sound is made
+- [docs/SUNDOWN.md](docs/SUNDOWN.md) — the cheat codes, and the survival mode behind the last one
 - [docs/REALISM.md](docs/REALISM.md) — the honest ledger against the photoreal target: what the code
   reaches on its own, and what needs the editor and art
 - `python3 Tests/check_engine.py` — compiles the Unreal layer against a stand-in for the engine

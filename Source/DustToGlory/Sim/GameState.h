@@ -3,6 +3,7 @@
 // The Unreal layer owns one of these inside UDTGGameSubsystem.
 #pragma once
 
+#include "Sim/Cheats.h"
 #include "Sim/CityLayout.h"
 #include "Sim/Careers.h"
 #include "Sim/Clock.h"
@@ -24,6 +25,7 @@
 #include "Sim/Powers.h"
 #include "Sim/PrivateSales.h"
 #include "Sim/StatePlan.h"
+#include "Sim/Sundown.h"
 #include "Sim/Tuning.h"
 #include "Sim/Vehicles.h"
 #include "Sim/Wanted.h"
@@ -155,6 +157,17 @@ namespace dtg::sim
 		std::vector<PendingOffer> PendingOffers; // notes and texted counters waiting for a reply
 		Inbox Phone;                             // calls, texts and email
 		int NextOfferId = 1;
+		CheatBook Cheats;                        // which cheats are on, and that any ever were
+		SundownState Sundown;                    // the mode behind the SUNDOWN code
+
+		// ---------------------------------------------------------------- Cheats
+		/**
+		 * Dials a cheat. Takes the word or the number -- "SUNDOWN" or "1-999-786366" -- and returns
+		 * what the confirmation text says. Failure means it was not a code, which is the same thing
+		 * the phone would tell you.
+		 */
+		ActionResult EnterCheat(const std::string& Typed);
+		bool CheatOn(Cheat Which) const { return Cheats.IsOn(Which); }
 
 		/** Parses every data file and builds the catalog, city and businesses. */
 		bool LoadContent(const ContentFiles& Files, ContentReport& Report);
