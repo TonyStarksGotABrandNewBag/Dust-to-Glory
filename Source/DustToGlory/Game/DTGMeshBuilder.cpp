@@ -618,7 +618,7 @@ namespace DTGMeshBuilder
 
 	UMaterialInterface* VertexColorMaterial()
 	{
-		static const TCHAR* const Path = TEXT("/Engine/EngineMaterials/VertexColorMaterial.VertexColorMaterial");
+		static const TCHAR* const Path = TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial");
 		// Found once. StaticLoadObject hits the asset registry, and this is asked for by every building,
 		// every car and every person in the world.
 		static TWeakObjectPtr<UMaterialInterface> Cached;
@@ -635,7 +635,7 @@ namespace DTGMeshBuilder
 				bWarned = true;
 				UE_LOG(LogDTG, Warning,
 					TEXT("No vertex-colour material at %s, so the world will draw untextured. In a packaged build this "
-						 "means /Engine/EngineMaterials was not cooked; see DirectoriesToAlwaysCook in Config/DefaultGame.ini."),
+						 "means /Engine/EngineDebugMaterials was not cooked; see DirectoriesToAlwaysCook in Config/DefaultGame.ini."),
 					Path);
 			}
 			return nullptr;

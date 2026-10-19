@@ -116,6 +116,8 @@ private:
 	FLinearColor RimColour = FLinearColor(0.55f, 0.55f, 0.57f);
 	int32 PendingShift = 0;
 	bool bSwamped = false;
+	/** Chassis blow-ups already logged, so each car reports its first one rather than every frame. */
+	int32 ReportedResets = 0;
 	double LengthM = 4.5;
 	double WidthM = 1.8;
 	double HeightM = 1.4;

@@ -4,6 +4,7 @@
 #include "Sim/ChassisSim.h"
 
 #include <cmath>
+#include <limits>
 
 using namespace dtg::sim;
 
@@ -26,6 +27,29 @@ namespace detail_chassis_test
 		Car.Teleport(Vec3(), 0.0);
 		return Car;
 	}
+
+	/** Flat ground that returns a hit with a NaN contact point for a few casts, then behaves. */
+	class PoisonedGround : public GroundQuery
+	{
+	public:
+		explicit PoisonedGround(int InBadCasts) : BadCasts(InBadCasts) {}
+
+		GroundHit Cast(const Vec3& Origin, const Vec3& Direction, double MaxDistance) const override
+		{
+			GroundHit Hit = Flat.Cast(Origin, Direction, MaxDistance);
+			if (Hit.bHit && BadCasts > 0)
+			{
+				--BadCasts;
+				const double Nan = std::numeric_limits<double>::quiet_NaN();
+				Hit.Point = Vec3(Nan, Nan, Nan);
+			}
+			return Hit;
+		}
+
+	private:
+		FlatGround Flat;
+		mutable int BadCasts;
+	};
 
 	void Run(ChassisSim& Car, const GroundQuery& Ground, const DriverInput& Input, double Seconds)
 	{
@@ -171,6 +195,27 @@ DTG_TEST(ChassisRollsOntoItsRoofWithoutFallingThrough)
 	EXPECT(std::fabs(Car.State.Velocity.Z) < 0.1);
 	// Wherever it ended up (wheels or roof), it sits on the ground, not in it.
 	EXPECT(Car.State.Position.Z < 2.0);
+}
+
+DTG_TEST(ChassisRecoversFromANumericalBlowUp)
+{
+	// The first run in the real engine sent one parked car's position to NaN, and it never came back.
+	using namespace detail_chassis_test;
+	ChassisSim Car = MakeCar(BodyStyle::Sedan);
+	DriverInput Parked;
+	Parked.Handbrake = 1.0;
+	Run(Car, FlatGround(), Parked, 1.0);
+	const Vec3 Rest = Car.State.Position;
+	EXPECT(Car.NumericalResets() == 0);
+
+	const PoisonedGround Ground(1);
+	Run(Car, Ground, Parked, 2.0);
+	EXPECT(Car.NumericalResets() >= 1);
+	EXPECT(Car.State.Position.IsFinite());
+	EXPECT(Car.State.Velocity.IsFinite());
+	// Rolled back and settled again, not thrown somewhere else.
+	EXPECT_MSG((Car.State.Position - Rest).Length() < 0.05, std::to_string((Car.State.Position - Rest).Length()));
+	EXPECT(Car.GroundedWheels() == 4);
 }
 
 DTG_TEST(ChassisCollisionsBounceAndSpin)

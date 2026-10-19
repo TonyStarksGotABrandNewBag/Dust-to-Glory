@@ -128,6 +128,8 @@ namespace dtg::sim
 		const AirRecord& LastAir() const { return LastAirRecord; }
 		/** True when the body is upside down or on its side and nearly stopped. */
 		bool IsCapsized() const;
+		/** How many sub-steps have blown up numerically and been rolled back. Should stay 0. */
+		int NumericalResets() const { return Resets; }
 
 	private:
 		void Substep(double Dt, const DriverInput& Input, const GroundQuery& Ground);
@@ -152,5 +154,6 @@ namespace dtg::sim
 		double AirPitch = 0.0;
 		double AirRoll = 0.0;
 		AirRecord LastAirRecord;
+		int Resets = 0;
 	};
 }

@@ -65,6 +65,22 @@ declarations**. Where they differ from the real engine it will disagree in both 
 
 ### 2. Nothing has ever run
 
+**First run, 19 October, `-game` on `ci-ironman1`:** the state loads (1,160 buildings, 21 towns) and
+the map comes up in about 0.4 s, with no `BeginPlay` crash. The HUD, powers, minimap and player all
+appear. Three things were wrong and are fixed:
+
+- `VertexColorMaterial` lives in `/Engine/EngineDebugMaterials/`, not `/Engine/EngineMaterials/`, so the
+  world drew with the checkerboard fallback. Path and cook list corrected.
+- Traffic spawned cars onto junctions that already had one, and each stacked pair blew its chassis up
+  to NaN. Spawns now skip an occupied junction.
+- `ChassisSim`'s blow-up guard cleared velocity after position had already been integrated from it,
+  so a NaN position never recovered. It now rolls back the whole sub-step
+  (`ChassisRecoversFromANumericalBlowUp`, mutation-tested). `ADTGVehicle` also guards the collision
+  response and logs the first rollback per car.
+
+After the fixes, 90 seconds ran with no ensures and no rollbacks. Not yet checked: driving, frame rate,
+night, weather, Sundown. The original note follows.
+
 No idea whether it crashes on `BeginPlay`, whether the world appears, or what the frame rate is. The
 per-frame budget has been measured in simulation terms only (see below).
 

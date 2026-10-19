@@ -93,6 +93,8 @@ private:
 	/** A node on the road graph near a point, preferring one the player can't already see. */
 	int32 PickNode(const FVector& Around, bool bFar) const;
 	FVector NodeLocation(int32 NodeId) const;
+	/** True when a traffic car is already standing near this point, so another must not spawn into it. */
+	bool IsOccupied(const FVector& At) const;
 
 	UPROPERTY()
 	TArray<FDTGDriver> Drivers;

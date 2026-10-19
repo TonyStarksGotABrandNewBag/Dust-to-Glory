@@ -249,7 +249,26 @@ void ADTGVehicle::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	const FVector Before = GetActorLocation();
 	StepPhysics(FMath::Min(static_cast<double>(DeltaSeconds), 0.1));
+	if (Sim.NumericalResets() > ReportedResets)
+	{
+		// The chassis rolled itself back. Say where, once per car, so the cause can be found.
+		if (ReportedResets == 0)
+		{
+			UE_LOG(LogDTG, Warning, TEXT("%s: chassis blew up numerically near %s (%d wheels down, %s) and was rolled back."),
+				*GetName(), *Before.ToString(), Sim.GroundedWheels(), bPlayerDriven ? TEXT("player") : TEXT("AI/parked"));
+		}
+		ReportedResets = Sim.NumericalResets();
+	}
 	ResolveCollisions(Before);
+	if (!Sim.State.Position.IsFinite())
+	{
+		// The collision response runs outside the chassis's own guard. Whatever it produced, the engine
+		// must never be handed a NaN transform: put the car back where it was this frame, at rest.
+		Sim.State.Position = Vec3(Before.X / DTGMetresToUnreal, Before.Y / DTGMetresToUnreal, Before.Z / DTGMetresToUnreal);
+		Sim.Freeze();
+		UE_LOG(LogDTG, Warning, TEXT("%s: collision response produced a non-finite position near %s; restored."),
+			*GetName(), *Before.ToString());
+	}
 
 	SetActorLocationAndRotation(ToUnrealVector(Sim.State.Position), ToUnrealQuat(Sim.State.Orientation), /*bSweep*/ false);
 

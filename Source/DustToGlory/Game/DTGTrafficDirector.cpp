@@ -40,6 +40,22 @@ FVector ADTGTrafficDirector::NodeLocation(int32 NodeId) const
 	return Game->ToUnreal(Node->X, Node->Y, Z);
 }
 
+bool ADTGTrafficDirector::IsOccupied(const FVector& At) const
+{
+	// Spawns land on junction centres. Without this, a second car picked for the same junction a quarter
+	// of a second later appeared inside the first, and the pair blew their chassis up -- the first real
+	// run showed exactly that, in pairs, at the same X and Y.
+	const double ClearCm = 8.0 * DTGMetresToUnreal;
+	for (const FDTGDriver& Driver : Drivers)
+	{
+		if (Driver.Car && FVector::DistSquared(Driver.Car->GetActorLocation(), At) < ClearCm * ClearCm)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 int32 ADTGTrafficDirector::PickNode(const FVector& Around, bool bFar) const
 {
 	if (!Game || !Game->IsContentLoaded())
@@ -177,7 +193,7 @@ void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSecond
 		NextSpawn = Now + 0.25;
 		const int32 Node = PickNode(Around, /*bFar*/ true);
 		const FVector At = NodeLocation(Node);
-		if (!At.IsNearlyZero() && FVector::Dist(At, Around) < SpawnRadiusM * DTGMetresToUnreal)
+		if (!At.IsNearlyZero() && FVector::Dist(At, Around) < SpawnRadiusM * DTGMetresToUnreal && !IsOccupied(At))
 		{
 			if (ADTGVehicle* Car = SpawnCar(At + FVector(0.0f, 0.0f, 60.0f), FMath::FRandRange(0.0f, 360.0f), false))
 			{
@@ -227,9 +243,9 @@ void ADTGTrafficDirector::UpdatePolice(const FVector& Around)
 	}
 	const int32 Node = PickNode(Around, /*bFar*/ true);
 	const FVector At = NodeLocation(Node);
-	if (At.IsNearlyZero() || FVector::Dist(At, Around) > DespawnRadiusM * DTGMetresToUnreal)
+	if (At.IsNearlyZero() || FVector::Dist(At, Around) > DespawnRadiusM * DTGMetresToUnreal || IsOccupied(At))
 	{
-		return; // nowhere to come from that is not already out of sight
+		return; // nowhere to come from that is not already out of sight, or already taken
 	}
 	NextPoliceSpawn = Now + 0.7;
 	if (ADTGVehicle* Car = SpawnCar(At + FVector(0.0f, 0.0f, 60.0f), 0.0, /*bPolice*/ true))

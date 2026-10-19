@@ -243,6 +243,7 @@ namespace dtg::sim
 	void ChassisSim::Substep(double Dt, const DriverInput& Input, const GroundQuery& Ground)
 	{
 		using namespace detail_chassis;
+		const ChassisState Start = State;
 		const Quat& Q = State.Orientation;
 		const Vec3 BodyUp = Q.Up();
 		const Vec3 Fwd = Q.Forward();
@@ -419,10 +420,14 @@ namespace dtg::sim
 
 		if (!State.Velocity.IsFinite() || !State.AngularVelocity.IsFinite() || !State.Position.IsFinite())
 		{
-			// Never let a numerical blow-up escape into the game.
+			// Never let a numerical blow-up escape into the game. Position has already been integrated from
+			// the bad velocity by now, so clearing the velocity alone left it NaN for good -- which is what
+			// the first real run showed. Go back to where the sub-step started, at rest.
+			State = Start;
 			State.Velocity = Vec3();
 			State.AngularVelocity = Vec3();
-			State.Orientation = Quat::FromYaw(0.0);
+			Dyn.Reset();
+			++Resets;
 		}
 	}
 }
