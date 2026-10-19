@@ -55,12 +55,24 @@ a 120 m cap so no triangle is so large that it never frustum-culls.
 None of the following can be faked in C++, and attempting to would produce something that looks worse
 than honest flat shading. Each needs a person in the Unreal editor with assets.
 
-**Materials.** Everything in the world is currently drawn with a single vertex-colour material. There is
-no asphalt, no bark, no leaf translucency, no painted metal, no glass, no wet-road reflection. This is the
-single largest gap between the current build and the mockups, and it is the one with the best return:
-the geometry underneath is already correct, so a PBR material set would move the whole world a long way
-in one step. Needed: base colour, roughness, normal and (for foliage) subsurface maps for asphalt,
-concrete, brick, siding, glass, car paint, bark, and leaf cards.
+**Materials.** Partly done, 19 October. Every generated surface is tagged with what it is made of
+(`Game/DTGSurface.h`) and drawn with that kind's material. The materials are built headless from code
+(`Tools/Art/build_materials.py`) over 15 photo-scanned CC0 texture sets from Poly Haven
+(`Tools/Art/fetch_textures.py`). They are projected from world space (triplanar), so the procedural
+meshes need neither UVs nor tangents.
+
+- **Done:** asphalt, sidewalk, concrete, brick, stucco, wood siding, shingle and metal roofs, and park
+  grass.
+- **Done:** terrain blending grass, beach sand and red clay by the existing class colours.
+- **Done:** glass, chrome, rubber, and car paint whose roughness and metalness follow `PaintFinish`.
+- **Done:** a glossy water surface.
+
+Still missing:
+- **Bark and leaves.** Plants are still one flat-coloured section. `PlantTri` has no trunk/foliage tag yet.
+- **Clear-coat paint.** UE 5.8's Python API does not expose the clear-coat pins.
+- **Leaf translucency, emissive lights and lit windows.**
+- **Wet roads.** Nothing drives a wetness parameter from the weather yet.
+- **Real shapes.** Every shape is still a box, and textures do not change that.
 
 **Lighting.** Lumen GI and reflections, a sky atmosphere driven by the existing time-of-day clock, and
 volumetric fog for the morning haze the mockups lean on. The simulation already produces sun angle and

@@ -114,6 +114,8 @@ private:
 	FString ParkedId;
 	FLinearColor PaintColour = FLinearColor(0.5f, 0.5f, 0.52f);
 	FLinearColor RimColour = FLinearColor(0.55f, 0.55f, 0.57f);
+	/** 0 gloss, 1 metallic, 2 matte, 3 pearl, 4 chrome -- the simulation's PaintFinish. */
+	int32 PaintFinish = 0;
 	int32 PendingShift = 0;
 	bool bSwamped = false;
 	/** Chassis blow-ups already logged, so each car reports its first one rather than every frame. */

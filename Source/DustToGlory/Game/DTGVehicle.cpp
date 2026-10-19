@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/Character.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 
 #include "Game/DTGEngineAudio.h"
@@ -148,6 +149,7 @@ void ADTGVehicle::ConfigureFromOwned(const OwnedVehicle& Car)
 		HeightM = Def->HeightM;
 	}
 	PaintColour = FromRgb(Car.Build.PaintRgb);
+	PaintFinish = Car.Build.PaintFinish;
 	RimColour = FromRgb(Car.Build.WheelRgb);
 	Sim.Configure(Setup, LengthM, WidthM, HeightM);
 	Sim.Dynamics().bAutomatic = Game->Sim().AutomaticGearbox();
@@ -176,6 +178,8 @@ void ADTGVehicle::ConfigureFromModel(const FString& ModelId)
 	const uint32 Hash = GetTypeHash(ModelId);
 	PaintColour = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash & 0xFF), static_cast<uint8>(50 + (Hash >> 8) % 110), 185);
 	RimColour = FLinearColor(0.55f, 0.55f, 0.57f);
+	// Most traffic is ordinary gloss; a share of it is metallic, as on a real road.
+	PaintFinish = (Hash >> 16) % 5 < 2 ? 1 : 0;
 	Sim.Configure(Setup, LengthM, WidthM, HeightM);
 	Sim.Dynamics().bAutomatic = true;
 	ApplyVisuals();
@@ -187,14 +191,27 @@ void ADTGVehicle::ApplyVisuals()
 	const double S = DTGMetresToUnreal;
 	Body->SetBoxExtent(FVector(0.5 * LengthM * S, 0.5 * WidthM * S, 0.5 * HeightM * S), false);
 
-	UMaterialInterface* const Painted = DTGMeshBuilder::VertexColorMaterial();
-
 	if (Shell)
 	{
-		FDTGMesh Mesh;
-		DTGMeshBuilder::BuildCarBody(Setup.Body, LengthM, WidthM, HeightM, PaintColour, Mesh);
-		Shell->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
-		Shell->SetMaterial(0, Painted);
+		FDTGSurfaceMeshes Meshes;
+		DTGMeshBuilder::BuildCarBody(Setup.Body, LengthM, WidthM, HeightM, PaintColour, Meshes);
+		// A reconfigured car may have a different set of surfaces, so nothing from the last build is kept.
+		Shell->ClearAllMeshSections();
+		Meshes.Apply(Shell, 0, false);
+		// The finish the player paid for: gloss, metallic, matte, pearl or chrome.
+		const int32 PaintSection = Meshes.SectionOf(EDTGSurface::Paint, 0);
+		if (PaintSection != INDEX_NONE)
+		{
+			if (UMaterialInstanceDynamic* Finish = UMaterialInstanceDynamic::Create(DTGSurface::Material(EDTGSurface::Paint), this))
+			{
+				static const float Roughness[] = {0.16f, 0.28f, 0.65f, 0.2f, 0.05f};
+				static const float Metallic[] = {0.05f, 0.7f, 0.0f, 0.35f, 1.0f};
+				const int32 Pick = FMath::Clamp(PaintFinish, 0, 4);
+				Finish->SetScalarParameterValue(TEXT("Roughness"), Roughness[Pick]);
+				Finish->SetScalarParameterValue(TEXT("Metallic"), Metallic[Pick]);
+				Shell->SetMaterial(PaintSection, Finish);
+			}
+		}
 	}
 	// Wheels sized from the tires actually fitted, so a car on bigger rubber looks like it.
 	const double FrontRadius = FMath::Max(0.2, Setup.FrontTire.RadiusM);
@@ -214,10 +231,10 @@ void ADTGVehicle::ApplyVisuals()
 		{
 			continue;
 		}
-		FDTGMesh Mesh;
-		DTGMeshBuilder::BuildWheel(Index < 2 ? FrontRadius : RearRadius, TireWidth, RimColour, Mesh);
-		WheelMeshes[Index]->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
-		WheelMeshes[Index]->SetMaterial(0, Painted);
+		FDTGSurfaceMeshes Meshes;
+		DTGMeshBuilder::BuildWheel(Index < 2 ? FrontRadius : RearRadius, TireWidth, RimColour, Meshes);
+		WheelMeshes[Index]->ClearAllMeshSections();
+		Meshes.Apply(WheelMeshes[Index], 0, false);
 	}
 }
 

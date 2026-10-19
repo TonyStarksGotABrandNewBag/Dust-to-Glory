@@ -53,14 +53,14 @@ void UDTGBody::Build(int32 Seed)
 		}
 	}
 	Limbs.Reset();
-	UMaterialInterface* const Material = DTGMeshBuilder::VertexColorMaterial();
+	UMaterialInterface* const ClothMaterial = DTGSurface::Material(EDTGSurface::Cloth);
 	constexpr double S = 100.0;
 	// Parts are built around their own pivot -- a hip for a leg, a shoulder for an arm -- so swinging one
 	// is a rotation rather than a translation.
 	const double HipZ = -0.05 * S;
 	const double ShoulderZ = 0.47 * S;
 
-	auto MakePart = [&](const TCHAR* Name, const FDTGMesh& Mesh, const FVector& At)
+	auto MakePart = [&](const TCHAR* Name, const FDTGMesh& Mesh, const FVector& At, UMaterialInterface* Material)
 	{
 		UProceduralMeshComponent* Part = NewObject<UProceduralMeshComponent>(this, Name);
 		Part->SetupAttachment(this);
@@ -74,11 +74,11 @@ void UDTGBody::Build(int32 Seed)
 
 	FDTGMesh TorsoMesh;
 	TorsoMesh.AddBox(FVector(-0.16 * S, -0.22 * S, 0.0), FVector(0.16 * S, 0.22 * S, 0.57 * S), Clothes, false);
-	Torso = MakePart(TEXT("Torso"), TorsoMesh, FVector(0.0, 0.0, -0.05 * S));
+	Torso = MakePart(TEXT("Torso"), TorsoMesh, FVector(0.0, 0.0, -0.05 * S), ClothMaterial);
 
 	FDTGMesh HeadMesh;
 	HeadMesh.AddBox(FVector(-0.11 * S, -0.11 * S, 0.0), FVector(0.11 * S, 0.11 * S, 0.24 * S), Skin, false);
-	Head = MakePart(TEXT("Head"), HeadMesh, FVector(0.0, 0.0, 0.52 * S));
+	Head = MakePart(TEXT("Head"), HeadMesh, FVector(0.0, 0.0, 0.52 * S), DTGSurface::Material(EDTGSurface::Skin));
 
 	const FLinearColor Trousers(Clothes.R * 0.55f, Clothes.G * 0.55f, Clothes.B * 0.6f);
 	for (int32 Side = 0; Side < 2; ++Side)
@@ -87,14 +87,14 @@ void UDTGBody::Build(int32 Seed)
 		FDTGMesh Leg;
 		// Hanging down from the pivot at the hip.
 		Leg.AddBox(FVector(-0.07 * S, -0.06 * S, -0.85 * S), FVector(0.07 * S, 0.06 * S, 0.0), Trousers, false);
-		Limbs.Add(MakePart(*FString::Printf(TEXT("Leg%d"), Side), Leg, FVector(0.0, Y, HipZ)));
+		Limbs.Add(MakePart(*FString::Printf(TEXT("Leg%d"), Side), Leg, FVector(0.0, Y, HipZ), ClothMaterial));
 	}
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
 		const double Y = (Side == 0 ? -1.0 : 1.0) * 0.25 * S;
 		FDTGMesh Arm;
 		Arm.AddBox(FVector(-0.05 * S, -0.05 * S, -0.48 * S), FVector(0.05 * S, 0.05 * S, 0.0), Clothes, false);
-		Limbs.Add(MakePart(*FString::Printf(TEXT("Arm%d"), Side), Arm, FVector(0.0, Y, ShoulderZ)));
+		Limbs.Add(MakePart(*FString::Printf(TEXT("Arm%d"), Side), Arm, FVector(0.0, Y, ShoulderZ), ClothMaterial));
 	}
 	LastLocation = GetComponentLocation();
 }

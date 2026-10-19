@@ -5,13 +5,14 @@
 // tiny and means a new make or a new town needs no asset work -- and when real art arrives, these are the
 // shapes it replaces, at the right scale and in the right places.
 //
-// All of it is vertex-coloured and drawn with the engine's vertex-colour material, so a wall, a window and
-// a roof are told apart without a single texture.
+// Each piece is tagged with what it is made of (DTGSurface) and drawn with that surface's material; the
+// vertex colour rides along as a tint, and is the whole look if the art has not been imported.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "ProceduralMeshComponent.h"
 
+#include "Game/DTGSurface.h"
 #include "Sim/CityLayout.h"
 #include "Sim/Vehicles.h"
 
@@ -50,10 +51,32 @@ struct FDTGMesh
 	 */
 	void AddTaperedBox(const FVector& Min, const FVector& Max, double InsetFrontX, double InsetBackX, double InsetY,
 		const FLinearColor& Colour, bool bSkipBottom = true);
-	/** A cylinder lying on its side along Y (a wheel), centred on Centre. */
-	void AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, const FLinearColor& Tyre, const FLinearColor& Rim, int32 Sides = 14);
+	/**
+	 * A cylinder lying on its side along Y (a wheel), centred on Centre. The two faces go into RimOut when
+	 * given, so tread and rim can be drawn with different materials; otherwise into this mesh.
+	 */
+	void AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, const FLinearColor& Tyre, const FLinearColor& Rim, int32 Sides = 14,
+		FDTGMesh* RimOut = nullptr);
 	/** A simple pitched roof over a rectangle. */
 	void AddRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour);
+};
+
+/** Geometry sorted by what it is made of: one mesh per surface kind, each drawn with its own material. */
+struct FDTGSurfaceMeshes
+{
+	FDTGMesh Parts[DTGSurfaceCount];
+
+	FDTGMesh& operator[](EDTGSurface Kind) { return Parts[static_cast<int32>(Kind)]; }
+	const FDTGMesh& operator[](EDTGSurface Kind) const { return Parts[static_cast<int32>(Kind)]; }
+	bool IsEmpty() const;
+	void Reset();
+	/**
+	 * Writes each non-empty kind as its own section of Target, from FirstSection up, with its material.
+	 * Returns the next free section, so several builders can share one component.
+	 */
+	int32 Apply(UProceduralMeshComponent* Target, int32 FirstSection, bool bCollision) const;
+	/** The section Apply gave Kind, or INDEX_NONE if Kind was empty. */
+	int32 SectionOf(EDTGSurface Kind, int32 FirstSection) const;
 };
 
 namespace DTGMeshBuilder
@@ -68,14 +91,17 @@ namespace DTGMeshBuilder
 	};
 	FPalette PaletteFor(const dtg::sim::BuildingPlan& Building);
 
+	/** What a building's walls are made of: from its role, downtown or not, and its id for variety. */
+	EDTGSurface WallSurfaceFor(const dtg::sim::BuildingPlan& Building);
+
 	/** A building: walls, a band of windows per floor, a door on its own side, and a roof. */
-	void BuildBuilding(const dtg::sim::BuildingPlan& Building, double GroundZ, double MetresToUnreal, FDTGMesh& Out);
+	void BuildBuilding(const dtg::sim::BuildingPlan& Building, double GroundZ, double MetresToUnreal, FDTGSurfaceMeshes& Out);
 
 	/** A car body with a cabin, glass, lights and a colour -- the silhouette of its body style. */
-	void BuildCarBody(dtg::sim::BodyStyle Body, double LengthM, double WidthM, double HeightM, const FLinearColor& Paint, FDTGMesh& Out);
+	void BuildCarBody(dtg::sim::BodyStyle Body, double LengthM, double WidthM, double HeightM, const FLinearColor& Paint, FDTGSurfaceMeshes& Out);
 
-	/** One wheel, sized from the tire. */
-	void BuildWheel(double RadiusM, double WidthM, const FLinearColor& Rim, FDTGMesh& Out);
+	/** One wheel, sized from the tire: rubber tread, metal rim. */
+	void BuildWheel(double RadiusM, double WidthM, const FLinearColor& Rim, FDTGSurfaceMeshes& Out);
 
 	/**
 	 * A person as one static mesh: the shape without the walk. DressPerson builds the jointed version;

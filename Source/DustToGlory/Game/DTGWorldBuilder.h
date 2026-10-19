@@ -109,8 +109,6 @@ private:
 	UProceduralMeshComponent* TakeTerrainPart(int32& OutIndex);
 	/** A flat, axis-aligned slab (streets, parking, venue aprons). */
 	void AddSlab(struct FDTGMesh& Mesh, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color);
-	/** The engine's vertex-colour material: every surface here carries its colour in its vertices. */
-	UMaterialInterface* SurfaceMaterial();
 
 	/** One component per live chunk, reused as the player moves. */
 	UPROPERTY()
@@ -122,15 +120,15 @@ private:
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Water;
 
-	/** Building shells, one mesh section per town. */
+	/** Building shells: per town, one mesh section per surface kind. */
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Buildings;
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
 
-	UPROPERTY()
-	TObjectPtr<UMaterialInterface> Painted;
+	/** The next free section on Surfaces while the static world is being built. */
+	int32 NextSurfaceSection = 0;
 
 	TArray<FDTGTerrainChunk> Chunks;
 	TArray<FIntPoint> Pending;

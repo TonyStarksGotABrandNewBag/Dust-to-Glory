@@ -56,16 +56,6 @@ void ADTGWorldBuilder::BeginPlay()
 	bBuilt = true;
 }
 
-UMaterialInterface* ADTGWorldBuilder::SurfaceMaterial()
-{
-	if (!Painted)
-	{
-		// Shared with everything else that draws generated geometry, and warns once if it is missing.
-		Painted = DTGMeshBuilder::VertexColorMaterial();
-	}
-	return Painted;
-}
-
 // ============================================================================================ Static world
 
 void ADTGWorldBuilder::AddSlab(FDTGMesh& Mesh, double MinX, double MinY, double MaxX, double MaxY, double Z, const FLinearColor& Color)
@@ -98,6 +88,9 @@ void ADTGWorldBuilder::Rebuild()
 
 void ADTGWorldBuilder::BuildStaticWorld()
 {
+	// Streets, highways, paint and venues share the Surfaces component, a section per surface kind each,
+	// handed out in order. Fixed section numbers used to let the venues overwrite the road paint.
+	NextSurfaceSection = 0;
 	BuildTownStreets();
 	BuildHighways();
 	BuildRoadMarkings();
@@ -114,7 +107,8 @@ void ADTGWorldBuilder::BuildTownStreets()
 	const FLinearColor Sidewalk(0.42f, 0.41f, 0.39f);
 	const FLinearColor Grass(0.16f, 0.27f, 0.11f);
 
-	FDTGMesh Mesh;
+	FDTGSurfaceMeshes Meshes;
+	FDTGMesh& Mesh = Meshes[EDTGSurface::Asphalt];
 	for (const RoadPlan& Road : City.Roads)
 	{
 		// A street sits a hair above its town's pad so it reads as a surface, not z-fighting with the ground.
@@ -124,18 +118,14 @@ void ADTGWorldBuilder::BuildTownStreets()
 	for (const dtg::sim::Rect& Block : City.Blocks)
 	{
 		const double Z = Map.HeightAt(Block.CenterX(), Block.CenterY()) + 0.06;
-		AddSlab(Mesh, Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Z, Sidewalk);
+		AddSlab(Meshes[EDTGSurface::Sidewalk], Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Z, Sidewalk);
 	}
 	for (const dtg::sim::Rect& Park : City.Parks)
 	{
 		const double Z = Map.HeightAt(Park.CenterX(), Park.CenterY()) + 0.08;
-		AddSlab(Mesh, Park.MinX, Park.MinY, Park.MaxX, Park.MaxY, Z, Grass);
+		AddSlab(Meshes[EDTGSurface::Grass], Park.MinX, Park.MinY, Park.MaxX, Park.MaxY, Z, Grass);
 	}
-	if (!Mesh.IsEmpty())
-	{
-		Surfaces->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
-		Surfaces->SetMaterial(0, SurfaceMaterial());
-	}
+	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ true);
 }
 
 void ADTGWorldBuilder::BuildHighways()
@@ -143,7 +133,8 @@ void ADTGWorldBuilder::BuildHighways()
 	const CityPlan& City = Game->Sim().City;
 	const double S = DTGMetresToUnreal;
 	const FLinearColor Asphalt(0.06f, 0.06f, 0.065f);
-	FDTGMesh Mesh;
+	FDTGSurfaceMeshes Meshes;
+	FDTGMesh& Mesh = Meshes[EDTGSurface::Asphalt];
 
 	for (const HighwayPlan& Road : City.Highways)
 	{
@@ -190,11 +181,7 @@ void ADTGWorldBuilder::BuildHighways()
 			bHavePrevious = true;
 		}
 	}
-	if (!Mesh.IsEmpty())
-	{
-		Surfaces->CreateMeshSection_LinearColor(1, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
-		Surfaces->SetMaterial(1, SurfaceMaterial());
-	}
+	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ true);
 }
 
 void ADTGWorldBuilder::BuildRoadMarkings()
@@ -204,7 +191,8 @@ void ADTGWorldBuilder::BuildRoadMarkings()
 	const dtg::sim::CityPlan& City = Game->Sim().City;
 	const dtg::sim::StatePlan& Map = Game->Sim().Map;
 	const double S = DTGMetresToUnreal;
-	FDTGMesh Mesh;
+	FDTGSurfaceMeshes Meshes;
+	FDTGMesh& Mesh = Meshes[EDTGSurface::Matte];
 
 	auto Paint = [&Mesh, S](const dtg::sim::RoadMark& Mark)
 	{
@@ -239,12 +227,7 @@ void ADTGWorldBuilder::BuildRoadMarkings()
 		Paint(Mark);
 	}
 
-	if (!Mesh.IsEmpty())
-	{
-		Surfaces->CreateMeshSection_LinearColor(2, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors,
-			Mesh.Tangents, /*bCreateCollision*/ false);
-		Surfaces->SetMaterial(2, SurfaceMaterial());
-	}
+	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ false);
 }
 
 void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh)
@@ -293,7 +276,7 @@ void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralM
 		// several hundred trees every time a chunk streams in.
 		Mesh->CreateMeshSection_LinearColor(1, Trees.Verts, Trees.Tris, Trees.Normals, Trees.Uvs,
 			Trees.Colors, Trees.Tangents, /*bCreateCollision*/ false);
-		Mesh->SetMaterial(1, SurfaceMaterial());
+		Mesh->SetMaterial(1, DTGSurface::Material(EDTGSurface::Leaves));
 	}
 	else
 	{
@@ -311,7 +294,7 @@ void ADTGWorldBuilder::BuildBuildings()
 	int32 Total = 0;
 	auto BuildRange = [&](const dtg::sim::Rect* Bounds)
 	{
-		FDTGMesh Mesh;
+		FDTGSurfaceMeshes Meshes;
 		for (const BuildingPlan& Building : City.Buildings)
 		{
 			if (Bounds && !Bounds->Contains(Building.Footprint.CenterX(), Building.Footprint.CenterY()))
@@ -319,15 +302,10 @@ void ADTGWorldBuilder::BuildBuildings()
 				continue;
 			}
 			const double GroundZ = Map.HeightAt(Building.Footprint.CenterX(), Building.Footprint.CenterY());
-			DTGMeshBuilder::BuildBuilding(Building, GroundZ, DTGMetresToUnreal, Mesh);
+			DTGMeshBuilder::BuildBuilding(Building, GroundZ, DTGMetresToUnreal, Meshes);
 			++Total;
 		}
-		if (!Mesh.IsEmpty())
-		{
-			Buildings->CreateMeshSection_LinearColor(Section, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
-			Buildings->SetMaterial(Section, SurfaceMaterial());
-			++Section;
-		}
+		Section = Meshes.Apply(Buildings, Section, /*bCollision*/ true);
 	};
 	if (City.Cities.empty())
 	{
@@ -345,18 +323,20 @@ void ADTGWorldBuilder::BuildBuildings()
 
 void ADTGWorldBuilder::BuildVenues()
 {
-	FDTGMesh Stands;
+	FDTGSurfaceMeshes StandMeshes;
+	FDTGMesh& Stands = StandMeshes[EDTGSurface::Concrete];
 	const CityPlan& City = Game->Sim().City;
 	const StatePlan& Map = Game->Sim().Map;
 	const FLinearColor Apron(0.21f, 0.2f, 0.19f);
 	const FLinearColor Track(0.05f, 0.05f, 0.055f);
 	const FLinearColor Stand(0.3f, 0.3f, 0.32f);
 	const double S = DTGMetresToUnreal;
-	FDTGMesh Mesh;
+	FDTGSurfaceMeshes Meshes;
+	FDTGMesh& Mesh = Meshes[EDTGSurface::Asphalt];
 	for (const VenuePlan& Venue : City.Venues)
 	{
 		const double Z = Map.HeightAt(Venue.Area.CenterX(), Venue.Area.CenterY());
-		AddSlab(Mesh, Venue.Area.MinX, Venue.Area.MinY, Venue.Area.MaxX, Venue.Area.MaxY, Z + 0.02, Apron);
+		AddSlab(Meshes[EDTGSurface::Concrete], Venue.Area.MinX, Venue.Area.MinY, Venue.Area.MaxX, Venue.Area.MaxY, Z + 0.02, Apron);
 		// The racing surface follows the venue's centreline.
 		const double Half = 0.5 * Venue.TrackWidthM;
 		for (std::size_t Index = 0; Index + 1 < Venue.Path.size(); ++Index)
@@ -385,19 +365,9 @@ void ADTGWorldBuilder::BuildVenues()
 				Stand);
 		}
 	}
-	if (!Mesh.IsEmpty())
-	{
-		Surfaces->CreateMeshSection_LinearColor(2, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, true);
-		Surfaces->SetMaterial(2, SurfaceMaterial());
-	}
-	if (!Stands.IsEmpty())
-	{
-		// A section number past the towns, which claim one each.
-		const int32 Section = Buildings->GetNumSections();
-		Buildings->CreateMeshSection_LinearColor(Section, Stands.Verts, Stands.Tris, Stands.Normals, Stands.Uvs,
-			Stands.Colors, Stands.Tangents, true);
-		Buildings->SetMaterial(Section, SurfaceMaterial());
-	}
+	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ true);
+	// Sections past the towns', which BuildBuildings has already handed out.
+	StandMeshes.Apply(Buildings, Buildings->GetNumSections(), /*bCollision*/ true);
 }
 
 void ADTGWorldBuilder::BuildWater()
@@ -446,7 +416,7 @@ void ADTGWorldBuilder::BuildWater()
 		}
 	}
 	Water->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors, Mesh.Tangents, false);
-	Water->SetMaterial(0, SurfaceMaterial());
+	Water->SetMaterial(0, DTGSurface::Material(EDTGSurface::Water));
 }
 
 // ============================================================================================ Terrain streaming
@@ -613,7 +583,8 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 		return;
 	}
 	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
-	Mesh->SetMaterial(0, SurfaceMaterial());
+	// One material for the whole grid, blending grass, sand and clay by the class colours above.
+	Mesh->SetMaterial(0, DTGSurface::Material(EDTGSurface::Terrain));
 	BuildChunkPlants(ChunkX, ChunkY, Mesh);
 	Mesh->SetVisibility(true);
 

@@ -130,11 +130,18 @@ will not represent the Omen.
 
 ## What the project does not need
 
-Worth knowing, because it is unusual: **there are no `.uasset` or `.umap` files anywhere, and none
-are needed.** The default map is engine-provided (`/Engine/Maps/Entry.Entry`), the one material
-referenced is engine-provided (`VertexColorMaterial`), and every input action and mapping context is
-created at runtime with `NewObject`. There is no "first, author these assets in the editor" step —
-clone and build.
+**Superseded 19 October.** The project now has art: `Content/Art/` holds imported textures and
+materials as `.uasset` files tracked by Git LFS. Run `git lfs install` and `git lfs pull` after
+cloning.
+
+- **Without the LFS files** the game still runs. Every surface falls back to the engine's
+  vertex-colour material and logs a warning once per kind.
+- **Rebuilding the art from source:**
+  1. `python Tools/Art/fetch_textures.py` downloads the CC0 textures into `ArtSource/`, which is
+     git-ignored.
+  2. Run `Tools/Art/build_materials.py` through `UnrealEditor-Cmd -run=pythonscript`. It rebuilds
+     every material.
+- **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here
 

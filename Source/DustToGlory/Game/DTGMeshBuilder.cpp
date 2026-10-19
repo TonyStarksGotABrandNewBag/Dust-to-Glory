@@ -145,8 +145,10 @@ void FDTGMesh::AddTaperedBox(const FVector& Min, const FVector& Max, double Inse
 	AddQuad(D, A, E, H, Slope(D, A, E), Colour);
 }
 
-void FDTGMesh::AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, const FLinearColor& Tyre, const FLinearColor& Rim, int32 Sides)
+void FDTGMesh::AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, const FLinearColor& Tyre, const FLinearColor& Rim, int32 Sides,
+	FDTGMesh* RimOut)
 {
+	FDTGMesh& Faces = RimOut ? *RimOut : *this;
 	const double Half = 0.5 * WidthUu;
 	for (int32 Side = 0; Side < Sides; ++Side)
 	{
@@ -160,9 +162,65 @@ void FDTGMesh::AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, 
 		// The two faces, as a fan to the hub.
 		const FVector HubIn = Centre - FVector(0, Half, 0);
 		const FVector HubOut = Centre + FVector(0, Half, 0);
-		AddTri(HubIn, P0 - FVector(0, Half, 0), P1 - FVector(0, Half, 0), FVector(0, -1, 0), Rim);
-		AddTri(HubOut, P1 + FVector(0, Half, 0), P0 + FVector(0, Half, 0), FVector(0, 1, 0), Rim);
+		Faces.AddTri(HubIn, P0 - FVector(0, Half, 0), P1 - FVector(0, Half, 0), FVector(0, -1, 0), Rim);
+		Faces.AddTri(HubOut, P1 + FVector(0, Half, 0), P0 + FVector(0, Half, 0), FVector(0, 1, 0), Rim);
 	}
+}
+
+bool FDTGSurfaceMeshes::IsEmpty() const
+{
+	for (const FDTGMesh& Part : Parts)
+	{
+		if (!Part.IsEmpty())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+void FDTGSurfaceMeshes::Reset()
+{
+	for (FDTGMesh& Part : Parts)
+	{
+		Part.Reset();
+	}
+}
+
+int32 FDTGSurfaceMeshes::Apply(UProceduralMeshComponent* Target, int32 FirstSection, bool bCollision) const
+{
+	int32 Section = FirstSection;
+	if (!Target)
+	{
+		return Section;
+	}
+	for (int32 Kind = 0; Kind < DTGSurfaceCount; ++Kind)
+	{
+		const FDTGMesh& Part = Parts[Kind];
+		if (Part.IsEmpty())
+		{
+			continue;
+		}
+		Target->CreateMeshSection_LinearColor(Section, Part.Verts, Part.Tris, Part.Normals, Part.Uvs, Part.Colors, Part.Tangents, bCollision);
+		Target->SetMaterial(Section, DTGSurface::Material(static_cast<EDTGSurface>(Kind)));
+		++Section;
+	}
+	return Section;
+}
+
+int32 FDTGSurfaceMeshes::SectionOf(EDTGSurface Kind, int32 FirstSection) const
+{
+	const int32 Wanted = static_cast<int32>(Kind);
+	if (Wanted < 0 || Wanted >= DTGSurfaceCount || Parts[Wanted].IsEmpty())
+	{
+		return INDEX_NONE;
+	}
+	int32 Section = FirstSection;
+	for (int32 Index = 0; Index < Wanted; ++Index)
+	{
+		Section += Parts[Index].IsEmpty() ? 0 : 1;
+	}
+	return Section;
 }
 
 void FDTGMesh::AddRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour)
@@ -218,8 +276,10 @@ namespace DTGMeshBuilder
 		Palette.Wall = FromRgb(Building.ColorRgb);
 		Palette.Window = Glass;
 		Palette.Trim = DarkTrim;
-		// Downtown towers are glass and steel; everything else gets a roof you can see.
-		Palette.Roof = Building.bDowntown ? FLinearColor(0.12f, 0.12f, 0.13f) : Palette.Wall * 0.55f;
+		// Downtown towers are glass and steel; everything else gets a roof you can see. Scaled channel by
+		// channel: FLinearColor * float scales alpha too.
+		Palette.Roof = Building.bDowntown ? FLinearColor(0.12f, 0.12f, 0.13f)
+										  : FLinearColor(Palette.Wall.R * 0.55f, Palette.Wall.G * 0.55f, Palette.Wall.B * 0.55f);
 		switch (Building.Role)
 		{
 		case LotRole::Home:
@@ -245,9 +305,35 @@ namespace DTGMeshBuilder
 		return Palette;
 	}
 
-	void BuildBuilding(const BuildingPlan& Building, double GroundZ, double S, FDTGMesh& Out)
+	EDTGSurface WallSurfaceFor(const BuildingPlan& Building)
+	{
+		// The same building always gets the same finish, and a street of them does not all match.
+		const uint32 Pick = (static_cast<uint32>(Building.Id) * 2654435761u >> 16) % 100u;
+		if (Building.bDowntown)
+		{
+			return EDTGSurface::Concrete;
+		}
+		switch (Building.Role)
+		{
+		case LotRole::Home:
+			// Carolina and Florida housing: mostly siding, then brick, then stucco.
+			return Pick < 55u ? EDTGSurface::WoodSiding : (Pick < 82u ? EDTGSurface::Brick : EDTGSurface::Stucco);
+		case LotRole::Church:
+			return EDTGSurface::Brick;
+		case LotRole::Jail:
+		case LotRole::PoliceStation:
+			return EDTGSurface::Concrete;
+		default:
+			return Pick < 50u ? EDTGSurface::Brick : EDTGSurface::Stucco;
+		}
+	}
+
+	void BuildBuilding(const BuildingPlan& Building, double GroundZ, double S, FDTGSurfaceMeshes& Meshes)
 	{
 		const FPalette Palette = PaletteFor(Building);
+		FDTGMesh& Walls = Meshes[WallSurfaceFor(Building)];
+		FDTGMesh& Windows = Meshes[EDTGSurface::Glass];
+		FDTGMesh& Trim = Meshes[EDTGSurface::Matte];
 		const double MinX = Building.Footprint.MinX * S;
 		const double MinY = Building.Footprint.MinY * S;
 		const double MaxX = Building.Footprint.MaxX * S;
@@ -264,30 +350,34 @@ namespace DTGMeshBuilder
 			const double Low = Base + Floor * FloorHeight;
 			const double SillHeight = FloorHeight * 0.3;
 			const double GlassHeight = FloorHeight * 0.45;
-			Out.AddBox(FVector(MinX, MinY, Low), FVector(MaxX, MaxY, Low + SillHeight), Palette.Wall);
+			Walls.AddBox(FVector(MinX, MinY, Low), FVector(MaxX, MaxY, Low + SillHeight), Palette.Wall);
 			// The window band is inset a little so it reads as glass set into the wall.
 			const double Inset = FMath::Min(12.0, (MaxX - MinX) * 0.02);
-			Out.AddBox(FVector(MinX + Inset, MinY + Inset, Low + SillHeight),
+			Windows.AddBox(FVector(MinX + Inset, MinY + Inset, Low + SillHeight),
 				FVector(MaxX - Inset, MaxY - Inset, Low + SillHeight + GlassHeight), Palette.Window);
-			Out.AddBox(FVector(MinX, MinY, Low + SillHeight + GlassHeight), FVector(MaxX, MaxY, Low + FloorHeight), Palette.Wall);
+			Walls.AddBox(FVector(MinX, MinY, Low + SillHeight + GlassHeight), FVector(MaxX, MaxY, Low + FloorHeight), Palette.Wall);
 		}
 
-		// Roof: flat with a parapet on anything tall, pitched on a house or a church.
+		// Roof: flat with a parapet on anything tall, pitched on a house or a church. Shingles on homes and
+		// churches, sheet metal on the low commercial sheds, a concrete deck behind a parapet on the rest.
 		const double Top = Base + Height;
 		const bool bPitched = Building.Role == LotRole::Home || Building.Role == LotRole::Church || Floors <= 1;
 		if (bPitched)
 		{
+			const bool bShingled = Building.Role == LotRole::Home || Building.Role == LotRole::Church;
+			FDTGMesh& Roof = Meshes[bShingled ? EDTGSurface::ShingleRoof : EDTGSurface::MetalRoof];
 			const double Ridge = FMath::Min(FMath::Min(MaxX - MinX, MaxY - MinY) * 0.35, 4.0 * S);
-			Out.AddRoof(FVector(MinX - 0.25 * S, MinY - 0.25 * S, Top), FVector(MaxX + 0.25 * S, MaxY + 0.25 * S, Top), Ridge, Palette.Roof);
+			Roof.AddRoof(FVector(MinX - 0.25 * S, MinY - 0.25 * S, Top), FVector(MaxX + 0.25 * S, MaxY + 0.25 * S, Top), Ridge, Palette.Roof);
 		}
 		else
 		{
-			Out.AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MaxY, Top + 0.1 * S), Palette.Roof);
+			Meshes[EDTGSurface::Concrete].AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MaxY, Top + 0.1 * S), Palette.Roof);
+			// The parapet is the wall carried up, so it is built of the wall.
 			const double Wall = 0.25 * S;
-			Out.AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MinY + Wall, Top + 0.9 * S), Palette.Roof);
-			Out.AddBox(FVector(MinX, MaxY - Wall, Top), FVector(MaxX, MaxY, Top + 0.9 * S), Palette.Roof);
-			Out.AddBox(FVector(MinX, MinY, Top), FVector(MinX + Wall, MaxY, Top + 0.9 * S), Palette.Roof);
-			Out.AddBox(FVector(MaxX - Wall, MinY, Top), FVector(MaxX, MaxY, Top + 0.9 * S), Palette.Roof);
+			Walls.AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MinY + Wall, Top + 0.9 * S), Palette.Wall);
+			Walls.AddBox(FVector(MinX, MaxY - Wall, Top), FVector(MaxX, MaxY, Top + 0.9 * S), Palette.Wall);
+			Walls.AddBox(FVector(MinX, MinY, Top), FVector(MinX + Wall, MaxY, Top + 0.9 * S), Palette.Wall);
+			Walls.AddBox(FVector(MaxX - Wall, MinY, Top), FVector(MaxX, MaxY, Top + 0.9 * S), Palette.Wall);
 		}
 
 		// A door on the side the simulation put it, so the way in is where the game says it is.
@@ -298,10 +388,10 @@ namespace DTGMeshBuilder
 		const double Lip = 0.12 * S;
 		switch (Building.DoorSide)
 		{
-		case 0: Out.AddBox(FVector(Dx - DoorWide, MinY - Lip, Base), FVector(Dx + DoorWide, MinY + Lip, Base + DoorHigh), Palette.Trim, false); break;
-		case 1: Out.AddBox(FVector(MaxX - Lip, Dy - DoorWide, Base), FVector(MaxX + Lip, Dy + DoorWide, Base + DoorHigh), Palette.Trim, false); break;
-		case 2: Out.AddBox(FVector(Dx - DoorWide, MaxY - Lip, Base), FVector(Dx + DoorWide, MaxY + Lip, Base + DoorHigh), Palette.Trim, false); break;
-		default: Out.AddBox(FVector(MinX - Lip, Dy - DoorWide, Base), FVector(MinX + Lip, Dy + DoorWide, Base + DoorHigh), Palette.Trim, false); break;
+		case 0: Trim.AddBox(FVector(Dx - DoorWide, MinY - Lip, Base), FVector(Dx + DoorWide, MinY + Lip, Base + DoorHigh), Palette.Trim, false); break;
+		case 1: Trim.AddBox(FVector(MaxX - Lip, Dy - DoorWide, Base), FVector(MaxX + Lip, Dy + DoorWide, Base + DoorHigh), Palette.Trim, false); break;
+		case 2: Trim.AddBox(FVector(Dx - DoorWide, MaxY - Lip, Base), FVector(Dx + DoorWide, MaxY + Lip, Base + DoorHigh), Palette.Trim, false); break;
+		default: Trim.AddBox(FVector(MinX - Lip, Dy - DoorWide, Base), FVector(MinX + Lip, Dy + DoorWide, Base + DoorHigh), Palette.Trim, false); break;
 		}
 
 		// A steeple on a church, because a town skyline needs something that isn't a box.
@@ -310,17 +400,18 @@ namespace DTGMeshBuilder
 			const double Cx = 0.5 * (MinX + MaxX);
 			const double Cy = 0.5 * (MinY + MaxY);
 			const double Wide = 1.1 * S;
-			Out.AddBox(FVector(Cx - Wide, Cy - Wide, Top), FVector(Cx + Wide, Cy + Wide, Top + 5.0 * S), Palette.Wall);
-			Out.AddTaperedBox(FVector(Cx - Wide, Cy - Wide, Top + 5.0 * S), FVector(Cx + Wide, Cy + Wide, Top + 9.0 * S),
+			Walls.AddBox(FVector(Cx - Wide, Cy - Wide, Top), FVector(Cx + Wide, Cy + Wide, Top + 5.0 * S), Palette.Wall);
+			Meshes[EDTGSurface::ShingleRoof].AddTaperedBox(FVector(Cx - Wide, Cy - Wide, Top + 5.0 * S), FVector(Cx + Wide, Cy + Wide, Top + 9.0 * S),
 				0.48, 0.48, 0.48, Palette.Roof);
 		}
 	}
 
 	// ======================================================================================== Cars
 
-	void BuildCarBody(BodyStyle Body, double LengthM, double WidthM, double HeightM, const FLinearColor& Paint, FDTGMesh& Out)
+	void BuildCarBody(BodyStyle Body, double LengthM, double WidthM, double HeightM, const FLinearColor& Paint, FDTGSurfaceMeshes& Meshes)
 	{
 		constexpr double S = 100.0; // metres to Unreal units
+		FDTGMesh& Out = Meshes[EDTGSurface::Paint];
 		const double HalfL = 0.5 * LengthM * S;
 		// The body is narrower than the car's overall width: the tyres sit outboard of it, where they can
 		// be seen, exactly as the wheel positions the chassis works with put them.
@@ -383,7 +474,7 @@ namespace DTGMeshBuilder
 			const double CabinInset = HalfW * 0.08;
 			const FLinearColor Windows(0.1f, 0.13f, 0.16f);
 			// Glass first, as a slightly smaller box, then the roof cap in body colour on top.
-			Out.AddTaperedBox(FVector(CabinMinX, -HalfW + CabinInset, LowerTop), FVector(CabinMaxX, HalfW - CabinInset, Floor + Height * 0.92),
+			Meshes[EDTGSurface::Glass].AddTaperedBox(FVector(CabinMinX, -HalfW + CabinInset, LowerTop), FVector(CabinMaxX, HalfW - CabinInset, Floor + Height * 0.92),
 				0.18, 0.1, 0.1, Windows);
 			Out.AddBox(FVector(CabinMinX + (CabinMaxX - CabinMinX) * 0.1, -HalfW + CabinInset * 2.0, Floor + Height * 0.92),
 				FVector(CabinMaxX - (CabinMaxX - CabinMinX) * 0.18, HalfW - CabinInset * 2.0, Floor + Height), Paint);
@@ -395,16 +486,17 @@ namespace DTGMeshBuilder
 		const FLinearColor Headlight(0.92f, 0.9f, 0.78f);
 		const FLinearColor Taillight(0.5f, 0.04f, 0.04f);
 		const double LightW = HalfW * 0.3;
-		Out.AddBox(FVector(HalfL - 0.06 * S, -HalfW * 0.82, LightZ), FVector(HalfL + 0.02 * S, -HalfW * 0.82 + LightW, LightZ + LightH), Headlight);
-		Out.AddBox(FVector(HalfL - 0.06 * S, HalfW * 0.82 - LightW, LightZ), FVector(HalfL + 0.02 * S, HalfW * 0.82, LightZ + LightH), Headlight);
-		Out.AddBox(FVector(-HalfL - 0.02 * S, -HalfW * 0.82, LightZ), FVector(-HalfL + 0.06 * S, -HalfW * 0.82 + LightW, LightZ + LightH), Taillight);
-		Out.AddBox(FVector(-HalfL - 0.02 * S, HalfW * 0.82 - LightW, LightZ), FVector(-HalfL + 0.06 * S, HalfW * 0.82, LightZ + LightH), Taillight);
+		Meshes[EDTGSurface::Chrome].AddBox(FVector(HalfL - 0.06 * S, -HalfW * 0.82, LightZ), FVector(HalfL + 0.02 * S, -HalfW * 0.82 + LightW, LightZ + LightH), Headlight);
+		Meshes[EDTGSurface::Chrome].AddBox(FVector(HalfL - 0.06 * S, HalfW * 0.82 - LightW, LightZ), FVector(HalfL + 0.02 * S, HalfW * 0.82, LightZ + LightH), Headlight);
+		Meshes[EDTGSurface::Glass].AddBox(FVector(-HalfL - 0.02 * S, -HalfW * 0.82, LightZ), FVector(-HalfL + 0.06 * S, -HalfW * 0.82 + LightW, LightZ + LightH), Taillight);
+		Meshes[EDTGSurface::Glass].AddBox(FVector(-HalfL - 0.02 * S, HalfW * 0.82 - LightW, LightZ), FVector(-HalfL + 0.06 * S, HalfW * 0.82, LightZ + LightH), Taillight);
 	}
 
-	void BuildWheel(double RadiusM, double WidthM, const FLinearColor& Rim, FDTGMesh& Out)
+	void BuildWheel(double RadiusM, double WidthM, const FLinearColor& Rim, FDTGSurfaceMeshes& Meshes)
 	{
 		constexpr double S = 100.0;
-		Out.AddWheel(FVector::ZeroVector, RadiusM * S, FMath::Max(0.12, WidthM) * S, FLinearColor(0.025f, 0.025f, 0.028f), Rim);
+		Meshes[EDTGSurface::Rubber].AddWheel(FVector::ZeroVector, RadiusM * S, FMath::Max(0.12, WidthM) * S, FLinearColor(0.025f, 0.025f, 0.028f), Rim,
+			14, &Meshes[EDTGSurface::Chrome]);
 	}
 
 	// ======================================================================================== People

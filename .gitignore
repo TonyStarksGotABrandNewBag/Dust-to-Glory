@@ -33,3 +33,6 @@ Thumbs.db
 
 # Stand-ins for Unreal Header Tool output, rebuilt by Tests/check_engine.py on every run.
 Tests/UnrealStub/*.generated.h
+
+# Raw art downloads; the imported .uasset files under Content/Art are what get committed.
+ArtSource/
