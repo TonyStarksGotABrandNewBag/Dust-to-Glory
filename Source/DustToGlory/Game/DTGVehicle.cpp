@@ -398,6 +398,12 @@ void ADTGVehicle::ResolveCollisions(const FVector& PreviousLocation)
 	{
 		return; // already touching and not pressing in: nothing new happened
 	}
+	// A sweep that starts inside something can come back with no usable normal -- zero, or NaN when the
+	// depenetration fails. Pushing along that put a parked car's position to NaN every frame.
+	if (Hit.ImpactNormal.ContainsNaN() || Hit.ImpactNormal.IsNearlyZero() || Hit.ImpactPoint.ContainsNaN() || Hit.Location.ContainsNaN())
+	{
+		return;
+	}
 	const Vec3 Point(Hit.ImpactPoint.X / DTGMetresToUnreal, Hit.ImpactPoint.Y / DTGMetresToUnreal, Hit.ImpactPoint.Z / DTGMetresToUnreal);
 	const Vec3 Normal(Hit.ImpactNormal.X, Hit.ImpactNormal.Y, Hit.ImpactNormal.Z);
 	Vec3 OtherVelocity;

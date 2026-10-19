@@ -26,4 +26,6 @@ public:
 	class APawn* GetOwningPawn() const;
 	UCanvas* Canvas = nullptr;
 	APlayerController* PlayerOwner = nullptr;
+	/** NOTE: a uint8 bitfield in the real engine; assigning true/false works the same on both. */
+	bool bShowHUD = true;
 };

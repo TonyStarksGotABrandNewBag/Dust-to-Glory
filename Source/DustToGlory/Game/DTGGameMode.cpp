@@ -11,6 +11,7 @@
 #include "Game/DTGEventDirector.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGHud.h"
+#include "Game/DTGPhotoMode.h"
 #include "Game/DTGPlayerController.h"
 #include "Game/DTGSky.h"
 #include "Game/DTGTrafficDirector.h"
@@ -70,6 +71,13 @@ void ADTGGameMode::StartPlay()
 	SpawnDirectors();
 	SpawnStarterCar();
 	bStarted = true;
+	if (ADTGPhotoMode::IsRequested())
+	{
+		// Spawned last, so the starter car it photographs is already standing.
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		GetWorld()->SpawnActor<ADTGPhotoMode>(ADTGPhotoMode::StaticClass(), FTransform::Identity, Params);
+	}
 	if (Game && Game->IsContentLoaded())
 	{
 		const CityInfo* Town = Game->Sim().City.CityAt(Game->Sim().City.SpawnX, Game->Sim().City.SpawnY);

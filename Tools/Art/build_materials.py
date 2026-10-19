@@ -38,7 +38,9 @@ SURFACES = {
     "WoodSiding": (200.0, 0.9, 1.0),
     "ShingleRoof": (300.0, 0.5, 1.0),
     "MetalRoof": (250.0, 0.6, 0.8),
-    "Grass": (300.0, 0.0, 1.0),
+    # Poly Haven's grass photographs are all dry or leaf-strewn (leafy_grass averages sRGB 151,131,89, as
+    # tan as the sand), so the photo supplies the detail and the park's vertex colour supplies the green.
+    "Grass": (300.0, 0.85, 1.0),
     "Sand": (300.0, 0.0, 1.0),
     "Dirt": (300.0, 0.0, 1.0),
     "ForestFloor": (300.0, 0.0, 1.0),
@@ -74,7 +76,11 @@ float2 Uv = P.xy;
 """
 
 TERRAIN_COLOUR = TERRAIN_WEIGHTS + """
-return Texture2DSample(GrassD, GrassDSampler, Uv).rgb * Wt.x
+// The grass photo is dry and tan; keep its detail and take the colour from the class green.
+float3 GrassPhoto = Texture2DSample(GrassD, GrassDSampler, Uv).rgb;
+float GrassLum = dot(GrassPhoto, float3(0.3, 0.59, 0.11));
+float3 GrassC = lerp(GrassPhoto, saturate(GrassLum * 2.2 * Grass), 0.85);
+return GrassC * Wt.x
      + Texture2DSample(SandD, SandDSampler, Uv).rgb * Wt.y
      + Texture2DSample(DirtD, DirtDSampler, Uv).rgb * Wt.z;
 """
@@ -137,9 +143,14 @@ def log(message):
 
 
 def import_textures():
+    # Only what is missing. Re-importing an unchanged texture rewrites its .uasset byte for byte
+    # differently, and every rewrite is another full copy in Git LFS. Pass --reimport to force it.
+    reimport = "--reimport" in unreal.SystemLibrary.get_command_line()
     tasks = []
     for name in sorted(os.listdir(SOURCE)):
         if not name.lower().endswith(".jpg"):
+            continue
+        if not reimport and unreal.EditorAssetLibrary.does_asset_exist(TEXTURES + "/" + os.path.splitext(name)[0]):
             continue
         task = unreal.AssetImportTask()
         task.set_editor_property("filename", os.path.join(SOURCE, name))

@@ -115,10 +115,58 @@ void ADTGWorldBuilder::BuildTownStreets()
 		const double Z = Map.HeightAt(Road.Area.CenterX(), Road.Area.CenterY()) + 0.04;
 		AddSlab(Mesh, Road.Area.MinX, Road.Area.MinY, Road.Area.MaxX, Road.Area.MaxY, Z, Asphalt);
 	}
+	// A block is a kerbed sidewalk round its edge and a lawn inside, as a Carolina street is. Paved edge to
+	// edge, a block read as one enormous parking lot. Downtown blocks, and blocks too small for a lawn, stay
+	// paved. The kerb stands 15 cm proud of the road.
+	const double S = DTGMetresToUnreal;
+	const double KerbM = 0.15;
+	const double WalkM = 2.5;
+	FDTGMesh& Walks = Meshes[EDTGSurface::Sidewalk];
+	auto AddKerb = [&Walks, S, &Sidewalk](double X0, double Y0, double X1, double Y1, double Low, double High, const FVector& Facing)
+	{
+		Walks.AddQuad(FVector(X0 * S, Y0 * S, Low * S), FVector(X1 * S, Y1 * S, Low * S), FVector(X1 * S, Y1 * S, High * S),
+			FVector(X0 * S, Y0 * S, High * S), Facing, Sidewalk);
+	};
 	for (const dtg::sim::Rect& Block : City.Blocks)
 	{
-		const double Z = Map.HeightAt(Block.CenterX(), Block.CenterY()) + 0.06;
-		AddSlab(Meshes[EDTGSurface::Sidewalk], Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Z, Sidewalk);
+		const double Base = Map.HeightAt(Block.CenterX(), Block.CenterY());
+		const double Top = Base + KerbM;
+		bool bPaved = Block.Width() < 4.0 * WalkM || Block.Depth() < 4.0 * WalkM;
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			if (bPaved)
+			{
+				break;
+			}
+			bPaved = Building.bDowntown && Block.Contains(Building.Footprint.CenterX(), Building.Footprint.CenterY());
+		}
+		if (bPaved)
+		{
+			AddSlab(Walks, Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Top, Sidewalk);
+		}
+		else
+		{
+			const double InMinX = Block.MinX + WalkM;
+			const double InMinY = Block.MinY + WalkM;
+			const double InMaxX = Block.MaxX - WalkM;
+			const double InMaxY = Block.MaxY - WalkM;
+			AddSlab(Walks, Block.MinX, Block.MinY, Block.MaxX, InMinY, Top, Sidewalk);
+			AddSlab(Walks, Block.MinX, InMaxY, Block.MaxX, Block.MaxY, Top, Sidewalk);
+			AddSlab(Walks, Block.MinX, InMinY, InMinX, InMaxY, Top, Sidewalk);
+			AddSlab(Walks, InMaxX, InMinY, Block.MaxX, InMaxY, Top, Sidewalk);
+			const double Lawn = Base + 0.08;
+			AddSlab(Meshes[EDTGSurface::Grass], InMinX, InMinY, InMaxX, InMaxY, Lawn, Grass);
+			// The sidewalk's inner edge, stepping down to the lawn.
+			AddKerb(InMinX, InMinY, InMaxX, InMinY, Lawn, Top, FVector(0.0, 1.0, 0.0));
+			AddKerb(InMinX, InMaxY, InMaxX, InMaxY, Lawn, Top, FVector(0.0, -1.0, 0.0));
+			AddKerb(InMinX, InMinY, InMinX, InMaxY, Lawn, Top, FVector(1.0, 0.0, 0.0));
+			AddKerb(InMaxX, InMinY, InMaxX, InMaxY, Lawn, Top, FVector(-1.0, 0.0, 0.0));
+		}
+		// The kerb itself, facing the road on all four sides.
+		AddKerb(Block.MinX, Block.MinY, Block.MaxX, Block.MinY, Base, Top, FVector(0.0, -1.0, 0.0));
+		AddKerb(Block.MinX, Block.MaxY, Block.MaxX, Block.MaxY, Base, Top, FVector(0.0, 1.0, 0.0));
+		AddKerb(Block.MinX, Block.MinY, Block.MinX, Block.MaxY, Base, Top, FVector(-1.0, 0.0, 0.0));
+		AddKerb(Block.MaxX, Block.MinY, Block.MaxX, Block.MaxY, Base, Top, FVector(1.0, 0.0, 0.0));
 	}
 	for (const dtg::sim::Rect& Park : City.Parks)
 	{

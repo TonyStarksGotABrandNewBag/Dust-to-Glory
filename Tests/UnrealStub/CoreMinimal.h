@@ -594,6 +594,7 @@ struct FVector
 	FQuat ToOrientationQuat() const;
 	void Normalize() { *this = GetSafeNormal(); }
 	bool IsNearlyZero(double Tolerance = 1e-4) const { return Size() <= Tolerance; }
+	bool ContainsNaN() const { return !std::isfinite(X) || !std::isfinite(Y) || !std::isfinite(Z); }
 	bool IsZero() const { return X == 0.0 && Y == 0.0 && Z == 0.0; }
 	FVector RotateAngleAxis(double Degrees, const FVector& Axis) const;
 
