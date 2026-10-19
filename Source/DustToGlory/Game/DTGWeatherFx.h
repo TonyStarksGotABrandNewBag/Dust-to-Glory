@@ -55,7 +55,7 @@ private:
 	void UpdateSound();
 
 	UPROPERTY()
-	TArray<TObjectPtr<UProceduralMeshComponent>> Layers;
+	TArray<TObjectPtr<UProceduralMeshComponent>> StreakLayers;
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;

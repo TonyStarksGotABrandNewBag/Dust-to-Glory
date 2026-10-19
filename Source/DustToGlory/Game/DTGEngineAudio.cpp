@@ -4,7 +4,8 @@
 
 using namespace dtg::sim;
 
-UDTGEngineAudio::UDTGEngineAudio()
+UDTGEngineAudio::UDTGEngineAudio(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	bAutoActivate = true;

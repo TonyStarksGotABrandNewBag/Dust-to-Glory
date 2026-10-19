@@ -222,8 +222,8 @@ void ADTGPlayerController::PlayerTick(float DeltaTime)
 			}
 		}
 	}
-	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
-	ADTGVehicle* Car = Player ? Player->DrivingNow() : Cast<ADTGVehicle>(GetPawn());
+	ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn());
+	ADTGVehicle* Car = PlayerCharacter ? PlayerCharacter->DrivingNow() : Cast<ADTGVehicle>(GetPawn());
 	if (!Car)
 	{
 		return;
@@ -238,9 +238,9 @@ void ADTGPlayerController::PlayerTick(float DeltaTime)
 	// because they stay the view target, the boom they are carrying is the chase camera. Making the car
 	// itself the view target would put the view inside the car: it has no camera component of its own,
 	// so the engine would fall back to its eye height, which is a point inside the body shell.
-	if (Player && Player->DrivingNow() == Car)
+	if (PlayerCharacter && PlayerCharacter->DrivingNow() == Car)
 	{
-		Player->SetActorLocation(Car->GetActorLocation());
+		PlayerCharacter->SetActorLocation(Car->GetActorLocation());
 	}
 }
 
@@ -299,9 +299,9 @@ void ADTGPlayerController::OnLook(const FInputActionValue& Value)
 
 void ADTGPlayerController::OnJump()
 {
-	if (ACharacter* Player = Cast<ACharacter>(GetPawn()))
+	if (ACharacter* PlayerCharacter = Cast<ACharacter>(GetPawn()))
 	{
-		Player->Jump();
+		PlayerCharacter->Jump();
 	}
 }
 
@@ -318,27 +318,27 @@ void ADTGPlayerController::OnInteract()
 		Hud->Choose(-1);
 		return;
 	}
-	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
-	if (!Player || !Game)
+	ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn());
+	if (!PlayerCharacter || !Game)
 	{
 		return;
 	}
-	const FDTGInteraction& Focus = Player->Focus();
+	const FDTGInteraction& Focus = PlayerCharacter->Focus();
 	if (Focus.BuildingId >= 0)
 	{
-		if (Player->IsIndoors())
+		if (PlayerCharacter->IsIndoors())
 		{
 			// At the door, this is the way out; anywhere else inside, it is the building's own menu.
 			if (Focus.Prompt == TEXT("Step outside"))
 			{
-				Player->LeaveBuilding();
+				PlayerCharacter->LeaveBuilding();
 				return;
 			}
 			Hud->Open(EDTGScreen::Building, Focus.BuildingId);
 			return;
 		}
 		// Outside: walk in. Anything the building does is then on its menu.
-		if (!Player->EnterBuilding(Focus.BuildingId))
+		if (!PlayerCharacter->EnterBuilding(Focus.BuildingId))
 		{
 			Hud->Open(EDTGScreen::Building, Focus.BuildingId);
 		}
@@ -356,16 +356,16 @@ void ADTGPlayerController::OnInteract()
 
 void ADTGPlayerController::OnEnterExit()
 {
-	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
-	if (!Player)
+	ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn());
+	if (!PlayerCharacter)
 	{
 		return;
 	}
-	ADTGVehicle* Car = Player->ToggleVehicle();
-	SetDrivingContext(Player->DrivingNow() != nullptr);
-	if (!Player->DrivingNow())
+	ADTGVehicle* Car = PlayerCharacter->ToggleVehicle();
+	SetDrivingContext(PlayerCharacter->DrivingNow() != nullptr);
+	if (!PlayerCharacter->DrivingNow())
 	{
-		SetViewTargetWithBlend(Player, 0.3f);
+		SetViewTargetWithBlend(PlayerCharacter, 0.3f);
 		if (Car)
 		{
 			Car->SetDriverInput(DriverInput());
@@ -379,9 +379,9 @@ void ADTGPlayerController::OnPunch()
 	{
 		return;
 	}
-	if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn()))
+	if (ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn()))
 	{
-		Player->Punch();
+		PlayerCharacter->Punch();
 	}
 }
 
@@ -406,9 +406,9 @@ void ADTGPlayerController::OnPower(int32 Slot)
 	{
 		return;
 	}
-	if (ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn()))
+	if (ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn()))
 	{
-		Player->UsePower(Slot);
+		PlayerCharacter->UsePower(Slot);
 	}
 }
 
@@ -436,8 +436,8 @@ void ADTGPlayerController::OnHandbrake(const FInputActionValue& Value)
 
 void ADTGPlayerController::OnShiftUp()
 {
-	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
-	if (ADTGVehicle* Car = Player ? Player->DrivingNow() : nullptr)
+	ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn());
+	if (ADTGVehicle* Car = PlayerCharacter ? PlayerCharacter->DrivingNow() : nullptr)
 	{
 		Car->ShiftUp();
 	}
@@ -445,8 +445,8 @@ void ADTGPlayerController::OnShiftUp()
 
 void ADTGPlayerController::OnShiftDown()
 {
-	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
-	if (ADTGVehicle* Car = Player ? Player->DrivingNow() : nullptr)
+	ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn());
+	if (ADTGVehicle* Car = PlayerCharacter ? PlayerCharacter->DrivingNow() : nullptr)
 	{
 		Car->ShiftDown();
 	}
@@ -462,8 +462,8 @@ void ADTGPlayerController::OnToggleGearbox()
 	const bool bManual = Game->Sim().AutomaticGearbox();
 	const ActionResult Result = Game->Sim().SetTransmission(bManual);
 	Game->OnNotice.Broadcast(UTF8_TO_TCHAR(Result.Message.c_str()));
-	ADTGCharacter* Player = Cast<ADTGCharacter>(GetPawn());
-	if (ADTGVehicle* Car = Player ? Player->DrivingNow() : nullptr)
+	ADTGCharacter* PlayerCharacter = Cast<ADTGCharacter>(GetPawn());
+	if (ADTGVehicle* Car = PlayerCharacter ? PlayerCharacter->DrivingNow() : nullptr)
 	{
 		Car->Chassis().Dynamics().bAutomatic = Game->Sim().AutomaticGearbox();
 	}

@@ -792,11 +792,11 @@ void ADTGHud::RunBuildingService(int32 Index)
 	if (Service == TEXT("Work a shift"))
 	{
 		// Only a job whose workplace is this kind of building can be worked here.
-		const std::string Role = LotRoleName(Building->Role);
+		const std::string RoleName = LotRoleName(Building->Role);
 		for (const CareerProgress& Job : Sim.Jobs)
 		{
 			const CareerDef* Def = Sim.Careers.FindCareer(Job.CareerId);
-			if (!Def || Def->Workplace != Role)
+			if (!Def || Def->Workplace != RoleName)
 			{
 				continue;
 			}

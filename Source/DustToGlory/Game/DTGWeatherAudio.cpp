@@ -4,7 +4,8 @@
 
 using namespace dtg::sim;
 
-UDTGWeatherAudio::UDTGWeatherAudio()
+UDTGWeatherAudio::UDTGWeatherAudio(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	bAutoActivate = true;

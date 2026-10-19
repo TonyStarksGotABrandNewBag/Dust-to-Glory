@@ -121,12 +121,12 @@ void ADTGWorldBuilder::BuildTownStreets()
 		const double Z = Map.HeightAt(Road.Area.CenterX(), Road.Area.CenterY()) + 0.04;
 		AddSlab(Mesh, Road.Area.MinX, Road.Area.MinY, Road.Area.MaxX, Road.Area.MaxY, Z, Asphalt);
 	}
-	for (const Rect& Block : City.Blocks)
+	for (const dtg::sim::Rect& Block : City.Blocks)
 	{
 		const double Z = Map.HeightAt(Block.CenterX(), Block.CenterY()) + 0.06;
 		AddSlab(Mesh, Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Z, Sidewalk);
 	}
-	for (const Rect& Park : City.Parks)
+	for (const dtg::sim::Rect& Park : City.Parks)
 	{
 		const double Z = Map.HeightAt(Park.CenterX(), Park.CenterY()) + 0.08;
 		AddSlab(Mesh, Park.MinX, Park.MinY, Park.MaxX, Park.MaxY, Z, Grass);
@@ -309,7 +309,7 @@ void ADTGWorldBuilder::BuildBuildings()
 	// apart means a section can be rebuilt later without touching the rest of the state.
 	int32 Section = 0;
 	int32 Total = 0;
-	auto BuildRange = [&](const Rect* Bounds)
+	auto BuildRange = [&](const dtg::sim::Rect* Bounds)
 	{
 		FDTGMesh Mesh;
 		for (const BuildingPlan& Building : City.Buildings)
@@ -409,7 +409,7 @@ void ADTGWorldBuilder::BuildWater()
 	FDTGMesh Mesh;
 
 	// The ocean is one sheet at sea level, reaching well past the coast.
-	const Rect& Bounds = Map.Bounds;
+	const dtg::sim::Rect& Bounds = Map.Bounds;
 	const double Margin = 4000.0;
 	AddSlab(Mesh, Bounds.MinX - Margin, Bounds.MinY - Margin, Bounds.MaxX + Margin, Bounds.MaxY + Margin, 0.0, Sea);
 	for (const StateLake& Lake : Map.Lakes)

@@ -41,6 +41,11 @@
 #define UPROPERTY(...)
 #define UFUNCTION(...)
 #define UINTERFACE(...)
+
+// SlateCore's Rendering/SlateRenderer.h forward-declares a global `struct Rect;`, and Slate/UMG
+// bring it into every file. With `using namespace dtg::sim;` in a .cpp, a bare `Rect` is then
+// ambiguous. Declared here so check_engine.py fails the same way the real engine does.
+struct Rect;
 // GENERATED_BODY() resolves, exactly as the real one does, through the file id the .generated.h
 // most recently defined and the line it appears on -- which is how `Super` gets a per-class value.
 // Tests/make_unreal_stub_headers.py writes those definitions.

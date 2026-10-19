@@ -19,7 +19,7 @@ class DUSTTOGLORY_API UDTGWeatherAudio : public USynthComponent
 	GENERATED_BODY()
 
 public:
-	UDTGWeatherAudio();
+	UDTGWeatherAudio(const FObjectInitializer& ObjectInitializer);
 
 	/** How hard it is raining (0..1) and how much is between the player and it (1 = inside a car). */
 	void SetWeather(double Intensity, double Shelter);

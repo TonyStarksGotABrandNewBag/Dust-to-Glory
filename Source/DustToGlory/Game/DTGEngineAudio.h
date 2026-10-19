@@ -19,7 +19,7 @@ class DUSTTOGLORY_API UDTGEngineAudio : public USynthComponent
 	GENERATED_BODY()
 
 public:
-	UDTGEngineAudio();
+	UDTGEngineAudio(const FObjectInitializer& ObjectInitializer);
 
 	/** Rebuilds the synth for a car's engine, exhaust and forced induction. */
 	void Configure(const dtg::sim::VehicleSetup& Setup);

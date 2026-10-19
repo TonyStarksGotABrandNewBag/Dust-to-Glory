@@ -50,6 +50,11 @@ metres; Unreal works in centimetres; that constant is the whole boundary.
 - **`dtg::sim` exports short, ordinary names** (`Rect`, `Message`, `Profile`, `Market`, `Clock`,
   `Crime`, `Refuge`). Before adding another, check it does not collide with something the engine
   layer already uses — `Shelter` had to become `Refuge` for exactly this reason.
+- **Write `dtg::sim::Rect` in engine .cpp files too.** SlateCore forward-declares a global
+  `struct Rect;`, so a bare `Rect` is ambiguous even under `using namespace dtg::sim;`.
+- **Locals must not share a name with an inherited engine member.** MSVC's C4458 is an error in
+  Unreal builds. Seen on the first real build: `Role` (`AActor::Role`), `Player`
+  (`APlayerController::Player`), and UHT rejects a `UPROPERTY` called `Layers` (`AActor::Layers`).
 - `bUseUnity = false` in `Build.cs` is deliberate. Do not turn it back on.
 
 ## Commands

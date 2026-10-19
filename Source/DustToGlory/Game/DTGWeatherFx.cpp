@@ -89,7 +89,7 @@ ADTGWeatherFx::ADTGWeatherFx()
 		Layer->SetCastShadow(false);
 		Layer->bUseAsOccluder = false;
 		Layer->SetVisibility(false);
-		Layers.Add(Layer);
+		StreakLayers.Add(Layer);
 	}
 
 	// Rain and thunder, synthesised rather than played, and heard wherever the listener is.
@@ -130,7 +130,7 @@ void ADTGWeatherFx::BeginPlay()
 
 void ADTGWeatherFx::BuildLayer(int32 Index, double Scale, const FLinearColor& Colour)
 {
-	if (!Layers.IsValidIndex(Index) || !Layers[Index])
+	if (!StreakLayers.IsValidIndex(Index) || !StreakLayers[Index])
 	{
 		return;
 	}
@@ -157,14 +157,14 @@ void ADTGWeatherFx::BuildLayer(int32 Index, double Scale, const FLinearColor& Co
 		AddStreak(Mesh, Top, Long, ThickUu, Colour);
 		AddStreak(Mesh, Top + FVector(0.0, 0.0, HeightUu), Long, ThickUu, Colour);
 	}
-	Layers[Index]->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors,
+	StreakLayers[Index]->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors,
 		Mesh.Tangents, /*bCreateCollision*/ false);
 	if (UMaterialInterface* Material = DTGMeshBuilder::VertexColorMaterial())
 	{
-		Layers[Index]->SetMaterial(0, Material);
+		StreakLayers[Index]->SetMaterial(0, Material);
 	}
 	// A box of rain that is always around the camera has no meaningful bounds to cull against.
-	Layers[Index]->SetBoundsScale(4.0f);
+	StreakLayers[Index]->SetBoundsScale(4.0f);
 }
 
 void ADTGWeatherFx::ReadWeather(float DeltaSeconds)
@@ -220,7 +220,7 @@ void ADTGWeatherFx::Tick(float DeltaSeconds)
 
 	if (Fall <= 0.02 || bIndoors)
 	{
-		for (const TObjectPtr<UProceduralMeshComponent>& Layer : Layers)
+		for (const TObjectPtr<UProceduralMeshComponent>& Layer : StreakLayers)
 		{
 			if (Layer && Layer->IsVisible())
 			{
@@ -265,9 +265,9 @@ void ADTGWeatherFx::Tick(float DeltaSeconds)
 	// Three tenths of a cell below the eye and seven tenths above it, at every point in the wrap.
 	const double Base = -0.3 * HeightUu;
 	// A storm falls faster as well as harder.
-	for (int32 Index = 0; Index < Layers.Num(); ++Index)
+	for (int32 Index = 0; Index < StreakLayers.Num(); ++Index)
 	{
-		if (!Layers[Index] || !Scroll.IsValidIndex(Index) || !Speeds.IsValidIndex(Index))
+		if (!StreakLayers[Index] || !Scroll.IsValidIndex(Index) || !Speeds.IsValidIndex(Index))
 		{
 			continue;
 		}
@@ -277,12 +277,12 @@ void ADTGWeatherFx::Tick(float DeltaSeconds)
 		{
 			Scroll[Index] -= HeightUu;
 		}
-		Layers[Index]->SetRelativeLocation(FVector(0.0, 0.0, Base - Scroll[Index]));
+		StreakLayers[Index]->SetRelativeLocation(FVector(0.0, 0.0, Base - Scroll[Index]));
 		// Thinner rain means fewer layers rather than thinner streaks: the far one drops out first.
 		const bool bLayerOn = Fall > 0.25 * static_cast<double>(Index);
-		if (Layers[Index]->IsVisible() != bLayerOn)
+		if (StreakLayers[Index]->IsVisible() != bLayerOn)
 		{
-			Layers[Index]->SetVisibility(bLayerOn);
+			StreakLayers[Index]->SetVisibility(bLayerOn);
 		}
 	}
 

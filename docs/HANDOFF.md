@@ -28,7 +28,19 @@ Details in `docs/ARCHITECTURE.md`, `docs/AUDIO.md`, `docs/REALISM.md`, `docs/SUN
 
 ### 1. The engine layer has never been built by Unreal
 
-This is the only thing that matters right now. Everything else is downstream of it.
+**Done 19 October, on `ci-ironman1` with UE 5.8.3 and MSVC 14.44.** `DustToGloryEditor Win64
+Development` builds and links with zero warnings after three rounds. What the real build actually
+threw, for calibrating the guesses below:
+
+- UHT: one error. A `UPROPERTY` named `Layers` shadowed `AActor::Layers` (renamed `StreakLayers`).
+- `USynthComponent` has only an `FObjectInitializer` constructor; both synth subclasses needed one.
+  `Init`/`OnGenerateAudio` were guessed right. `MapKey` was fine.
+- C4458 on locals named `Role` and `Player`, which hide engine members.
+- A bare `Rect` was ambiguous with SlateCore's global `struct Rect;`.
+- No missing module dependencies. The stub now reproduces the constructor and the `Rect` cases.
+  That stub change is untested here: this machine has no GCC/Clang, so `check_engine.py` skips.
+
+The original assessment follows.
 
 `check_engine.py` compiles all 6,818 lines against `Tests/UnrealStub/` — a hand-written stand-in for
 Unreal's API — at `-Wall -Wextra -Wshadow -Wconversion`. It is clean. That found and fixed four real
@@ -91,10 +103,14 @@ fit inside.
 Checked 19 October: the linked Windows machine `ci-ironman1` has Git and the Epic Games Launcher but
 **no Unreal Engine and no Visual Studio 2022** (only VS 2010, which is useless here). Building needs
 both — roughly 100–150 GB of installs. It looks like a work machine rather than the HP Omen with the
-RTX 5080 that is the stated target. Confirm which machine before planning a build session.
+RTX 5080 that is the stated target.
 
-Also unconfirmed: `DustToGlory.uproject` pins `EngineAssociation: 5.8`. Check what the Epic Launcher
-actually offers and retarget if needed — it is a one-line change.
+Update, same day: Kenny confirmed `ci-ironman1` is the build machine. The Epic Launcher offered and is
+installing **UE 5.8.3**, so `EngineAssociation: 5.8` stands — no retarget. Visual Studio 2022
+Community (17.14, game and desktop C++ workloads, Windows SDK 10.0.22621) is being installed. VS 2022
+rather than 2026 because Epic's own 5.8 build farm uses VS 2022 17.14 with the 14.44 toolset, and the
+14.51 toolset VS 2026 now ships has known 5.8 compile failures. Frame-rate numbers from this machine
+will not represent the Omen.
 
 ## What the project does not need
 
@@ -106,7 +122,7 @@ clone and build.
 
 ## Suggested order from here
 
-1. Get it compiling in Unreal on a machine that has the engine. Fix UHT and signature errors.
+1. ~~Get it compiling in Unreal on a machine that has the engine. Fix UHT and signature errors.~~ Done.
 2. Get it running. Expect `BeginPlay` crashes; the world-building order has already been moved from
    `StartPlay` to `InitGame` once for exactly this reason.
 3. Verify the measured budget survives contact with a real frame.

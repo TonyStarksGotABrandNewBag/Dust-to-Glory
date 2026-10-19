@@ -312,11 +312,11 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			Walker.NextThink = Now + FMath::FRandRange(4.0, 9.0);
 			NpcMind& Mind = Game->Sim().Npcs.GetOrCreate(TCHAR_TO_UTF8(*Walker.MindId));
 			const NpcDecision Decision = Game->Sim().Npcs.Decide(Mind, Game->Sim().Clock.Hour(), Game->Sim().Random, Game->Sim().Careers);
-			LotRole Role = LotRole::Shop;
+			LotRole WantedRole = LotRole::Shop;
 			const BuildingPlan* Destination = nullptr;
-			if (!Decision.Destination.empty() && ParseLotRole(Decision.Destination, Role))
+			if (!Decision.Destination.empty() && ParseLotRole(Decision.Destination, WantedRole))
 			{
-				Destination = Game->Sim().City.FirstWithRole(Role);
+				Destination = Game->Sim().City.FirstWithRole(WantedRole);
 			}
 			if (Destination)
 			{
@@ -359,7 +359,7 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 	const FVector2D Here = Game->ToSim(Around);
 	for (int32 Attempt = 0; Attempt < 8; ++Attempt)
 	{
-		const Rect& Block = City.Blocks[FMath::RandHelper(static_cast<int32>(City.Blocks.size()))];
+		const dtg::sim::Rect& Block = City.Blocks[FMath::RandHelper(static_cast<int32>(City.Blocks.size()))];
 		const double Dx = Block.CenterX() - Here.X;
 		const double Dy = Block.CenterY() - Here.Y;
 		if (Dx * Dx + Dy * Dy > FMath::Square(SpawnRadiusM))
