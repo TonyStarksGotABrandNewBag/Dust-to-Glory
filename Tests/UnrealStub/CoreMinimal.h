@@ -680,6 +680,16 @@ struct FQuat
 	static const FQuat Identity;
 };
 
+struct FVector4
+{
+	FVector4() = default;
+	FVector4(double InX, double InY, double InZ, double InW) : X(InX), Y(InY), Z(InZ), W(InW) {}
+	double X = 0.0;
+	double Y = 0.0;
+	double Z = 0.0;
+	double W = 0.0;
+};
+
 struct FBoxSphereBounds
 {
 	FVector Origin;
@@ -695,6 +705,8 @@ struct FTransform
 	FTransform(const FRotator& InRotation, const FVector& InTranslation)
 		: Rotation(InRotation.Quaternion()), Translation(InTranslation) {}
 	explicit FTransform(const FVector& InTranslation) : Translation(InTranslation) {}
+	/** This transform, then Other: the engine's composition order. */
+	FTransform operator*(const FTransform& Other) const;
 
 	FVector GetLocation() const { return Translation; }
 	void SetLocation(const FVector& In) { Translation = In; }

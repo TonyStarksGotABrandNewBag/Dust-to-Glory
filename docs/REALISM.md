@@ -74,6 +74,19 @@ Still missing:
 - **Wet roads.** Nothing drives a wetness parameter from the weather yet.
 - **Real shapes.** Every shape is still a box, and textures do not change that.
 
+**Rendering, 19 October.** Now on in this project:
+
+- **Shader Model 6.** Nanite and virtual shadow maps were silently off before, because only SM5 was targeted.
+- **Hardware ray-traced Lumen,** with hit-lit reflections, and Nanite geometry in the ray tracing scene.
+- **Volumetric clouds** and thinner clear-weather fog.
+- **A post-process grade** (in `ADTGSky`).
+- **NVIDIA DLSS 4.5:** Quality-mode super resolution, Ray Reconstruction, and auto frame generation.
+  `Tools/fetch_dlss.py` installs it, and the plugins are optional.
+- **Street furniture:** CC0 models placed by `Sim/StreetFurniture` (poles, lamps, hydrants, deck barriers).
+
+Still box geometry: cars and people. No power lines between the poles, and no grass blades.
+Not checked: the frame rate with all of it on.
+
 **Lighting.** Lumen GI and reflections, a sky atmosphere driven by the existing time-of-day clock, and
 volumetric fog for the morning haze the mockups lean on. The simulation already produces sun angle and
 weather state; nothing consumes them for lighting yet.

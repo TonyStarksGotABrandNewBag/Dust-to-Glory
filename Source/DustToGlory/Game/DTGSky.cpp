@@ -5,8 +5,12 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/VolumetricCloudComponent.h"
 #include "Engine/GameInstance.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/UObjectGlobals.h"
 
 #include "Game/DTGGameSubsystem.h"
 
@@ -40,16 +44,64 @@ ADTGSky::ADTGSky()
 
 	Fog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("Fog"));
 	Fog->SetupAttachment(Root);
-	Fog->SetFogDensity(0.02f);
+	Fog->SetFogDensity(FogDensity);
 	Fog->SetFogHeightFalloff(0.2f);
 	// Fog that takes its colour from the sky is what makes a coastal morning read as one.
 	Fog->SetVolumetricFog(true);
+
+	Clouds = CreateDefaultSubobject<UVolumetricCloudComponent>(TEXT("Clouds"));
+	Clouds->SetupAttachment(Root);
+
+	// The grade. Open-world games get most of their "photographic" look here rather than from geometry:
+	// warm highlights against slightly cool shadows, a touch more contrast and saturation than the raw
+	// render, a soft vignette and fine grain to take the CG edge off, and motion blur kept light so a
+	// fast drive still reads. Lumen is asked for more than its defaults, which an RTX card can afford.
+	Grade = CreateDefaultSubobject<UPostProcessComponent>(TEXT("Grade"));
+	Grade->SetupAttachment(Root);
+	Grade->bUnbound = true;
+	FPostProcessSettings& Look = Grade->Settings;
+	Look.bOverride_ColorSaturation = true;
+	Look.ColorSaturation = FVector4(1.06, 1.06, 1.06, 1.0);
+	Look.bOverride_ColorContrast = true;
+	Look.ColorContrast = FVector4(1.06, 1.06, 1.06, 1.0);
+	Look.bOverride_ColorGainHighlights = true;
+	Look.ColorGainHighlights = FVector4(1.04, 1.01, 0.95, 1.0);
+	Look.bOverride_ColorOffsetShadows = true;
+	Look.ColorOffsetShadows = FVector4(-0.002, 0.0, 0.004, 0.0);
+	Look.bOverride_VignetteIntensity = true;
+	Look.VignetteIntensity = 0.28f;
+	Look.bOverride_FilmGrainIntensity = true;
+	Look.FilmGrainIntensity = 0.04f;
+	Look.bOverride_SceneFringeIntensity = true;
+	Look.SceneFringeIntensity = 0.0f;
+	Look.bOverride_BloomIntensity = true;
+	Look.BloomIntensity = 0.45f;
+	Look.bOverride_MotionBlurAmount = true;
+	Look.MotionBlurAmount = 0.3f;
+	Look.bOverride_Sharpen = true;
+	Look.Sharpen = 0.4f;
+	Look.bOverride_LumenFinalGatherQuality = true;
+	Look.LumenFinalGatherQuality = 2.0f;
+	Look.bOverride_LumenSceneDetail = true;
+	Look.LumenSceneDetail = 1.5f;
+	Look.bOverride_LumenReflectionQuality = true;
+	Look.LumenReflectionQuality = 2.0f;
 }
 
 void ADTGSky::BeginPlay()
 {
 	Super::BeginPlay();
 	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
+	// The engine's own volumetric cloud material. Loaded by path, so it is in the cook list in DefaultGame.ini.
+	if (UMaterialInterface* CloudMaterial = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr,
+			TEXT("/Engine/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.m_SimpleVolumetricCloud_Inst"))))
+	{
+		Clouds->SetMaterial(CloudMaterial);
+	}
+	else
+	{
+		UE_LOG(LogDTG, Warning, TEXT("No volumetric cloud material; the sky will be clear."));
+	}
 }
 
 void ADTGSky::Tick(float DeltaSeconds)
@@ -133,8 +185,10 @@ void ADTGSky::Strike(bool bStormy, float DeltaSeconds)
 
 void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 {
-	// Each weather is a visibility and a thickness of air; everything else follows from those.
-	float TargetDensity = 0.015f;
+	// Each weather is a visibility and a thickness of air; everything else follows from those. Clear air
+	// is thin: the sky atmosphere already gives distance its aerial perspective, and the 0.015 this used
+	// to be washed every long view out to grey.
+	float TargetDensity = 0.004f;
 	float TargetBrightness = 6.0f;
 	double TargetVisibility = 6000.0;
 	FLinearColor FogColour(0.45f, 0.52f, 0.6f);
@@ -147,25 +201,25 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 		TargetVisibility = 5000.0;
 		break;
 	case Weather::Overcast:
-		TargetDensity = 0.03f;
+		TargetDensity = 0.012f;
 		TargetBrightness = 3.0f;
 		TargetVisibility = 3000.0;
 		FogColour = FLinearColor(0.42f, 0.44f, 0.47f);
 		break;
 	case Weather::Rain:
-		TargetDensity = 0.055f;
+		TargetDensity = 0.025f;
 		TargetBrightness = 2.0f;
 		TargetVisibility = 1400.0;
 		FogColour = FLinearColor(0.36f, 0.39f, 0.43f);
 		break;
 	case Weather::Storm:
-		TargetDensity = 0.09f;
+		TargetDensity = 0.045f;
 		TargetBrightness = 1.1f;
 		TargetVisibility = 700.0;
 		FogColour = FLinearColor(0.25f, 0.27f, 0.31f);
 		break;
 	case Weather::Fog:
-		TargetDensity = 0.22f;
+		TargetDensity = 0.16f;
 		TargetBrightness = 2.4f;
 		TargetVisibility = 220.0;
 		FogColour = FLinearColor(0.62f, 0.64f, 0.66f);

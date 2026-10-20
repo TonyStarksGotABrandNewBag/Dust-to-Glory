@@ -1,6 +1,7 @@
 #include "Game/DTGWorldBuilder.h"
 
 #include "Sim/RoadMarkings.h"
+#include "Sim/StreetFurniture.h"
 #include "Sim/Vegetation.h"
 
 #include "DustToGlory.h"
@@ -16,6 +17,7 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGPlantModels.h"
+#include "Game/DTGPropModels.h"
 
 using namespace dtg::sim;
 
@@ -312,6 +314,77 @@ void ADTGWorldBuilder::ClearPlants(int32 Part)
 			PlantInstances[Index]->ClearInstances();
 			PlantInstances[Index]->SetVisibility(false);
 		}
+	}
+}
+
+UInstancedStaticMeshComponent* ADTGWorldBuilder::PropComponent(int32 Part, int32 Mesh)
+{
+	const int32 Index = Part * DTGPropModels::MeshCount() + Mesh;
+	if (Index >= PropInstances.Num())
+	{
+		PropInstances.SetNum(Index + 1);
+	}
+	if (!PropInstances[Index])
+	{
+		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
+		Instances->SetupAttachment(GetRootComponent());
+		Instances->RegisterComponent();
+		Instances->SetStaticMesh(DTGPropModels::Mesh(Mesh));
+		// Drawn, not collided with, for now: a car body sweep against thousands of poles is its own job.
+		Instances->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Instances->SetCastShadow(true);
+		PropInstances[Index] = Instances;
+	}
+	return PropInstances[Index].Get();
+}
+
+void ADTGWorldBuilder::ClearProps(int32 Part)
+{
+	for (int32 Mesh = 0; Mesh < DTGPropModels::MeshCount(); ++Mesh)
+	{
+		const int32 Index = Part * DTGPropModels::MeshCount() + Mesh;
+		if (PropInstances.IsValidIndex(Index) && PropInstances[Index])
+		{
+			PropInstances[Index]->ClearInstances();
+			PropInstances[Index]->SetVisibility(false);
+		}
+	}
+}
+
+void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
+{
+	ClearProps(Part);
+	if (!DTGPropModels::Ready())
+	{
+		return;
+	}
+	const double OriginX = ChunkX * static_cast<double>(ChunkSizeM);
+	const double OriginY = ChunkY * static_cast<double>(ChunkSizeM);
+	const dtg::sim::Rect Area{OriginX, OriginY, OriginX + ChunkSizeM, OriginY + ChunkSizeM};
+	dtg::sim::FurnitureRules Rules;
+	// Barriers laid end to end at the model's own length, so a raised deck has a continuous wall.
+	Rules.BarrierLengthM = DTGPropModels::BarrierLengthM();
+	const std::vector<dtg::sim::Prop> Props = dtg::sim::FurnitureIn(Game->Sim().Map, Game->Sim().City, Area, Rules);
+
+	TArray<TArray<FTransform>> PerMesh;
+	PerMesh.SetNum(DTGPropModels::MeshCount());
+	for (const dtg::sim::Prop& Value : Props)
+	{
+		const FTransform Placed = DTGPropModels::TransformFor(Value);
+		for (const DTGPropModels::FPart& Piece : DTGPropModels::PartsFor(Value.Kind, Value.Variant))
+		{
+			PerMesh[Piece.Mesh].Add(Piece.Local * Placed);
+		}
+	}
+	for (int32 Mesh = 0; Mesh < PerMesh.Num(); ++Mesh)
+	{
+		if (PerMesh[Mesh].IsEmpty())
+		{
+			continue;
+		}
+		UInstancedStaticMeshComponent* Instances = PropComponent(Part, Mesh);
+		Instances->AddInstances(PerMesh[Mesh], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+		Instances->SetVisibility(true);
 	}
 }
 
@@ -699,6 +772,7 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	// One material for the whole grid, blending grass, sand and clay by the class colours above.
 	Mesh->SetMaterial(0, DTGSurface::Material(EDTGSurface::Terrain));
 	BuildChunkPlants(ChunkX, ChunkY, Part, Mesh);
+	BuildChunkProps(ChunkX, ChunkY, Part);
 	Mesh->SetVisibility(true);
 
 	FDTGTerrainChunk Chunk;
@@ -804,6 +878,7 @@ void ADTGWorldBuilder::ReleaseChunk(int32 Index)
 		TerrainParts[Chunks[Index].Part]->ClearMeshSection(1);
 		// And its instanced plants, for the same reason.
 		ClearPlants(Chunks[Index].Part);
+		ClearProps(Chunks[Index].Part);
 		TerrainParts[Chunks[Index].Part]->SetVisibility(false);
 		FreeParts.Add(Chunks[Index].Part);
 	}

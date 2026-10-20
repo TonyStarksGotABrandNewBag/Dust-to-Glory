@@ -62,6 +62,26 @@
 		{
 			"Name": "AndroidFileServer",
 			"Enabled": false
+		},
+		{
+			"Name": "DLSS",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
+			"Name": "StreamlineCore",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
+			"Name": "StreamlineDLSSG",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
+			"Name": "StreamlineReflex",
+			"Enabled": true,
+			"Optional": true
 		}
 	]
 }

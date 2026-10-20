@@ -16,8 +16,10 @@
 class UDTGGameSubsystem;
 class UDirectionalLightComponent;
 class UExponentialHeightFogComponent;
+class UPostProcessComponent;
 class USkyAtmosphereComponent;
 class USkyLightComponent;
+class UVolumetricCloudComponent;
 
 UCLASS()
 class DUSTTOGLORY_API ADTGSky : public AActor
@@ -58,6 +60,14 @@ private:
 	UPROPERTY()
 	TObjectPtr<UExponentialHeightFogComponent> Fog;
 
+	/** Real clouds with depth that the sun lights through, rather than an empty blue dome. */
+	UPROPERTY()
+	TObjectPtr<UVolumetricCloudComponent> Clouds;
+
+	/** The look: colour grade, lens, motion blur and Lumen quality, applied everywhere. */
+	UPROPERTY()
+	TObjectPtr<UPostProcessComponent> Grade;
+
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
 
@@ -69,5 +79,5 @@ private:
 	float SunBase = 6.0f;          // eased daylight level of the sun
 	bool bSunSettled = false;      // false until the first frame has set it from the clock
 	float Brightness = 6.0f;
-	float FogDensity = 0.02f;
+	float FogDensity = 0.004f;
 };

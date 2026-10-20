@@ -42,3 +42,7 @@ ArtSource/
 # to generated plants without them.
 Content/Art/Models/
 __pycache__/
+
+# NVIDIA DLSS / Streamline plugins: ~2 GB, installed by Tools/fetch_dlss.py, used under NVIDIA's licence.
+Plugins/DLSS/
+Plugins/Streamline*/

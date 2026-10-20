@@ -106,6 +106,12 @@ private:
 	UInstancedStaticMeshComponent* PlantComponent(int32 Part, int32 Model);
 	/** Empties and hides a part's plant instances, when its chunk is released. */
 	void ClearPlants(int32 Part);
+	/** Utility poles, street lamps, hydrants and deck barriers for one streamed chunk (Sim/StreetFurniture). */
+	void BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part);
+	/** The instanced component drawing furniture mesh Mesh for terrain part Part, made on first use. */
+	UInstancedStaticMeshComponent* PropComponent(int32 Part, int32 Mesh);
+	/** Empties and hides a part's furniture, when its chunk is released. */
+	void ClearProps(int32 Part);
 	void UpdateChunks(const FVector& Around);
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);
@@ -125,6 +131,10 @@ private:
 	/** Plant instances, one component per model per terrain part: index Part * DTGPlantModels::Count() + Model. */
 	UPROPERTY()
 	TArray<TObjectPtr<UInstancedStaticMeshComponent>> PlantInstances;
+
+	/** Furniture instances, one component per mesh per terrain part: index Part * DTGPropModels::MeshCount() + Mesh. */
+	UPROPERTY()
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> PropInstances;
 
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Surfaces; // streets, highways, venue slabs: built once
