@@ -15,6 +15,7 @@
 #include "DTGWorldBuilder.generated.h"
 
 class UDTGGameSubsystem;
+class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UProceduralMeshComponent;
 
@@ -96,8 +97,15 @@ private:
 	void BuildWater();
 	/** The paint on the highways and the town streets, from Sim/RoadMarkings. */
 	void BuildRoadMarkings();
-	/** Trees and scrub for one streamed chunk, as a second section on that chunk's component. */
-	void BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh);
+	/**
+	 * Trees and scrub for one streamed chunk: instanced real models (DTGPlantModels) when they have been
+	 * imported, otherwise generated geometry as a second section on that chunk's component.
+	 */
+	void BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh);
+	/** The instanced component drawing Model for terrain part Part, made on first use and kept with the part. */
+	UInstancedStaticMeshComponent* PlantComponent(int32 Part, int32 Model);
+	/** Empties and hides a part's plant instances, when its chunk is released. */
+	void ClearPlants(int32 Part);
 	void UpdateChunks(const FVector& Around);
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);
@@ -113,6 +121,10 @@ private:
 	/** One component per live chunk, reused as the player moves. */
 	UPROPERTY()
 	TArray<TObjectPtr<UProceduralMeshComponent>> TerrainParts;
+
+	/** Plant instances, one component per model per terrain part: index Part * DTGPlantModels::Count() + Model. */
+	UPROPERTY()
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> PlantInstances;
 
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Surfaces; // streets, highways, venue slabs: built once

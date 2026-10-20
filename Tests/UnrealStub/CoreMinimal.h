@@ -680,6 +680,13 @@ struct FQuat
 	static const FQuat Identity;
 };
 
+struct FBoxSphereBounds
+{
+	FVector Origin;
+	FVector BoxExtent;
+	double SphereRadius = 0.0;
+};
+
 struct FTransform
 {
 	FTransform() = default;

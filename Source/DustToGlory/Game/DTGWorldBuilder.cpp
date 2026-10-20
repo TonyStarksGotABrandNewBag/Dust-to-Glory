@@ -8,12 +8,14 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
+#include "Game/DTGPlantModels.h"
 
 using namespace dtg::sim;
 
@@ -278,7 +280,42 @@ void ADTGWorldBuilder::BuildRoadMarkings()
 	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ false);
 }
 
-void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh)
+UInstancedStaticMeshComponent* ADTGWorldBuilder::PlantComponent(int32 Part, int32 Model)
+{
+	const int32 Index = Part * DTGPlantModels::Count() + Model;
+	if (Index >= PlantInstances.Num())
+	{
+		PlantInstances.SetNum(Index + 1);
+	}
+	if (!PlantInstances[Index])
+	{
+		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
+		Instances->SetupAttachment(GetRootComponent());
+		Instances->RegisterComponent();
+		Instances->SetStaticMesh(DTGPlantModels::Mesh(Model));
+		// As before: no collision. A car that clips a pine is a smaller problem than cooking collision
+		// for hundreds of trees every time a chunk streams in.
+		Instances->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Instances->SetCastShadow(true);
+		PlantInstances[Index] = Instances;
+	}
+	return PlantInstances[Index].Get();
+}
+
+void ADTGWorldBuilder::ClearPlants(int32 Part)
+{
+	for (int32 Model = 0; Model < DTGPlantModels::Count(); ++Model)
+	{
+		const int32 Index = Part * DTGPlantModels::Count() + Model;
+		if (PlantInstances.IsValidIndex(Index) && PlantInstances[Index])
+		{
+			PlantInstances[Index]->ClearInstances();
+			PlantInstances[Index]->SetVisibility(false);
+		}
+	}
+}
+
+void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh)
 {
 	if (!bPlantVegetation || Mesh == nullptr)
 	{
@@ -293,8 +330,36 @@ void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, UProceduralM
 
 	dtg::sim::PlantingRules Rules;
 	const std::vector<dtg::sim::Plant> Grown = dtg::sim::PlantsIn(Map, City, Area, Rules);
+	ClearPlants(Part);
 	if (Grown.empty())
 	{
+		Mesh->ClearMeshSection(1);
+		return;
+	}
+
+	// Real models when they have been imported: the same plants in the same places, drawn as instances.
+	if (DTGPlantModels::Ready())
+	{
+		TArray<TArray<FTransform>> PerModel;
+		PerModel.SetNum(DTGPlantModels::Count());
+		for (const dtg::sim::Plant& Value : Grown)
+		{
+			const int32 Model = DTGPlantModels::ModelFor(Value);
+			if (Model != INDEX_NONE)
+			{
+				PerModel[Model].Add(DTGPlantModels::TransformFor(Value, Model));
+			}
+		}
+		for (int32 Model = 0; Model < PerModel.Num(); ++Model)
+		{
+			if (PerModel[Model].IsEmpty())
+			{
+				continue;
+			}
+			UInstancedStaticMeshComponent* Instances = PlantComponent(Part, Model);
+			Instances->AddInstances(PerModel[Model], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+			Instances->SetVisibility(true);
+		}
 		Mesh->ClearMeshSection(1);
 		return;
 	}
@@ -633,7 +698,7 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
 	// One material for the whole grid, blending grass, sand and clay by the class colours above.
 	Mesh->SetMaterial(0, DTGSurface::Material(EDTGSurface::Terrain));
-	BuildChunkPlants(ChunkX, ChunkY, Mesh);
+	BuildChunkPlants(ChunkX, ChunkY, Part, Mesh);
 	Mesh->SetVisibility(true);
 
 	FDTGTerrainChunk Chunk;
@@ -737,6 +802,8 @@ void ADTGWorldBuilder::ReleaseChunk(int32 Index)
 		// nothing -- open water, a town centre, the far side of the state line -- it would otherwise
 		// come back visible still carrying the last chunk's trees, standing in the sea.
 		TerrainParts[Chunks[Index].Part]->ClearMeshSection(1);
+		// And its instanced plants, for the same reason.
+		ClearPlants(Chunks[Index].Part);
 		TerrainParts[Chunks[Index].Part]->SetVisibility(false);
 		FreeParts.Add(Chunks[Index].Part);
 	}

@@ -36,3 +36,9 @@ Tests/UnrealStub/*.generated.h
 
 # Raw art downloads; the imported .uasset files under Content/Art are what get committed.
 ArtSource/
+
+# Imported models keep their full scanned geometry (the pine alone is ~600 MB), so they are rebuilt
+# locally from Tools/Art/fetch_models.py + import_models.py rather than committed. The game falls back
+# to generated plants without them.
+Content/Art/Models/
+__pycache__/
