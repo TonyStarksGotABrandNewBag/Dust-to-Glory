@@ -180,6 +180,19 @@ Still missing:
   Their cameras often land in the street-tree row 3.3 m in from the kerb: the `walker` one did in three
   runs out of three on 20 October, the person on the pavement behind the trunk.
 
+- **Nobody can shove a car by walking into it** (20 October). They could: a car sweeps its body on the
+  DTGBodySweep channel and backs out of whatever blocks the sweep, and a person's capsule blocked it, so
+  walking into a parked car pushed it down the street while the player walked on through the space it
+  left (the car's body answered the Pawn channel with overlap). Now a capsule, the player's and the
+  pedestrians', ignores DTGBodySweep, and the car's body blocks Pawn. `-DTGPushCheck` proves it the way
+  a test would: it stands the player a stride off the nearest standing car, waits four seconds to see
+  how far the car creeps by itself, walks the player into it for four more, and logs the verdict. Before
+  the fix: the car moved 12.10 m and the player ended inside it. After: 0.16 m, less than the 0.24 m it
+  drifted on its own, and the player stopped at the side. Not fixed, and noticed by that baseline: a
+  standing car creeps at about 6 cm/s on its own (the starter car, on the spawn street); a parking brake
+  in the chassis simulation is the likely answer. Not verified: what happens to a pedestrian a moving car
+  drives into now that the body blocks them (the character's own depenetration decides).
+
 **Memory, measured** (20 October, `-DTGMemReport` at the car shot, RTX 5070 Laptop, 8 GB): 5.7 GB of
 video memory in use at the shot, 7.7 GB at the peak during loading. It is not the car textures: the
 texture streaming pool held 277 MB of its 1000, and the City Sample textures are virtual (320 MB of

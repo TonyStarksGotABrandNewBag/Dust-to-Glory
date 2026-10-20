@@ -69,6 +69,10 @@ metres; Unreal works in centimetres; that constant is the whole boundary.
 # runs the stale dtg_tests.exe, which once reported "129 passed" for a test that had never compiled.
 cd Tests && cmake -S . -B build && cmake --build build --parallel 4 && ./build/dtg_tests
 
+# The photo tour and the in-game checks, one editor at a time (the GPU holds one); a worktree first
+# runs Tools/link_local_assets.ps1 to junction in the gitignored packs. See docs/HANDOFF.md.
+powershell -File Tools/photo.ps1 -Build -Shots street,walker
+
 # The four CI checks. All four must pass.
 cd Tests
 python3 check_content.py    # data files parse, states are well-formed

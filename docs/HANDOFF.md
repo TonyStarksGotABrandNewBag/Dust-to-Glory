@@ -169,6 +169,10 @@ cloning.
 - **`check_engine.py` is skipped on a machine with only MSVC** (this one): it drives g++ or clang++. There
   the real Unreal build is the compile check, so run `Build.bat DustToGloryEditor Win64 Development`
   before claiming the engine layer compiles.
+- **Checks that run in the game, from the command line:** `-DTGPhoto` (the photo tour; `Tools/photo.ps1`
+  builds and runs it one editor at a time, so several worktrees can share the GPU), `-DTGPushCheck`
+  (walks the player into a standing car and logs whether it moved). A worktree needs the gitignored packs
+  junctioned in first: `Tools/link_local_assets.ps1`.
 - **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here

@@ -92,6 +92,9 @@ ADTGVehicle::ADTGVehicle()
 	Body->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	// So another car's body sweep, and anything else looking for solid things, finds this one.
 	Body->SetCollisionResponseToChannel(DTGBodySweepChannel, ECR_Block);
+	// And solid to people: the player and the pedestrians walk round a car, not through it. Their capsules
+	// ignore DTGBodySweep in turn, so the car never backs away from them (-DTGPushCheck proves both).
+	Body->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	// Nothing subscribes to overlaps, and the car is teleported every frame by the chassis simulation,
 	// which would make the engine recompute the overlap set each time for nobody.
 	Body->SetGenerateOverlapEvents(false);

@@ -24,6 +24,10 @@ ADTGCharacter::ADTGCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(38.0f, 90.0f);
+	// Cars sweep their bodies on DTGBodySweep and back out of whatever blocks it. A person must not count:
+	// walking into a parked car shoved it down the street, and the player walked on through the space it
+	// left. The car's body blocks the Pawn channel instead, so it is the person who stops.
+	GetCapsuleComponent()->SetCollisionResponseToChannel(DTGBodySweepChannel, ECR_Ignore);
 	bUseControllerRotationYaw = false;
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 	{

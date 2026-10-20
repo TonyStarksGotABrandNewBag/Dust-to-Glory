@@ -12,6 +12,7 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGHud.h"
 #include "Game/DTGPhotoMode.h"
+#include "Game/DTGPushCheck.h"
 #include "Game/DTGPlayerController.h"
 #include "Game/DTGSky.h"
 #include "Game/DTGTrafficDirector.h"
@@ -71,6 +72,12 @@ void ADTGGameMode::StartPlay()
 	SpawnDirectors();
 	SpawnStarterCar();
 	bStarted = true;
+	if (ADTGPushCheck::IsRequested())
+	{
+		FActorSpawnParameters CheckParams;
+		CheckParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		GetWorld()->SpawnActor<ADTGPushCheck>(ADTGPushCheck::StaticClass(), FTransform::Identity, CheckParams);
+	}
 	if (ADTGPhotoMode::IsRequested())
 	{
 		// Spawned last, so the starter car it photographs is already standing.

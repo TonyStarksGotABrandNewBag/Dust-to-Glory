@@ -2,6 +2,7 @@
 
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -509,6 +510,8 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			// this flag is already set, and with no controller nothing sets it afterwards. Without this call
 			// every pedestrian stood at 0 cm/s for ever (photo mode's walker listing showed forty of them).
 			Legs->SetDefaultMovementMode();
+			// As the player's capsule (ADTGCharacter): not something a car backs away from.
+			Person->GetCapsuleComponent()->SetCollisionResponseToChannel(DTGBodySweepChannel, ECR_Ignore);
 			// Steering round each other: everybody walks the same line round the block, and two people meeting
 			// on it head-on stood nose to nose until one of them changed their mind -- a sixth of them at once,
 			// with errands. Unreal's crowd avoidance took that from 6.7 of 40 to 0.1 (docs/REALISM.md).
