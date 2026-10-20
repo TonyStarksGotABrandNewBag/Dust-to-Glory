@@ -11,23 +11,26 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
-#include "Sim/StreetFurniture.h"
+#include "Sim/Pavement.h"
+
+#include <array>
+#include <vector>
 
 using namespace dtg::sim;
 
 namespace detail_trafficdirector
 {
 	/**
-	 * The pavement ring round a block, in simulation metres: its four corners, half the sidewalk in from
-	 * the kerb, anticlockwise from the south-west; side N runs from corner N to corner N + 1.
+	 * The pavement ring round a block, in simulation metres (PavementRing): its four corners, half the
+	 * sidewalk in from the kerb, anticlockwise from the south-west; side N runs from corner N to corner N + 1.
 	 */
 	void RingCorners(const FVector2D& Min, const FVector2D& Max, FVector2D (&Corners)[4])
 	{
-		const double In = 0.5 * FurnitureRules().SidewalkM;
-		Corners[0] = FVector2D(Min.X + In, Min.Y + In);
-		Corners[1] = FVector2D(Max.X - In, Min.Y + In);
-		Corners[2] = FVector2D(Max.X - In, Max.Y - In);
-		Corners[3] = FVector2D(Min.X + In, Max.Y - In);
+		const std::array<std::array<double, 2>, 4> Ring = PavementRing(dtg::sim::Rect{Min.X, Min.Y, Max.X, Max.Y});
+		for (int32 Corner = 0; Corner < 4; ++Corner)
+		{
+			Corners[Corner] = FVector2D(Ring[Corner][0], Ring[Corner][1]);
+		}
 	}
 
 	/** The side of the ring a spot is nearest. */
@@ -371,56 +374,85 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			Walker.NextThink = Now + FMath::FRandRange(4.0, 9.0);
 			NpcMind& Mind = Game->Sim().Npcs.GetOrCreate(TCHAR_TO_UTF8(*Walker.MindId));
 			const NpcDecision Decision = Game->Sim().Npcs.Decide(Mind, Game->Sim().Clock.Hour(), Game->Sim().Random, Game->Sim().Careers);
+			const CityPlan& City = Game->Sim().City;
+			const FVector2D Here = Game->ToSim(Walker.Actor->GetActorLocation());
 			LotRole WantedRole = LotRole::Shop;
 			const BuildingPlan* Destination = nullptr;
 			if (!Decision.Destination.empty() && ParseLotRole(Decision.Destination, WantedRole))
 			{
-				Destination = Game->Sim().City.FirstWithRole(WantedRole);
+				// The nearest one: the first in the plan is usually in another town, which no pavement reaches.
+				for (const BuildingPlan* Candidate : City.BuildingsNear(Here.X, Here.Y, DespawnRadiusM))
+				{
+					if (Candidate->Role == WantedRole)
+					{
+						Destination = Candidate;
+						break;
+					}
+				}
 			}
-			Walker.bVia = false;
-			if (Destination)
+			// Round the blocks and over the roads at the corners, rather than straight through the houses and
+			// over the lawns; the length of the walk comes back.
+			auto Follow = [&](double ToX, double ToY)
 			{
-				const double Z = Game->Sim().Map.HeightAt(Destination->DoorX, Destination->DoorY);
-				Walker.Target = Game->ToUnreal(Destination->DoorX, Destination->DoorY, Z);
+				FVector2D Last = Here;
+				double LengthM = 0.0;
+				for (const std::array<double, 2>& Waypoint : PavementRoute(City, Here.X, Here.Y, ToX, ToY))
+				{
+					const FVector2D Next(Waypoint[0], Waypoint[1]);
+					LengthM += FVector2D::Distance(Last, Next);
+					Last = Next;
+					Walker.Route.Add(Game->ToUnreal(Next.X, Next.Y, Game->Sim().Map.HeightAt(Next.X, Next.Y)));
+				}
+				return LengthM;
+			};
+			Walker.Route.Reset();
+			Walker.bErrand = false;
+			// Already at the door: stays there, rather than stepping out to the pavement and back.
+			const bool bThere = Destination && FVector2D::Distance(Here, FVector2D(Destination->DoorX, Destination->DoorY)) < 1.5;
+			if (Destination && !bThere)
+			{
+				const double LengthM = Follow(Destination->DoorX, Destination->DoorY);
+				// Seen through rather than rethought every few seconds, which turned people round mid-road; but
+				// given up if it takes far longer than it should -- at a metre a second, under their walking
+				// pace -- as it would for somebody stuck against something.
+				Walker.bErrand = Walker.Route.Num() > 0;
+				Walker.NextThink = Walker.bErrand ? Now + LengthM + 10.0 : Walker.NextThink;
 			}
-			else
+			if (!Walker.bErrand && !bThere)
 			{
-				// Nothing to do: a stroll along the home block's pavement, on this side of the block or round
-				// one corner onto the next, never across the block: the lawn, or the houses, are in the middle.
+				// Nothing to do: a stroll to a spot on the home block's pavement, on the side nearest them or
+				// round one corner onto the next -- by the pavements too, since an errand may have left them
+				// blocks away, and straight back would be through whatever stands between.
 				FVector2D Corners[4];
 				detail_trafficdirector::RingCorners(Walker.BlockMin, Walker.BlockMax, Corners);
-				const int32 Side = detail_trafficdirector::NearestSide(Corners, Game->ToSim(Walker.Actor->GetActorLocation()));
-				const int32 Turn = FMath::RandHelper(3) - 1;
-				const FVector2D Spot = detail_trafficdirector::AlongSide(Corners, (Side + Turn + 4) % 4);
-				Walker.Target = Game->ToUnreal(Spot.X, Spot.Y, Game->Sim().Map.HeightAt(Spot.X, Spot.Y));
-				if (Turn != 0)
-				{
-					const FVector2D Corner = Corners[Turn > 0 ? (Side + 1) % 4 : Side];
-					Walker.Via = Game->ToUnreal(Corner.X, Corner.Y, Game->Sim().Map.HeightAt(Corner.X, Corner.Y));
-					Walker.bVia = true;
-				}
+				const int32 Side = detail_trafficdirector::NearestSide(Corners, Here);
+				const FVector2D Spot = detail_trafficdirector::AlongSide(Corners, (Side + FMath::RandHelper(3) + 3) % 4);
+				Follow(Spot.X, Spot.Y);
 			}
 		}
 		// Walk there. Pedestrians use Unreal's own movement: they are people, not vehicles.
 		if (ACharacter* Person = Cast<ACharacter>(Walker.Actor))
 		{
-			if (Walker.bVia && FVector::Dist2D(Walker.Via, Person->GetActorLocation()) < 100.0)
+			while (Walker.Route.Num() > 0 && FVector::Dist2D(Walker.Route[0], Person->GetActorLocation()) < 100.0)
 			{
-				// Round the corner.
-				Walker.bVia = false;
+				Walker.Route.RemoveAt(0);
 			}
-			const FVector ToGo = (Walker.bVia ? Walker.Via : Walker.Target) - Person->GetActorLocation();
-			if (ToGo.Size2D() < 100.0)
+			if (Walker.Route.Num() == 0)
 			{
-				// There: stands until the next think, rather than shuffling on the spot.
+				// There: stands until the next think, rather than shuffling on the spot -- a while, after an errand.
+				if (Walker.bErrand)
+				{
+					Walker.bErrand = false;
+					Walker.NextThink = Now + FMath::FRandRange(4.0, 9.0);
+				}
 				continue;
 			}
-			const FVector Direction = ToGo.GetSafeNormal2D();
+			const FVector Direction = (Walker.Route[0] - Person->GetActorLocation()).GetSafeNormal2D();
 			// Forced, because a pawn with no local controller ignores movement input outright. Letting the
-		// movement component run (bRunPhysicsWithNoController, where they are spawned) only gets them
-		// gravity; without this they stand on the pavement for ever, turning to face where they meant
-		// to walk.
-		Person->AddMovementInput(Direction, 1.0f, /*bForce*/ true);
+			// movement component run (bRunPhysicsWithNoController, where they are spawned) only gets them
+			// gravity; without this they stand on the pavement for ever, turning to face where they meant
+			// to walk.
+			Person->AddMovementInput(Direction, 1.0f, /*bForce*/ true);
 			if (!Direction.IsNearlyZero())
 			{
 				Person->SetActorRotation(FRotator(0.0, Direction.Rotation().Yaw, 0.0));
@@ -477,6 +509,11 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			// this flag is already set, and with no controller nothing sets it afterwards. Without this call
 			// every pedestrian stood at 0 cm/s for ever (photo mode's walker listing showed forty of them).
 			Legs->SetDefaultMovementMode();
+			// Steering round each other: everybody walks the same line round the block, and two people meeting
+			// on it head-on stood nose to nose until one of them changed their mind -- a sixth of them at once,
+			// with errands. Unreal's crowd avoidance took that from 6.7 of 40 to 0.1 (docs/REALISM.md).
+			Legs->AvoidanceConsiderationRadius = 200.0f;
+			Legs->SetAvoidanceEnabled(true);
 		}
 		// Dressed after the mind id is known, so the same passer-by looks the same every time.
 		FDTGWalker Walker;
@@ -513,7 +550,6 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			Game->Sim().Npcs.Introduce(MyMind, TCHAR_TO_UTF8(*Neighbour.MindId), 0.4);
 			Introduced += 1;
 		}
-		Walker.Target = Person->GetActorLocation();
 		Walkers.Add(Walker);
 		return;
 	}

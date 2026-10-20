@@ -7,6 +7,7 @@ class UCharacterMovementComponent : public UActorComponent
 public:
 	void SetMovementMode(EMovementMode Mode, uint8 CustomMode = 0) { (void)Mode; (void)CustomMode; }
 	void SetDefaultMovementMode() {}
+	void SetAvoidanceEnabled(bool bEnable) { (void)bEnable; }
 	EMovementMode MovementMode = MOVE_Walking;
 	bool IsFalling() const { return false; }
 	bool IsMovingOnGround() const { return true; }
@@ -23,5 +24,6 @@ public:
 	float GroundFriction = 8.0f;
 	bool bOrientRotationToMovement = false;
 	bool bRunPhysicsWithNoController = false;
+	float AvoidanceConsiderationRadius = 500.0f;
 	FRotator RotationRate;
 };

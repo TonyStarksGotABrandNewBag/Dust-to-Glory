@@ -158,13 +158,27 @@ Still missing:
   `bRunPhysicsWithNoController` after spawning, and a character picks its walking movement mode at spawn
   only when that flag is already set, so with no controller all forty stood at 0 cm/s for ever (photo
   mode's listing of every character showed it). `SetDefaultMovementMode()` after the flag fixes it. They
-  spawn on the pavement ring round their block, not at its centre, and stroll along it, round at most one
-  corner, rather than across the lawn or the houses; an errand still goes in a straight line to the door,
-  through whatever is in the way, because there is no routing. Photo mode's `person` and `walker` shots
-  are framed when they come up, ahead of where the nearest person on the street will be when the shot is
-  taken, with the eye kept off the lots (from inside a shell the one-sided walls are not there); `walker`
+  spawn on the pavement ring round their block, not at its centre. Errands and strolls alike go by the
+  pavements (`PavementRoute`, `Sim/Pavement.h`): round the ring of the block they are on to the corner
+  facing the goal, straight over the road to the same corner of the next block, block by block, then up
+  the front path to the door. An errand goes to the nearest building of the kind the mind names -- it
+  went to the first in the state, usually in another town -- and is seen through rather than rethought
+  every few seconds, unless it takes longer than walking it at 1 m/s plus ten seconds. The test walks 300
+  random errands across the biggest town: no leg enters a building, crosses a lawn, or crosses a road
+  except straight over at a corner, and none walks more than 120 m beyond the grid distance (the worst
+  is 71). Eleven mutants of the routing each fail it. In the game, with every second pedestrian sent on
+  an errand by a temporary hack and a census of all forty every five seconds for three minutes: nobody
+  ever inside a building, a lawn only on a front path 2-4 m from a door, everyone else on the pavement or
+  crossing at a corner. The census also showed a sixth of them at a time stood nose to nose with somebody
+  coming the other way along the same line (strolls did it too); Unreal's crowd avoidance took that from
+  6.7 of 40 to 0.1. Not verified: errands at night, when the scripted minds all head home (the census
+  forced daytime ones instead), and a crowd at one door, which avoidance jostles rather than queues.
+  Photo mode's `person` and `walker` shots are framed when they come up, ahead of where the nearest
+  person on the street will be when the shot is taken, with the eye kept off the lots (from inside a shell the one-sided walls are not there); `walker`
   waits up to 30 s for someone walking, and both now see the plain-character pedestrians, which they
   never did before: both searches iterated the project's own character class, which only the player is.
+  Their cameras often land in the street-tree row 3.3 m in from the kerb: the `walker` one did in three
+  runs out of three on 20 October, the person on the pavement behind the trunk.
 
 **Memory, measured** (20 October, `-DTGMemReport` at the car shot, RTX 5070 Laptop, 8 GB): 5.7 GB of
 video memory in use at the shot, 7.7 GB at the peak during loading. It is not the car textures: the

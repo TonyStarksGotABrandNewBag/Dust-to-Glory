@@ -63,7 +63,7 @@ metres; Unreal works in centimetres; that constant is the whole boundary.
 ## Commands
 
 ```sh
-# Tests: 130 of them, seconds to build, no engine required. On the Windows build machine cmake and
+# Tests: 132 of them, seconds to build, no engine required. On the Windows build machine cmake and
 # MSVC are only on the PATH inside a Visual Studio developer shell: run
 # Launch-VsDevShell.ps1 -Arch amd64 first, and check the binary's timestamp -- a plain shell silently
 # runs the stale dtg_tests.exe, which once reported "129 passed" for a test that had never compiled.
