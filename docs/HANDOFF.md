@@ -140,7 +140,9 @@ cloning.
   1. `python Tools/Art/fetch_textures.py` downloads the CC0 textures into `ArtSource/`, which is
      git-ignored.
   2. Run `Tools/Art/build_materials.py` through `UnrealEditor-Cmd -run=pythonscript`. It rebuilds
-     every material.
+     every material; with `DTG_MATERIAL_STAGES=window` (or `surfaces`) in the environment, only
+     those. It keeps `MPC_DTG`'s existing parameters: the materials reference them by id, and a
+     rebuilt collection leaves every material built against the old one failing to compile.
 - **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here

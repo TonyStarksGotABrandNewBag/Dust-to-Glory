@@ -70,8 +70,7 @@ meshes need neither UVs nor tangents.
 Still missing:
 - **Bark and leaves.** Plants are still one flat-coloured section. `PlantTri` has no trunk/foliage tag yet.
 - **Clear-coat paint.** UE 5.8's Python API does not expose the clear-coat pins.
-- **Leaf translucency, emissive lights and lit windows.**
-- **Wet roads.** Nothing drives a wetness parameter from the weather yet.
+- **Leaf translucency.**
 - **Real shapes.** Every shape is still a box, and textures do not change that.
 
 **Rendering, 19 October.** Now on in this project:
@@ -98,15 +97,25 @@ Still missing:
 - **Rain wets the roads** and **windows light up after dark**: `ADTGSky` drives `MPC_DTG` (Wet, Night).
 - **People are Epic's mannequins** (`Tools/fetch_mannequins.py`) with idle, walk and jog clips matched
   to ground speed; the box figure stands in when the assets are not there.
-- **Frame rate** is logged per photo-mode shot: 32-67 fps at 1600x900 with everything on (RTX 5070).
+- **Night** (20 October): a moon (a second atmosphere light, there only once the sun is under), street
+  lamps that come up with the dark (a 2000-lumen point light at every lamp head, scaled by the sky's
+  night level, so a sunny street has no white pools), lit windows warmed to tungsten, and the exposure
+  held two and a half stops under after dark -- left to itself the camera opened up until a moonlit
+  street looked like an overcast afternoon. Photo mode adds `night-street` and `night-downtown` at 21:40,
+  last, because the camera takes a while to open back up and the daylight shots came out washed out.
+- **Frame rate** is logged per photo-mode shot: 31-58 fps by day at 1600x900 with everything on (RTX
+  5070 Laptop), 26-28 fps at night (the moon's shadows, the lamps, the headlights). Headlights cast no
+  shadows and only light up within 180 m of the camera: with every car's two beams shadowed, a night
+  street ran at 10 fps. A shot that moves the clock settles for ten seconds, not five, because the
+  lit windows' pipeline states compile and the camera re-adapts; only photo mode jumps the clock.
 
-Still box geometry: cars. One engine ensure seen once in photo mode (`!Geometry->IsEvicted()` in
-RayTracing.cpp); harmless so far, worth watching.
-Not checked: the frame rate with all of it on.
+Still box geometry: cars. One engine ensure seen once per photo-mode run (`!Geometry->IsEvicted()` in
+RayTracing.cpp); harmless so far, worth watching. The sun is six units, not a hundred thousand lux, so
+every light in the game is scaled to it rather than physical; the lamp heads themselves do not glow.
 
-**Lighting.** Lumen GI and reflections, a sky atmosphere driven by the existing time-of-day clock, and
-volumetric fog for the morning haze the mockups lean on. The simulation already produces sun angle and
-weather state; nothing consumes them for lighting yet.
+**Lighting.** Done: Lumen GI and reflections, a sky atmosphere with the sun and moon driven by the
+time-of-day clock, volumetric fog and clouds, and the weather driving the fog, the wet roads and the
+lightning. The lights are tuned against each other rather than physical (see above).
 
 **Nanite and foliage instancing.** Trees are procedural meshes built per chunk. That is affordable now
 because there are tens per chunk, not thousands. Real forest density needs

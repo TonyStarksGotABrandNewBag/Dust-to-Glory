@@ -126,7 +126,9 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 	}
 	bCaptured = false;
 	Frame(Shots[Current]);
-	NextAt = Now + detail_photo::SettleSeconds;
+	// A shot that moves the clock gets twice as long: the camera has to re-adapt, the lit windows' shaders
+	// have to compile, and the frame rate logged with it should be the settled one.
+	NextAt = Now + (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0) * detail_photo::SettleSeconds;
 }
 
 void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
@@ -403,6 +405,22 @@ void ADTGPhotoMode::PlanShots()
 			const FVector Centre = Spot + FVector(0.0, 0.0, 60.0);
 			const FVector Eye = Centre + Forward * 560.0 + Right * 380.0 + FVector(0.0, 0.0, 70.0);
 			Shots.Add({TEXT("car"), Eye, detail_photo::Looking(Eye, Centre)});
+		}
+	}
+
+	// And the street and the towers after dark: lit windows, lamps, moonlight. Last, because the camera
+	// takes a while to open back up from the dark, and the daylight shots would come out washed out.
+	{
+		const int32 Count = Shots.Num();
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			if (Shots[Index].Name == TEXT("street") || Shots[Index].Name == TEXT("downtown"))
+			{
+				FDTGPhotoShot Night = Shots[Index];
+				Night.Name = TEXT("night-") + Night.Name;
+				Night.ClockMinutes = 21.0 * 60.0 + 40.0;
+				Shots.Add(Night);
+			}
 		}
 	}
 }

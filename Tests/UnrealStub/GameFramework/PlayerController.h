@@ -35,6 +35,7 @@ public:
 		OutRotation = FRotator();
 	}
 	void SetViewTarget(AActor* Target) { (void)Target; }
+	AActor* GetViewTarget() const { return nullptr; }
 	void SetViewTargetWithBlend(AActor* Target, float BlendTime = 0.0f)
 	{
 		(void)Target;

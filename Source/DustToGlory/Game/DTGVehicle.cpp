@@ -117,6 +117,9 @@ ADTGVehicle::ADTGVehicle()
 		Lamp->SetInnerConeAngle(18.0f);
 		Lamp->SetOuterConeAngle(38.0f);
 		Lamp->SetLightColor(FLinearColor(1.0f, 0.97f, 0.88f));
+		// No shadows: a beam on a road does not need them, and with twenty cars about, forty shadowed
+		// spotlights took a night street from forty frames a second to ten.
+		Lamp->SetCastShadows(false);
 		Lamp->SetVisibility(false);
 		Headlights.Add(Lamp);
 	}
@@ -312,7 +315,15 @@ void ADTGVehicle::Tick(float DeltaSeconds)
 		{
 			Sky = Cast<ADTGSky>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGSky::StaticClass()));
 		}
-		const bool bOn = Sky && Sky->IsNight();
+		bool bOn = Sky && Sky->IsNight();
+		if (bOn)
+		{
+			// Near the camera, which in photo mode is not the player: every lit beam is a light the
+			// whole view pays for, and one two hundred metres off is a dot.
+			const APlayerController* Viewing = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+			const AActor* Viewer = Viewing ? Viewing->GetViewTarget() : nullptr;
+			bOn = !Viewer || FVector::DistSquared(Viewer->GetActorLocation(), GetActorLocation()) < FMath::Square(180.0 * DTGMetresToUnreal);
+		}
 		for (TObjectPtr<USpotLightComponent>& Lamp : Headlights)
 		{
 			if (Lamp && Lamp->GetVisibleFlag() != bOn)

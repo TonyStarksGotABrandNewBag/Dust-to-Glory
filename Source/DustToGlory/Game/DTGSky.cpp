@@ -34,6 +34,19 @@ ADTGSky::ADTGSky()
 	Sun->bAtmosphereSunLight = true;
 	Sun->SetCastShadows(true);
 
+	// The moon: a faint, cool second sun that gives the night a direction, shadows and a sky that is not
+	// black. The atmosphere scatters it as the second atmosphere light, so a night sky still has a glow.
+	// Far brighter than a real moon against this sun, because a night you cannot see is not playable.
+	Moon = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("Moon"));
+	Moon->SetupAttachment(Root);
+	Moon->SetMobility(EComponentMobility::Movable);
+	Moon->SetIntensity(0.0f);
+	Moon->SetLightColor(FLinearColor(0.62f, 0.72f, 1.0f));
+	Moon->SetDynamicShadowDistanceMovableLight(20000.0f);
+	Moon->bAtmosphereSunLight = true;
+	Moon->AtmosphereSunLightIndex = 1;
+	Moon->SetCastShadows(true);
+
 	Atmosphere = CreateDefaultSubobject<USkyAtmosphereComponent>(TEXT("Atmosphere"));
 	Atmosphere->SetupAttachment(Root);
 
@@ -82,6 +95,10 @@ ADTGSky::ADTGSky()
 	Look.MotionBlurAmount = 0.3f;
 	Look.bOverride_Sharpen = true;
 	Look.Sharpen = 0.4f;
+	// The exposure is set each frame: left to itself the camera opens up until a moonlit street looks
+	// like an overcast afternoon, so after dark it is held two and a half stops under.
+	Look.bOverride_AutoExposureBias = true;
+	Look.AutoExposureBias = 0.0f;
 	Look.bOverride_LumenFinalGatherQuality = true;
 	Look.LumenFinalGatherQuality = 2.0f;
 	Look.bOverride_LumenSceneDetail = true;
@@ -146,7 +163,7 @@ void ADTGSky::Tick(float DeltaSeconds)
 
 	// Night is lit by the sky rather than the sun, and never goes fully black. A flash is added on top
 	// of all of it, so lightning lights a midnight road as well as a grey afternoon.
-	const double Daylight = FMath::Clamp((SunPitch + 6.0) / 18.0, 0.0, 1.0);
+	Daylight = FMath::Clamp((SunPitch + 6.0) / 18.0, 0.0, 1.0);
 	const float TargetIntensity = static_cast<float>(0.15 + Daylight * Brightness);
 	// The daylight level is kept separately from what the light is actually set to, in case anything
 	// else is ever added on top of it. It starts where the first frame wants it, so a game that begins
@@ -161,6 +178,14 @@ void ADTGSky::Tick(float DeltaSeconds)
 	// adding it there would light the world from underneath at exactly the moment it shows most.
 	// Lightning is instantaneous; the decay is what you actually see.
 	Ambient->SetIntensity(static_cast<float>(0.25 + Daylight * 0.9 + Flash * 11.0));
+	// The moon stands opposite the sun, highest when the sun is deepest, and comes up as the sun goes
+	// under. Hidden while it is off: a light of any intensity is a second set of shadow maps.
+	const double Moonlight = FMath::Clamp(-SunPitch / 6.0, 0.0, 1.0);
+	const double MoonPitch = FMath::Clamp(-SunPitch * 1.5, 0.0, 60.0);
+	Moon->SetWorldRotation(FRotator(-MoonPitch, 280.0 + Fraction * 200.0, 0.0));
+	Moon->SetIntensity(static_cast<float>(0.14 * Moonlight));
+	Moon->SetVisibility(Moonlight > 0.0);
+	Grade->Settings.AutoExposureBias = static_cast<float>(-2.5 * (1.0 - Daylight));
 	// What the materials read: windows light up as the day goes, and the roads darken and shine in the rain,
 	// which takes a while to wet them and a while to dry.
 	const double TargetWet = Now == Weather::Rain ? 0.85 : (Now == Weather::Storm ? 1.0 : (Now == Weather::Fog ? 0.3 : 0.0));

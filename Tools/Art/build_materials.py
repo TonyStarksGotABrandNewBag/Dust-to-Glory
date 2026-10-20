@@ -38,13 +38,23 @@ def build_collection():
         collection = unreal.load_asset(path)
     else:
         collection = tools.create_asset("MPC_DTG", MATERIALS, unreal.MaterialParameterCollection, unreal.MaterialParameterCollectionFactoryNew())
-    params = []
+    # Keep what is there. Every parameter carries an id the materials reference by, and a fresh list
+    # with fresh ids leaves every material built against the old one failing to compile (seen: a grey
+    # checkerboard world after a window-only rebuild). Only what is missing is added.
+    params = list(collection.get_editor_property("scalar_parameters"))
+    have = {str(param.get_editor_property("parameter_name")) for param in params}
+    added = []
     for name, value in (("Night", 0.0), ("Wet", 0.0)):
+        if name in have:
+            continue
         param = unreal.CollectionScalarParameter()
         param.set_editor_property("parameter_name", name)
         param.set_editor_property("default_value", value)
         params.append(param)
-    collection.set_editor_property("scalar_parameters", params)
+        added.append(name)
+    if added:
+        collection.set_editor_property("scalar_parameters", params)
+        log("collection parameters added: " + ", ".join(added))
     return collection
 
 
@@ -319,10 +329,17 @@ def build_window_master():
     glow_night = expr(material, unreal.MaterialExpressionMultiply, -150, 200)
     mel.connect_material_expressions(glow, "", glow_night, "A")
     mel.connect_material_expressions(night, "", glow_night, "B")
+    # Tungsten, and about half the strength of the room as seen by day, or the windows blow out white
+    # against moonlight once the exposure has settled on the street.
+    warm = expr(material, unreal.MaterialExpressionConstant3Vector, -150, 350)
+    warm.set_editor_property("constant", unreal.LinearColor(0.55, 0.43, 0.27, 1.0))
+    glow_warm = expr(material, unreal.MaterialExpressionMultiply, 0, 250)
+    mel.connect_material_expressions(glow_night, "", glow_warm, "A")
+    mel.connect_material_expressions(warm, "", glow_warm, "B")
     roughness = scalar(material, "Roughness", 0.06, -500, 450)
     specular = scalar(material, "Specular", 1.0, -500, 550)
     mel.connect_material_property(tinted, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    mel.connect_material_property(glow_night, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.connect_material_property(glow_warm, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(roughness, "", unreal.MaterialProperty.MP_ROUGHNESS)
     mel.connect_material_property(specular, "", unreal.MaterialProperty.MP_SPECULAR)
     mel.recompile_material(material)
@@ -535,17 +552,22 @@ def build_instances(surface, plain, paint):
 
 
 def main():
+    # DTG_MATERIAL_STAGES=window (or surfaces, or both, comma-separated) rebuilds only those; the
+    # commandlet passes the environment through, which is simpler than script arguments.
+    stages = os.environ.get("DTG_MATERIAL_STAGES", "surfaces,window").split(",")
     global COLLECTION
     COLLECTION = build_collection()
-    import_textures()
-    surface = build_surface_master()
-    paint = build_paint_master()
-    plain = build_plain_master()
-    build_instances(surface, plain, paint)
-    fresh_instance("MI_Terrain", build_terrain_master())
-    fresh_instance("MI_Window", build_window_master())
+    if "surfaces" in stages:
+        import_textures()
+        surface = build_surface_master()
+        paint = build_paint_master()
+        plain = build_plain_master()
+        build_instances(surface, plain, paint)
+        fresh_instance("MI_Terrain", build_terrain_master())
+    if "window" in stages:
+        fresh_instance("MI_Window", build_window_master())
     unreal.EditorAssetLibrary.save_directory("/Game/Art", only_if_is_dirty=False, recursive=True)
-    log("saved /Game/Art")
+    log("saved /Game/Art (%s)" % ", ".join(stages))
 
 
 main()

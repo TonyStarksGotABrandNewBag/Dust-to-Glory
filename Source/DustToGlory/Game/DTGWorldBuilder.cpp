@@ -10,7 +10,9 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 
@@ -22,8 +24,15 @@
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGPlantModels.h"
 #include "Game/DTGPropModels.h"
+#include "Game/DTGSky.h"
 
 using namespace dtg::sim;
+
+namespace detail_worldbuilder
+{
+	/** A street lamp at full dark. Real lamps are 5000 to 10000 lumens; this sun is six units, not a hundred thousand. */
+	constexpr float LampLumens = 2000.0f;
+}
 
 ADTGWorldBuilder::ADTGWorldBuilder()
 {
@@ -344,6 +353,18 @@ UInstancedStaticMeshComponent* ADTGWorldBuilder::PropComponent(int32 Part, int32
 
 void ADTGWorldBuilder::ClearProps(int32 Part)
 {
+	for (int32 Index = LampLights.Num() - 1; Index >= 0; --Index)
+	{
+		if (LampLightParts[Index] == Part)
+		{
+			if (LampLights[Index])
+			{
+				LampLights[Index]->DestroyComponent();
+			}
+			LampLights.RemoveAtSwap(Index);
+			LampLightParts.RemoveAtSwap(Index);
+		}
+	}
 	for (int32 Mesh = 0; Mesh < DTGPropModels::MeshCount(); ++Mesh)
 	{
 		const int32 Index = Part * DTGPropModels::MeshCount() + Mesh;
@@ -398,6 +419,24 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 		for (const DTGPropModels::FPart& Piece : DTGPropModels::PartsFor(Value.Kind, Value.Variant))
 		{
 			PerMesh[Piece.Mesh].Add(Piece.Local * Placed);
+		}
+		if (Value.Kind == dtg::sim::PropKind::StreetLamp)
+		{
+			// The lamp lights its patch of street after dark: a warm, unshadowed point light at the head of
+			// the arm, which reaches over the street along the lamp's X. It comes up with the dark (Tick),
+			// since against this game's six-unit sun a lit lamp would pool white on a sunny street.
+			UPointLightComponent* Lamp = NewObject<UPointLightComponent>(this);
+			Lamp->SetupAttachment(GetRootComponent());
+			Lamp->SetMobility(EComponentMobility::Movable);
+			Lamp->SetIntensityUnits(ELightUnits::Lumens);
+			Lamp->SetIntensity(detail_worldbuilder::LampLumens * LampLevel);
+			Lamp->SetLightColor(FLinearColor(1.0f, 0.82f, 0.58f));
+			Lamp->SetAttenuationRadius(1400.0f);
+			Lamp->SetCastShadows(false);
+			Lamp->RegisterComponent();
+			Lamp->SetWorldLocation(Placed.TransformPosition(FVector(55.0, 0.0, 370.0)));
+			LampLights.Add(Lamp);
+			LampLightParts.Add(Part);
 		}
 	}
 	// Grass clumps on the lawns, drawn with the grass models on the plant components. Their size and spin
@@ -725,6 +764,24 @@ void ADTGWorldBuilder::Tick(float DeltaSeconds)
 	if (!bBuilt)
 	{
 		return;
+	}
+	// The street lamps follow the sky's night level. Every light is touched when it moves, so only when
+	// it has moved a step: a dusk is a few dozen steps, not a few thousand frames of light updates.
+	if (!Sky)
+	{
+		Sky = Cast<ADTGSky>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGSky::StaticClass()));
+	}
+	const float WantedLevel = Sky ? static_cast<float>(Sky->Night()) : 1.0f;
+	if (FMath::Abs(WantedLevel - LampLevel) > 0.02f)
+	{
+		LampLevel = WantedLevel;
+		for (UPointLightComponent* Lamp : LampLights)
+		{
+			if (Lamp)
+			{
+				Lamp->SetIntensity(detail_worldbuilder::LampLumens * LampLevel);
+			}
+		}
 	}
 	FVector Around = FVector::ZeroVector;
 	if (const APlayerController* Controller = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)

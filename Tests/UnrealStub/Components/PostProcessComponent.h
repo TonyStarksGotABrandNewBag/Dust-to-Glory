@@ -33,6 +33,8 @@ struct FPostProcessSettings
 	float LumenSceneDetail = 1.0f;
 	bool bOverride_LumenReflectionQuality = false;
 	float LumenReflectionQuality = 1.0f;
+	bool bOverride_AutoExposureBias = false;
+	float AutoExposureBias = 0.0f;
 };
 
 class UPostProcessComponent : public USceneComponent

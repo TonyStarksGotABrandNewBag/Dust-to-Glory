@@ -38,6 +38,9 @@ public:
 	/** True while it is dark enough for headlights. */
 	bool IsNight() const { return SunPitch < 2.0; }
 
+	/** How dark it is, 0 by day to 1 in the small hours; what the street lamps and the windows follow. */
+	double Night() const { return 1.0 - Daylight; }
+
 	/** How far you can see, in metres, which weather decides. */
 	double VisibilityM() const { return Visibility; }
 
@@ -51,6 +54,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UDirectionalLightComponent> Sun;
+
+	UPROPERTY()
+	TObjectPtr<UDirectionalLightComponent> Moon;
 
 	UPROPERTY()
 	TObjectPtr<USkyAtmosphereComponent> Atmosphere;
@@ -80,6 +86,7 @@ private:
 
 	double Fraction = 0.5;
 	double SunPitch = 60.0;
+	double Daylight = 1.0;         // 0 at night to 1 by day, from the sun's height
 	double Visibility = 4000.0;
 	double Flash = 0.0;            // 0..1, the current flash, falling away
 	double NextStrike = 8.0;       // seconds until the next one

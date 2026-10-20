@@ -16,6 +16,8 @@
 
 class UDTGGameSubsystem;
 class UInstancedStaticMeshComponent;
+class UPointLightComponent;
+class ADTGSky;
 class UMaterialInterface;
 class UProceduralMeshComponent;
 
@@ -137,6 +139,17 @@ private:
 	/** Furniture instances, one component per mesh per terrain part: index Part * DTGPropModels::MeshCount() + Mesh. */
 	UPROPERTY()
 	TArray<TObjectPtr<UInstancedStaticMeshComponent>> PropInstances;
+
+	/** One light at the head of every street lamp, with the terrain part it belongs to alongside. */
+	UPROPERTY()
+	TArray<TObjectPtr<UPointLightComponent>> LampLights;
+	TArray<int32> LampLightParts;
+
+	/** How far up the lamps are, 0 by day to 1 at night, following the sky; set on the lights when it moves. */
+	float LampLevel = 0.0f;
+
+	UPROPERTY()
+	TObjectPtr<ADTGSky> Sky;
 
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Surfaces; // streets, highways, venue slabs: built once
