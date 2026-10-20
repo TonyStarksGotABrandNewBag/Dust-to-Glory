@@ -24,7 +24,15 @@ namespace detail_propmodels
 		TEXT("preset_02_connection_single_01"), TEXT("preset_02_connection_single_01_02"),
 		// Single meshes.
 		TEXT("/Game/Art/Models/StreetLamp1/SM_StreetLamp1"), TEXT("/Game/Art/Models/Hydrant/SM_Hydrant"),
-		TEXT("/Game/Art/Models/Barrier1/SM_Barrier1")};
+		TEXT("/Game/Art/Models/Barrier1/SM_Barrier1"),
+		// Megascans, added through the editor's Fab window (docs/HANDOFF.md): a trash can, and a curb kit of six.
+		TEXT("/Game/Fab/Megascans/3D/Trash_Can_ucynedrfa/Raw/SM_ucynedrfa_tier_0/StaticMeshes/SM_ucynedrfa_tier_0"),
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_000"),
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_001"),
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_002"),
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_003"),
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_004"),
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_005")};
 	constexpr int32 PathCount = static_cast<int32>(sizeof(Paths) / sizeof(Paths[0]));
 	constexpr int32 Preset1First = 0;
 	constexpr int32 Preset1Count = 12;
@@ -33,6 +41,9 @@ namespace detail_propmodels
 	constexpr int32 LampMesh = 18;
 	constexpr int32 HydrantMesh = 19;
 	constexpr int32 BarrierMesh = 20;
+	constexpr int32 BinMesh = 21;
+	constexpr int32 CurbFirst = 22;
+	constexpr int32 CurbCount = 6;
 
 	/** The kit builds its presets 6 m tall; Carolina distribution poles stand 10-12 m. */
 	constexpr double PoleScale = 1.75;
@@ -99,7 +110,8 @@ namespace DTGPropModels
 			Cached[Index] = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *Path));
 			if (!Cached[Index].IsValid())
 			{
-				UE_LOG(LogDTG, Warning, TEXT("No furniture model at %s; Tools/Art/import_models.py imports it."), *Path);
+				UE_LOG(LogDTG, Warning, TEXT("No furniture model at %s; %s."), *Path,
+					Path.StartsWith(TEXT("/Game/Fab/")) ? TEXT("it comes in through the editor's Fab window (docs/HANDOFF.md)") : TEXT("Tools/Art/import_models.py imports it"));
 			}
 		}
 		return Cached[Index].Get();
@@ -113,6 +125,7 @@ namespace DTGPropModels
 		static const TArray<FPart> Lamp = Single(LampMesh);
 		static const TArray<FPart> Hydrant = Single(HydrantMesh);
 		static const TArray<FPart> Barrier = Single(BarrierMesh);
+		static const TArray<FPart> Bin = Single(BinMesh);
 		static const TArray<FPart> None;
 		switch (Kind)
 		{
@@ -120,6 +133,7 @@ namespace DTGPropModels
 		case PropKind::StreetLamp: return Lamp;
 		case PropKind::Hydrant: return Hydrant;
 		case PropKind::Barrier: return Barrier;
+		case PropKind::Bin: return Bin; // nothing drawn without the Megascans; Ready() does not insist on it
 		case PropKind::Count: break;
 		}
 		return None;
@@ -154,6 +168,17 @@ namespace DTGPropModels
 		}
 		const FVector At(Value.X * DTGMetresToUnreal, Value.Y * DTGMetresToUnreal, Value.Z * DTGMetresToUnreal);
 		return FTransform(FRotator(0.0, YawDegrees, 0.0), At);
+	}
+
+	int32 CurbMesh(int32 Variant)
+	{
+		return detail_propmodels::CurbFirst + FMath::Abs(Variant) % detail_propmodels::CurbCount;
+	}
+
+	double CurbLengthM(int32 Mesh)
+	{
+		const UStaticMesh* Source = DTGPropModels::Mesh(Mesh);
+		return Source ? FMath::Max(0.2, 2.0 * Source->GetBounds().BoxExtent.X / DTGMetresToUnreal) : 0.7;
 	}
 
 	double BarrierLengthM()

@@ -276,6 +276,31 @@ namespace dtg::sim
 				}
 			}
 		}
+
+		/** A trash can per block, on the sidewalk at the corner across from the hydrant, so the two never share one. */
+		void Bins(const StatePlan& Map, const CityPlan& World, const Rect& Area, const FurnitureRules& Rules, std::vector<Prop>& Out)
+		{
+			for (const Rect& Block : World.Blocks)
+			{
+				if (Out.size() >= Rules.Limit)
+				{
+					return;
+				}
+				if (!Block.Overlaps(Area) || IsPark(World, Block))
+				{
+					continue;
+				}
+				// The hydrant's corner is the block's own choice (Hydrants); the bin takes the one diagonally across.
+				const int Corner = VariantOf(Block.CenterX(), Block.CenterY()) ^ 3;
+				const double Inset = Rules.BinSetbackM;
+				const double X = (Corner & 1) ? Block.MaxX - Inset : Block.MinX + Inset;
+				const double Y = (Corner & 2) ? Block.MaxY - Inset : Block.MinY + Inset;
+				if (InArea(Area, X, Y))
+				{
+					Out.push_back({PropKind::Bin, X, Y, Map.HeightAt(X, Y) + Rules.KerbM, VariantOf(X, Y) * 1.5707963, Corner});
+				}
+			}
+		}
 	}
 
 	namespace detail_furniture
@@ -347,6 +372,7 @@ namespace dtg::sim
 		case PropKind::StreetLamp: return "StreetLamp";
 		case PropKind::Hydrant: return "Hydrant";
 		case PropKind::Barrier: return "Barrier";
+		case PropKind::Bin: return "Bin";
 		case PropKind::StreetTree: return "StreetTree";
 		case PropKind::Grass: return "Grass";
 		case PropKind::Count: break;
@@ -453,6 +479,7 @@ namespace dtg::sim
 		detail_furniture::Highways(Map, World, Area, Rules, Out);
 		detail_furniture::TownStreets(Map, World, Area, Rules, Out);
 		detail_furniture::Hydrants(Map, World, Area, Rules, Out);
+		detail_furniture::Bins(Map, World, Area, Rules, Out);
 		detail_furniture::StreetTrees(Map, World, Area, Rules, Out);
 		if (Out.size() > Rules.Limit)
 		{

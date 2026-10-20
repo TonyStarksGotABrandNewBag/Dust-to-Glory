@@ -118,6 +118,12 @@ fit inside.
 
 ## The build machine
 
+- **Simulation tests on Windows:** `cmake` is Visual Studio's, at
+  `C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`,
+  and MSVC's headers are only found inside a developer shell
+  (`& "...\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64`). From a plain shell the build fails on
+  `<algorithm>` and the old `Tests\build\dtg_tests.exe` still runs, so check its timestamp.
+
 Checked 19 October: the linked Windows machine `ci-ironman1` has Git and the Epic Games Launcher but
 **no Unreal Engine and no Visual Studio 2022** (only VS 2010, which is useless here). Building needs
 both — roughly 100–150 GB of installs. It looks like a work machine rather than the HP Omen with the
@@ -154,7 +160,11 @@ cloning.
   (launcher offers "Fix Now", one UAC prompt, never accepted). `Content/CitySampleVehicles` is read by
   `Game/DTGVehicleModels`; without it cars are the generated boxes. After the pack is in, run
   `Tools/Art/build_vehicle_paint.py` through `UnrealEditor-Cmd -run=pythonscript` (editor closed): it
-  makes the paint instances the game colours; without them every car is the pack's silver.
+  makes the paint instances the game colours; without them every car is the pack's silver. After the
+  Megascans plants are in, run `Tools/Art/fix_megascans_foliage.py` the same way: it gives them the
+  project's masked material (the Fab foliage master drew them near-black here; see docs/REALISM.md).
+  `Content/CitySampleCrowd` needs nothing further: `UDTGBody::BuildCrowd` assembles people from it, and
+  the HairStrands plugin (enabled in the .uproject) draws their hair.
 - **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here

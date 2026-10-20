@@ -39,5 +39,9 @@ namespace DTGPropModels
 	FTransform TransformFor(const dtg::sim::Prop& Value);
 
 	/** A barrier model's length in metres, so the simulation lays them end to end without gaps. */
+	/** The curb kit: a piece by variant, and its length in metres, so the world builder can lay them end to end along a kerb. */
+	int32 CurbMesh(int32 Variant);
+	double CurbLengthM(int32 Mesh);
+
 	double BarrierLengthM();
 }

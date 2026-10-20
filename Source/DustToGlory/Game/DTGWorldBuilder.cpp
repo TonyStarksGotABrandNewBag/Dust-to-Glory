@@ -8,11 +8,14 @@
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 
@@ -324,6 +327,39 @@ void ADTGWorldBuilder::BuildRoadMarkings()
 	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ false);
 }
 
+namespace detail_worldbuilder
+{
+	/**
+	 * -DTGMatScalar=Name:Value sets one scalar on every plant material, for finding out which parameter of
+	 * a pack's material does something unwanted without rebuilding assets between runs. Diagnostic only.
+	 */
+	void ApplyScalarOverride(UMeshComponent* Mesh, UObject* Outer)
+	{
+		FString Spec;
+		if (!FParse::Value(FCommandLine::Get(), TEXT("DTGMatScalar="), Spec, /*bShouldStopOnSeparator*/ false) || Spec.IsEmpty())
+		{
+			return;
+		}
+		FString Name;
+		FString Value;
+		if (!Spec.Split(TEXT(":"), &Name, &Value))
+		{
+			return;
+		}
+		for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+		{
+			if (UMaterialInterface* Parent = Mesh->GetMaterial(Slot))
+			{
+				if (UMaterialInstanceDynamic* Dynamic = UMaterialInstanceDynamic::Create(Parent, Outer))
+				{
+					Dynamic->SetScalarParameterValue(*Name, FCString::Atof(*Value));
+					Mesh->SetMaterial(Slot, Dynamic);
+				}
+			}
+		}
+	}
+}
+
 UInstancedStaticMeshComponent* ADTGWorldBuilder::PlantComponent(int32 Part, int32 Model)
 {
 	const int32 Index = Part * DTGPlantModels::Count() + Model;
@@ -337,6 +373,7 @@ UInstancedStaticMeshComponent* ADTGWorldBuilder::PlantComponent(int32 Part, int3
 		Instances->SetupAttachment(GetRootComponent());
 		Instances->RegisterComponent();
 		Instances->SetStaticMesh(DTGPlantModels::Mesh(Model));
+		detail_worldbuilder::ApplyScalarOverride(Instances, this);
 		// As before: no collision. A car that clips a pine is a smaller problem than cooking collision
 		// for hundreds of trees every time a chunk streams in.
 		Instances->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -466,6 +503,55 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 			Lamp->SetWorldLocation(Placed.TransformPosition(FVector(55.0, 0.0, 370.0)));
 			LampLights.Add(Lamp);
 			LampLightParts.Add(Part);
+		}
+	}
+	// The kerb itself: Megascans curb stones laid end to end along every block edge in the chunk, each its
+	// own length, stopping short of the corners. The kerb quad the streets are built with stays as the
+	// step; the stones stand two centimetres proud of it so the two never fight, and sunk so their top is
+	// the sidewalk's. Nothing is laid without the kit, which comes in through the editor's Fab window.
+	if (DTGPropModels::Mesh(DTGPropModels::CurbMesh(0)))
+	{
+		const double Proud = 0.02;
+		const double HalfWide = 0.13;
+		const double Tall = 0.30;
+		const double Margin = 0.4;
+		int32 Variant = 0;
+		for (const dtg::sim::Rect& Block : Game->Sim().City.Blocks)
+		{
+			if (!Block.Overlaps(Area))
+			{
+				continue;
+			}
+			// Four edges from the south-west corner, each stone's X along the edge and its Y into the block.
+			const double Starts[4][2] = {{Block.MinX, Block.MinY}, {Block.MaxX, Block.MinY}, {Block.MaxX, Block.MaxY}, {Block.MinX, Block.MaxY}};
+			const double Dirs[4][2] = {{1.0, 0.0}, {0.0, 1.0}, {-1.0, 0.0}, {0.0, -1.0}};
+			for (int32 Edge = 0; Edge < 4; ++Edge)
+			{
+				const double AlongX = Dirs[Edge][0];
+				const double AlongY = Dirs[Edge][1];
+				const double IntoX = -AlongY;
+				const double IntoY = AlongX;
+				const double Length = Edge % 2 == 0 ? Block.Width() : Block.Depth();
+				double Along = Margin;
+				while (true)
+				{
+					const int32 Mesh = DTGPropModels::CurbMesh(Variant++);
+					const double PieceM = DTGPropModels::CurbLengthM(Mesh);
+					if (Along + PieceM > Length - Margin)
+					{
+						break;
+					}
+					const double X = Starts[Edge][0] + AlongX * Along + IntoX * (HalfWide - Proud);
+					const double Y = Starts[Edge][1] + AlongY * Along + IntoY * (HalfWide - Proud);
+					if (Area.Contains(X, Y))
+					{
+						const double Z = Game->Sim().Map.HeightAt(X, Y) + Rules.KerbM - Tall;
+						PerMesh[Mesh].Add(FTransform(FRotator(0.0, 90.0 * Edge, 0.0),
+							FVector(X * DTGMetresToUnreal, Y * DTGMetresToUnreal, Z * DTGMetresToUnreal)));
+					}
+					Along += PieceM;
+				}
+			}
 		}
 	}
 	// Grass clumps on the lawns, drawn with the grass models on the plant components. Their size and spin

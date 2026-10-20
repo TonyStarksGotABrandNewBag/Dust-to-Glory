@@ -25,6 +25,7 @@ namespace dtg::sim
 		StreetLamp,  // on the sidewalk by the kerb, its arm reaching over the street
 		Hydrant,     // one per block, on a corner
 		Barrier,     // a concrete barrier along the edge of a raised deck
+		Bin,         // a trash can on the sidewalk, at the corner across from the hydrant
 		StreetTree,  // on the lawn strip inside the sidewalk, round every block that has one
 		Grass,       // a clump of grass blades on a lawn (GroundCoverIn, not FurnitureIn)
 		Count
@@ -49,6 +50,8 @@ namespace dtg::sim
 		double LampSpacingM = 32.0;
 		/** In from the kerb to the lamp. */
 		double LampSetbackM = 0.7;
+		/** In from both kerbs to the trash can: on the sidewalk, clear of the lamp and the corner. */
+		double BinSetbackM = 1.2;
 		/** The sidewalk's height above the street pad; matches the kerb the world builder draws. */
 		double KerbM = 0.15;
 		double BarrierLengthM = 3.0;

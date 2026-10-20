@@ -249,6 +249,7 @@ public:
 	}
 	FVector GetPhysicsLinearVelocity() const { return FVector(); }
 	void SetMaterial(int32 Index, UMaterialInterface* Material) { (void)Index; (void)Material; }
+	int32 GetNumMaterials() const { return 0; }
 	UMaterialInterface* GetMaterial(int32 Index) const { (void)Index; return nullptr; }
 	virtual int32 GetMaterialIndex(FName MaterialSlotName) const { (void)MaterialSlotName; return -1; }
 	void SetCastShadow(bool bCast) { (void)bCast; }
@@ -260,6 +261,11 @@ public:
 	FBox GetLocalBounds() const { return FBox(); }
 
 	bool bUseAttachParentBound = false;
+};
+
+/** Checked against UE 5.8.3: UMeshComponent sits between UPrimitiveComponent and the mesh components. */
+class UMeshComponent : public UPrimitiveComponent
+{
 };
 
 class AActor : public UObject

@@ -64,6 +64,10 @@
 			"Enabled": false
 		},
 		{
+			"Name": "HairStrands",
+			"Enabled": true
+		},
+		{
 			"Name": "DLSS",
 			"Enabled": true,
 			"Optional": true

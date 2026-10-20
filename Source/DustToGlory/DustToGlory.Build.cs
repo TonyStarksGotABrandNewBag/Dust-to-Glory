@@ -32,6 +32,8 @@ public class DustToGlory : ModuleRules
 			"PhysicsCore",
 			// Terrain, roads and water are generated at runtime from the simulation's state plan.
 			"ProceduralMeshComponent",
+			// Hair for the City Sample crowd people (Game/DTGBody), grooms bound to their faces.
+			"HairStrandsCore",
 			// The engine note is synthesised per sample (see Game/DTGEngineAudio).
 			"AudioMixer",
 			"SignalProcessing",

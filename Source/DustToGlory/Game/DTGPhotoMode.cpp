@@ -379,7 +379,30 @@ void ADTGPhotoMode::PlanShots()
 			{
 				continue;
 			}
-			const double Distance = FVector::DistSquared(It->GetActorLocation(), At(SpawnX, SpawnY, 0.0));
+			// Not someone indoors, nor standing in a doorway or crossing a lot: from inside a shell the
+			// one-sided walls are not there, and the shot came out as a row of window frames in a field.
+			if (It->IsIndoors())
+			{
+				continue;
+			}
+			const FVector Where = It->GetActorLocation();
+			bool bOnALot = false;
+			for (const BuildingPlan& Building : City.Buildings)
+			{
+				const dtg::sim::Rect& Lot = Building.Footprint;
+				const double X = Where.X / DTGMetresToUnreal;
+				const double Y = Where.Y / DTGMetresToUnreal;
+				if (X > Lot.MinX - 1.5 && X < Lot.MaxX + 1.5 && Y > Lot.MinY - 1.5 && Y < Lot.MaxY + 1.5)
+				{
+					bOnALot = true;
+					break;
+				}
+			}
+			if (bOnALot)
+			{
+				continue;
+			}
+			const double Distance = FVector::DistSquared(Where, At(SpawnX, SpawnY, 0.0));
 			if (Distance < BestPerson)
 			{
 				BestPerson = Distance;
@@ -436,6 +459,34 @@ void ADTGPhotoMode::PlanShots()
 			const FVector Centre = Spot + FVector(0.0, 0.0, 60.0);
 			const FVector Eye = Centre + Forward * 560.0 + Right * 380.0 + FVector(0.0, 0.0, 70.0);
 			Shots.Add({TEXT("car"), Eye, detail_photo::Looking(Eye, Centre)});
+		}
+	}
+
+	// The kerb up close: the nearest block corner to the spawn, from the street, low, with the curb stones
+	// running off along both edges and whatever the corner holds -- a hydrant or a trash can.
+	{
+		const dtg::sim::Rect* Nearest = nullptr;
+		double Nearness = 1e18;
+		for (const dtg::sim::Rect& Block : City.Blocks)
+		{
+			const double Distance = FMath::Square(Block.MinX - SpawnX) + FMath::Square(Block.MinY - SpawnY);
+			if (Distance < Nearness)
+			{
+				Nearness = Distance;
+				Nearest = &Block;
+			}
+		}
+		if (Nearest)
+		{
+			const double X = Nearest->MinX;
+			const double Y = Nearest->MinY;
+			// The corner from the street, and then the kerb itself from a metre out, knee high, looking along it.
+			const FVector CornerEye = At(X - 4.5, Y - 4.5, Ground(X - 4.5, Y - 4.5) + 1.5);
+			const FVector CornerAt = At(X + 1.5, Y + 1.5, Ground(X, Y) + 0.3);
+			Shots.Add({TEXT("corner"), CornerEye, detail_photo::Looking(CornerEye, CornerAt)});
+			const FVector KerbEye = At(X - 1.3, Y + 2.0, Ground(X - 1.3, Y + 2.0) + 0.7);
+			const FVector KerbAt = At(X + 0.1, Y + 7.0, Ground(X, Y + 7.0) + 0.1);
+			Shots.Add({TEXT("kerb"), KerbEye, detail_photo::Looking(KerbEye, KerbAt)});
 		}
 	}
 

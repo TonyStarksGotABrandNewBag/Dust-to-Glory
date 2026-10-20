@@ -256,6 +256,14 @@ public:
 
 	bool Equals(const FString& Other) const { return Text == Other.Text; }
 	bool Contains(const FString& Other) const { return Text.find(Other.Text) != std::wstring::npos; }
+	bool Split(const FString& Separator, FString* Left, FString* Right) const
+	{
+		const std::size_t At = Text.find(Separator.Text);
+		if (At == std::wstring::npos) return false;
+		if (Left) Left->Text = Text.substr(0, At);
+		if (Right) Right->Text = Text.substr(At + Separator.Text.size());
+		return true;
+	}
 	bool StartsWith(const FString& Other) const { return Text.rfind(Other.Text, 0) == 0; }
 	bool EndsWith(const FString& Other) const
 	{

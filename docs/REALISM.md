@@ -68,10 +68,12 @@ meshes need neither UVs nor tangents.
 - **Done:** a glossy water surface.
 
 Still missing:
-- **Bark and leaves.** Plants are still one flat-coloured section. `PlantTri` has no trunk/foliage tag yet.
-- **Clear-coat paint.** UE 5.8's Python API does not expose the clear-coat pins.
-- **Leaf translucency.**
-- **Real shapes.** Every shape is still a box, and textures do not change that.
+- **Clear-coat paint on the generated cars.** UE 5.8's Python API does not expose the clear-coat pins
+  of `M_DTG_Paint`; the City Sample bodies bring their own clear coat, so this only shows on the box
+  fallback.
+- **Leaf translucency** on the Poly Haven trees (the Megascans grasses and palm shrubs have it).
+- **Shapes.** Cars are real bodies and plants real scans; buildings are still boxes with trim, furniture
+  a handful of models, people mannequins.
 
 **Rendering, 19 October.** Now on in this project:
 
@@ -126,6 +128,29 @@ Still missing:
   simulation colours by role, which painted every house the same beige. The wall shader weathers: rain
   streaks in patches and blotches, by surface (`Weathering` on each instance; none on the ground).
 
+- **Megascans on the street** (20 October): the curb is Quixel curb stones laid end to end along every
+  block edge, each its own length, standing two centimetres proud of the kerb quad (verified in the
+  `kerb` photo-mode shot, knee high along the kerb); a Quixel trash can stands on the sidewalk at the
+  corner across from the hydrant (`Sim/StreetFurniture` `Bins`, tested and mutation-checked: the corner
+  rule and the setback each fail their own mutant). The palmettos are the Quixel Alexandra palm shrubs
+  and the lawn clumps the Kikuyu and wild grasses, where imported, with the Poly Haven scans as the
+  fallback (`Game/DTGPlantModels`). Through the Fab plugin's foliage master these drew as near-black
+  stems in this project under every setting tried -- hardware ray tracing off, Nanite off, Ray
+  Reconstruction off, the master's parameters zeroed one at a time -- while the project's
+  `M_DTG_ModelMasked` over the same textures draws them as grass (a `-DTGMatSwap` A/B, since removed).
+  `Tools/Art/fix_megascans_foliage.py` re-materials the plant meshes with that; the cause in the Fab
+  master was not found, so its wind and subsurface are lost until it is.
+
+- **People are City Sample crowd characters** (20 October) when that pack is in the project: MetaHuman
+  heads (six a sex) with their scanned hair as grooms bound to the face, a synthesized body, and a top,
+  bottom and shoes from the pack's wardrobe, chosen by the person's seed and the same every time; an
+  unseen base mesh plays the pack's idle, walk and brisk-walk clips and every visible piece follows its
+  pose (`UDTGBody::BuildCrowd`). The mannequins are the fallback, the box figure after that. Not right
+  yet: the shoes load but do not show (the crowd's clothing material takes its colours from per-instance
+  data this project does not set; the top and trousers happen to come out plain), the skin tone is the
+  pack's default rather than per person, and nobody has been seen walking in a photo-mode shot yet, so
+  the clip speeds (140 and 230 cm/s) are guesses.
+
 **Memory, measured** (20 October, `-DTGMemReport` at the car shot, RTX 5070 Laptop, 8 GB): 5.7 GB of
 video memory in use at the shot, 7.7 GB at the peak during loading. It is not the car textures: the
 texture streaming pool held 277 MB of its 1000, and the City Sample textures are virtual (320 MB of
@@ -162,9 +187,9 @@ which is the simulation's length and width rather than the body's. Headlights ar
 spotlights, not the model's lamps. The sim's fifteen body styles map onto the pack's eleven usable
 shapes, so open-wheelers and monster trucks stay boxes.
 
-**Character art.** Pedestrians and the player are capsules with simple meshes. Needs skeletal meshes and
-animation sets — idle, walk, run, enter and exit a vehicle, and the conversation poses the NPC minds
-already drive.
+**Character art.** Done as far as the City Sample crowd goes (above). Still missing: a run, getting in
+and out of a car, the conversation poses the NPC minds already drive, and the per-person skin and
+clothing colours the pack keeps in per-instance data.
 
 **Audio mixing.** The engine note is synthesised and correct. Tyre noise, wind, impacts, ambience and
 the attenuation and reverb settings around them are editor work.

@@ -179,6 +179,55 @@ DTG_TEST(HydrantsOnePerBlockOnACorner)
 	}
 }
 
+// A trash can per block, on the sidewalk at the corner across from the hydrant: never two on a block,
+// never on the hydrant's side on either axis, and BinSetbackM in from both kerbs.
+DTG_TEST(BinsOnePerBlockAcrossFromTheHydrant)
+{
+	using namespace detail_furniture_test;
+	const GameState& State = dtg_test::LoadedState();
+	const FurnitureRules Rules;
+	const std::vector<Prop> All = FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 900.0));
+	const std::vector<Prop> Bins = OfKind(All, PropKind::Bin);
+	const std::vector<Prop> Hydrants = OfKind(All, PropKind::Hydrant);
+	EXPECT(!Bins.empty());
+	std::map<std::size_t, int> PerBlock;
+	int Compared = 0;
+	for (const Prop& Bin : Bins)
+	{
+		bool bFound = false;
+		for (std::size_t Index = 0; Index < State.City.Blocks.size(); ++Index)
+		{
+			const Rect& Block = State.City.Blocks[Index];
+			if (!Block.Contains(Bin.X, Bin.Y))
+			{
+				continue;
+			}
+			bFound = true;
+			++PerBlock[Index];
+			const double FromX = std::min(Bin.X - Block.MinX, Block.MaxX - Bin.X);
+			const double FromY = std::min(Bin.Y - Block.MinY, Block.MaxY - Bin.Y);
+			EXPECT_MSG(std::fabs(FromX - Rules.BinSetbackM) < 0.01 && std::fabs(FromY - Rules.BinSetbackM) < 0.01,
+				"bin not on a corner at " + Key(Bin));
+			for (const Prop& Hydrant : Hydrants)
+			{
+				if (Block.Contains(Hydrant.X, Hydrant.Y))
+				{
+					const bool bSameX = (Hydrant.X < Block.CenterX()) == (Bin.X < Block.CenterX());
+					const bool bSameY = (Hydrant.Y < Block.CenterY()) == (Bin.Y < Block.CenterY());
+					EXPECT_MSG(!bSameX && !bSameY, "bin on the hydrant's side at " + Key(Bin));
+					++Compared;
+				}
+			}
+		}
+		EXPECT_MSG(bFound, "bin off the blocks at " + Key(Bin));
+	}
+	EXPECT_MSG(Compared > 0, "no block had both a bin and a hydrant to compare");
+	for (const auto& [Block, Count] : PerBlock)
+	{
+		EXPECT_MSG(Count == 1, std::to_string(Count) + " bins on block " + std::to_string(Block));
+	}
+}
+
 // Street trees stand on the lawn strip just inside the sidewalk, round every block that has a lawn:
 // never on the sidewalk itself, never inside a building, and on both axes of the block.
 DTG_TEST(StreetTreesLineTheLawns)

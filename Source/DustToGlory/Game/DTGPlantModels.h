@@ -2,8 +2,10 @@
 //
 // Sim/Vegetation decides what grows where, and is tested for it; this only decides which imported model
 // draws each species, and how to scale, spin and lean it to the plant the simulation asked for. The
-// models are CC0 Poly Haven scans (Tools/Art/fetch_models.py, then import_models.py). If they have not
-// been imported, Ready() is false and the world builder falls back to the generated plant geometry.
+// models are CC0 Poly Haven scans (Tools/Art/fetch_models.py, then import_models.py), and Quixel
+// Megascans added through the editor's Fab window (docs/HANDOFF.md): palm shrubs for the palmettos,
+// and lawn and wild grasses for the ground cover. A model that is not there is skipped; if no species
+// has a model at all, Ready() is false and the world builder falls back to the generated geometry.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -23,7 +25,7 @@ namespace DTGPlantModels
 	/** True when every species has at least one model to draw it with. */
 	bool Ready();
 
-	/** The grass clump model for a clump's variant: Bermuda and two meadow grasses. */
+	/** The grass clump model for a clump's variant: lawn and meadow grasses, whichever are imported. */
 	int32 GrassModel(int32 Variant);
 
 	/** Which model draws this plant -- the same one every time the chunk is built -- or INDEX_NONE. */
