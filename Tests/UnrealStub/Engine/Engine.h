@@ -4,6 +4,7 @@
 class UEngine : public UObject
 {
 public:
+	bool Exec(class UWorld* World, const TCHAR* Command) { (void)World; (void)Command; return true; }
 	void AddOnScreenDebugMessage(uint64 Key, float Time, FColor Colour, const FString& Message)
 	{
 		(void)Key; (void)Time; (void)Colour; (void)Message;

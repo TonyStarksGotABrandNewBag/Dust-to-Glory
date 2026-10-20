@@ -110,6 +110,8 @@ From `Tools/profile_*.cpp`, on a 2.8 GHz Xeon, two cores:
 | `RoadHeightAt` | 0.69 µs/sample |
 | Vegetation per chunk | 0.7–1.4 ms, 23–70 plants |
 | All road paint for a state, once at load | 1.6–4.9 ms |
+| Static world in Unreal (streets, 1160 shells, venues, water, one collision cook), RTX 5070 laptop | 1.3 s |
+| Full 14-view photo tour, `-DTGPhoto`, including load | 2 min |
 
 Two chunks a frame is roughly 3 ms of a 16.7 ms budget. That headroom is what the visual work has to
 fit inside.

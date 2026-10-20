@@ -13,6 +13,11 @@ struct FProcMeshTangent
 	bool bFlipTangentY = false;
 };
 
+struct FProcMeshSection
+{
+	bool bEnableCollision = false;
+};
+
 class UProceduralMeshComponent : public UPrimitiveComponent
 {
 public:
@@ -33,5 +38,7 @@ public:
 	void SetMeshSectionVisible(int32 SectionIndex, bool bVisible);
 
 	bool bUseAsyncCooking = false;
+	FProcMeshSection* GetProcMeshSection(int32 SectionIndex) { (void)SectionIndex; return nullptr; }
+	void ClearCollisionConvexMeshes() {}
 	bool bUseComplexAsSimpleCollision = true;
 };

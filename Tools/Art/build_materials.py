@@ -66,24 +66,25 @@ def collection_param(material, name, x, y):
 
 # Kind -> (tile size in cm, how much the vertex colour tints it, roughness scale).
 # Tint 0 keeps the photo's own colour (roads, ground, bark); facades take the building's colour.
+# Kind -> (tile cm, tint strength, roughness scale, weathering) on M_DTG_Surface.
 SURFACES = {
-    "Asphalt": (400.0, 0.0, 1.0),
-    "Sidewalk": (200.0, 0.0, 1.0),
-    "Concrete": (300.0, 0.35, 1.0),
-    "Brick": (180.0, 0.25, 1.0),
-    "Stucco": (250.0, 0.85, 1.0),
-    "WoodSiding": (200.0, 0.9, 1.0),
-    "ShingleRoof": (300.0, 0.5, 1.0),
-    "MetalRoof": (250.0, 0.6, 0.8),
+    "Asphalt": (400.0, 0.0, 1.0, 0.0),
+    "Sidewalk": (200.0, 0.0, 1.0, 0.0),
+    "Concrete": (300.0, 0.35, 1.0, 0.7),
+    "Brick": (180.0, 0.25, 1.0, 0.8),
+    "Stucco": (250.0, 0.85, 1.0, 1.0),
+    "WoodSiding": (200.0, 0.9, 1.0, 0.6),
+    "ShingleRoof": (300.0, 0.5, 1.0, 0.3),
+    "MetalRoof": (250.0, 0.6, 0.8, 0.5),
     # Poly Haven's grass photographs are all dry or leaf-strewn (leafy_grass averages sRGB 151,131,89, as
     # tan as the sand), so the photo supplies the detail and the park's vertex colour supplies the green.
-    "Grass": (300.0, 0.85, 1.0),
-    "Sand": (300.0, 0.0, 1.0),
-    "Dirt": (300.0, 0.0, 1.0),
-    "ForestFloor": (300.0, 0.0, 1.0),
-    "PineBark": (120.0, 0.0, 1.0),
-    "PalmBark": (120.0, 0.0, 1.0),
-    "Bark": (120.0, 0.0, 1.0),
+    "Grass": (300.0, 0.85, 1.0, 0.0),
+    "Sand": (300.0, 0.0, 1.0, 0.0),
+    "Dirt": (300.0, 0.0, 1.0, 0.0),
+    "ForestFloor": (300.0, 0.0, 1.0, 0.0),
+    "PineBark": (120.0, 0.0, 1.0, 0.0),
+    "PalmBark": (120.0, 0.0, 1.0, 0.0),
+    "Bark": (120.0, 0.0, 1.0, 0.0),
 }
 
 # Kind -> (roughness, metallic, colour scale) on M_DTG_Plain.
@@ -151,7 +152,35 @@ float2 VX = float2(-UvX.y, UvX.x) * 0.71 + 0.37; float2 VY = float2(-UvY.y, UvY.
 float Blend = smoothstep(0.35, 0.65, Mask);
 """
 
-COLOUR_CODE = TRIPLANAR_SETUP + """
+
+
+def hash2(q):
+    return "frac(sin(dot(%s, float2(127.1, 311.7))) * 43758.5453)" % q
+
+
+def value_noise(p):
+    """Smooth 0..1 value noise of a float2 expression, expanded inline (custom nodes cannot declare functions)."""
+    f = "floor(%s)" % p
+    t = "smoothstep(0.0, 1.0, frac(%s))" % p
+    return ("lerp(lerp(%s, %s, %s.x), lerp(%s, %s, %s.x), %s.y)" % (
+        hash2(f), hash2(f + " + float2(1.0, 0.0)"), t, hash2(f + " + float2(0.0, 1.0)"), hash2(f + " + float2(1.0, 1.0)"), t, t))
+
+
+# Weathering, for walls: rain streaks running down in patches, and blotches of grime and repair, so a
+# wall is not one photograph repeated end to end. u runs along the wall whichever way it faces; the
+# coordinates are in tiles, so a tile of 2.5 m gives streaks a hand wide and patches a few metres across.
+WEATHER_CODE = """
+float u = abs(N.x) > abs(N.y) ? P.y : P.x;
+float2 sp = float2(u * 9.0, P.z * 0.45);
+float2 pp = float2(u * 0.55 + 3.1, P.z * 0.55);
+float2 bp = float2(u * 0.8 + 11.7, P.z * 0.8 + 5.2);
+float Streak = %s;
+float Patch = smoothstep(0.4, 0.85, %s);
+float Blotch = %s;
+float Dirt = Weathering * Patch * Streak * Streak;
+""" % (value_noise("sp"), value_noise("pp"), value_noise("bp"))
+
+COLOUR_CODE = TRIPLANAR_SETUP + WEATHER_CODE + """
 float3 C1 = Texture2DSample(Tex, TexSampler, UvX).rgb * W.x + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
 float3 C2 = Texture2DSample(Tex, TexSampler, VX).rgb * W.x + Texture2DSample(Tex, TexSampler, VY).rgb * W.y + Texture2DSample(Tex, TexSampler, VZ).rgb * W.z;
 float3 C = lerp(C1, C2, Blend);
@@ -161,15 +190,19 @@ C = lerp(C, saturate(Lum * 2.0 * Tint), TintStrength);
 C *= lerp(0.62, 1.0, Grime) * lerp(0.92, 1.0, Mask);
 // Rain darkens whatever faces up.
 C *= lerp(1.0, 0.5, Wet * saturate(N.z));
+// Weathering: the streaks darken, the blotches go either way.
+C *= (1.0 - 0.3 * Dirt) * lerp(1.0, lerp(0.92, 1.06, Blotch), Weathering);
 return C;
 """
 
-ORM_CODE = TRIPLANAR_SETUP + """
+ORM_CODE = TRIPLANAR_SETUP + WEATHER_CODE + """
 float3 O1 = Texture2DSample(Tex, TexSampler, UvX).rgb * W.x + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
 float3 O2 = Texture2DSample(Tex, TexSampler, VX).rgb * W.x + Texture2DSample(Tex, TexSampler, VY).rgb * W.y + Texture2DSample(Tex, TexSampler, VZ).rgb * W.z;
 float3 O = lerp(O1, O2, Blend);
 // Damp at the foot of the wall is glossier, and rain makes whatever faces up shine.
 O.g *= lerp(0.8, 1.0, Grime) * lerp(1.0, 0.18, Wet * saturate(N.z));
+// Dirt is rougher than the wall it is on.
+O.g = saturate(O.g + 0.25 * Dirt);
 return O;
 """
 
@@ -434,6 +467,7 @@ def build_surface_master():
     vertex_colour = expr(material, unreal.MaterialExpressionVertexColor, -950, 350)
     tint = scalar(material, "TintStrength", 0.0, -950, 500)
     rough_scale = scalar(material, "RoughnessScale", 1.0, -300, 700)
+    weathering = scalar(material, "Weathering", 0.0, -950, 650)
 
     def texture_param(name, sampler, y):
         node = expr(material, unreal.MaterialExpressionTextureObjectParameter, -950, y)
@@ -449,9 +483,9 @@ def build_surface_master():
     orm_tex.set_editor_property("texture", unreal.load_asset(TEXTURES + "/T_Concrete_ORM"))
 
     float3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
-    colour = custom(material, COLOUR_CODE, float3, ["Tex", "P", "Nrm", "Tint", "TintStrength", "Mask", "Grime", "Wet"], -600, -600, "Triplanar colour")
+    colour = custom(material, COLOUR_CODE, float3, ["Tex", "P", "Nrm", "Tint", "TintStrength", "Mask", "Grime", "Wet", "Weathering"], -600, -600, "Triplanar colour")
     normal = custom(material, NORMAL_CODE, float3, ["Tex", "P", "Nrm", "Mask"], -600, -400, "Triplanar world normal")
-    orm = custom(material, ORM_CODE, float3, ["Tex", "P", "Nrm", "Mask", "Grime", "Wet"], -600, -200, "Triplanar ORM")
+    orm = custom(material, ORM_CODE, float3, ["Tex", "P", "Nrm", "Mask", "Grime", "Wet", "Weathering"], -600, -200, "Triplanar ORM")
     mask = world_noise(material, -1600, 700)
     for node, tex in ((colour, colour_tex), (normal, normal_tex), (orm, orm_tex)):
         mel.connect_material_expressions(tex, "", node, "Tex")
@@ -466,6 +500,8 @@ def build_surface_master():
     mel.connect_material_expressions(wet, "", colour, "Wet")
     mel.connect_material_expressions(wet, "", orm, "Wet")
     mel.connect_material_expressions(tint, "", colour, "TintStrength")
+    mel.connect_material_expressions(weathering, "", colour, "Weathering")
+    mel.connect_material_expressions(weathering, "", orm, "Weathering")
 
     def channel(r, g, b, y):
         mask = expr(material, unreal.MaterialExpressionComponentMask, -300, y)
@@ -535,13 +571,14 @@ def fresh_instance(name, parent):
 
 
 def build_instances(surface, plain, paint):
-    for kind, (tile_cm, tint, rough_scale) in SURFACES.items():
+    for kind, (tile_cm, tint, rough_scale, weathering) in SURFACES.items():
         instance = fresh_instance("MI_" + kind, surface)
         for param, suffix in (("Colour", "D"), ("Normal", "N"), ("ORM", "ORM")):
             mel.set_material_instance_texture_parameter_value(instance, param, unreal.load_asset("%s/T_%s_%s" % (TEXTURES, kind, suffix)))
         mel.set_material_instance_scalar_parameter_value(instance, "TileCm", tile_cm)
         mel.set_material_instance_scalar_parameter_value(instance, "TintStrength", tint)
         mel.set_material_instance_scalar_parameter_value(instance, "RoughnessScale", rough_scale)
+        mel.set_material_instance_scalar_parameter_value(instance, "Weathering", weathering)
     for kind, (roughness, metallic, colour_scale) in PLAIN.items():
         instance = fresh_instance("MI_" + kind, plain)
         mel.set_material_instance_scalar_parameter_value(instance, "Roughness", roughness)

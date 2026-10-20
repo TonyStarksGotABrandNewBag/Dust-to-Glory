@@ -108,12 +108,41 @@ void ADTGWorldBuilder::BuildStaticWorld()
 	// Streets, highways, paint and venues share the Surfaces component, a section per surface kind each,
 	// handed out in order. Fixed section numbers used to let the venues overwrite the road paint.
 	NextSurfaceSection = 0;
+	// Timed: the whole map is built here at once, and it has been slow enough to matter.
+	double Marks[8];
+	Marks[0] = FPlatformTime::Seconds();
 	BuildTownStreets();
+	Marks[1] = FPlatformTime::Seconds();
 	BuildHighways();
+	Marks[2] = FPlatformTime::Seconds();
 	BuildRoadMarkings();
+	Marks[3] = FPlatformTime::Seconds();
 	BuildBuildings();
+	Marks[4] = FPlatformTime::Seconds();
 	BuildVenues();
+	Marks[5] = FPlatformTime::Seconds();
 	BuildWater();
+	Marks[6] = FPlatformTime::Seconds();
+	CookBuildingCollision();
+	Marks[7] = FPlatformTime::Seconds();
+	UE_LOG(LogDTG, Log, TEXT("Static world: streets %.1f s, highways %.1f s, paint %.1f s, buildings %.1f s, venues %.1f s, water %.1f s, collision %.1f s"),
+		Marks[1] - Marks[0], Marks[2] - Marks[1], Marks[3] - Marks[2], Marks[4] - Marks[3], Marks[5] - Marks[4], Marks[6] - Marks[5], Marks[7] - Marks[6]);
+}
+
+void ADTGWorldBuilder::CookBuildingCollision()
+{
+	// A section created with collision cooks the whole component's collision again, so 191 sections of
+	// shells and stands created that way cooked it 191 times over: six minutes of the load. The sections
+	// are created without, flagged here, and cooked once. ClearCollisionConvexMeshes -- there are none --
+	// is the component's public way to re-cook.
+	for (int32 Index = 0; Index < Buildings->GetNumSections(); ++Index)
+	{
+		if (FProcMeshSection* Part = Buildings->GetProcMeshSection(Index))
+		{
+			Part->bEnableCollision = true;
+		}
+	}
+	Buildings->ClearCollisionConvexMeshes();
 }
 
 void ADTGWorldBuilder::BuildTownStreets()
@@ -642,7 +671,7 @@ void ADTGWorldBuilder::BuildBuildings()
 			DTGMeshBuilder::BuildBuilding(Building, GroundZ, DTGMetresToUnreal, Meshes);
 			++Total;
 		}
-		Section = Meshes.Apply(Buildings, Section, /*bCollision*/ true);
+		Section = Meshes.Apply(Buildings, Section, /*bCollision*/ false); // cooked once, in CookBuildingCollision
 	};
 	if (City.Cities.empty())
 	{
@@ -704,7 +733,7 @@ void ADTGWorldBuilder::BuildVenues()
 	}
 	NextSurfaceSection = Meshes.Apply(Surfaces, NextSurfaceSection, /*bCollision*/ true);
 	// Sections past the towns', which BuildBuildings has already handed out.
-	StandMeshes.Apply(Buildings, Buildings->GetNumSections(), /*bCollision*/ true);
+	StandMeshes.Apply(Buildings, Buildings->GetNumSections(), /*bCollision*/ false); // cooked once, in CookBuildingCollision
 }
 
 void ADTGWorldBuilder::BuildWater()

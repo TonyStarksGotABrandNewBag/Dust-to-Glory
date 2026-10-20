@@ -490,12 +490,23 @@ namespace DTGMeshBuilder
 			}
 		}
 
+		/** What dresses a window besides its frame: the sill (and lintel) in stone or board, and shutters if any. */
+		struct FWindowDressing
+		{
+			FDTGMesh* Sills = nullptr;            // null draws the sill in the frame's own mesh
+			FLinearColor SillColour = FLinearColor::White;
+			bool bLintel = false;                 // a flat lintel over the head, where masonry needs carrying
+			const FLinearColor* Shutters = nullptr; // a pair either side, in this colour, when set
+		};
+
 		/**
 		 * A framed window set back into the wall: the reveal, then the frame and glass at the back of it, a glazing
-		 * bar, and a sill that runs out past the wall to throw its own shadow.
+		 * bar, a sill that runs out past the wall to throw its own shadow and run the rain off, a lintel over a
+		 * masonry opening, and shutters either side on the houses that have them.
 		 */
 		void AddWindow(FDTGSurfaceMeshes& Meshes, FFacade& Face, double U0, double U1, double Z0, double Z1, double S, double Recess,
-			const FLinearColor& GlassColour, const FLinearColor& FrameColour, FDTGMesh& Walls, const FLinearColor& WallColour)
+			const FLinearColor& GlassColour, const FLinearColor& FrameColour, FDTGMesh& Walls, const FLinearColor& WallColour,
+			const FWindowDressing& Dressing)
 		{
 			const double Bar = 0.07 * S;
 			const double Proud = 0.05 * S;
@@ -508,15 +519,27 @@ namespace DTGMeshBuilder
 			FacadeBox(Frames, Face, U0 - Bar, U1 + Bar, Z1, Z1 + Bar, Back, Back + Proud, FrameColour);
 			FacadeBox(Frames, Face, U0 - Bar, U0, Z0, Z1, Back, Back + Proud, FrameColour);
 			FacadeBox(Frames, Face, U1, U1 + Bar, Z0, Z1, Back, Back + Proud, FrameColour);
-			FacadeBox(Frames, Face, U0 - 1.6 * Bar, U1 + 1.6 * Bar, Z0 - Bar, Z0, Back, 0.05 * S, FrameColour, false);
 			const double Mid = 0.5 * (Z0 + Z1);
 			FacadeBox(Frames, Face, U0, U1, Mid - 0.02 * S, Mid + 0.02 * S, Back, Back + 0.03 * S, FrameColour);
+			FDTGMesh& Sills = Dressing.Sills ? *Dressing.Sills : Frames;
+			FacadeBox(Sills, Face, U0 - 1.6 * Bar, U1 + 1.6 * Bar, Z0 - Bar - 0.07 * S, Z0 - Bar, Back, 0.1 * S, Dressing.SillColour, false);
+			if (Dressing.bLintel)
+			{
+				FacadeBox(Sills, Face, U0 - 1.8 * Bar, U1 + 1.8 * Bar, Z1 + Bar, Z1 + Bar + 0.15 * S, 0.0, 0.035 * S, Dressing.SillColour);
+			}
+			if (Dressing.Shutters)
+			{
+				const double Leaf = FMath::Min(0.36 * S, 0.45 * (U1 - U0));
+				const double Gap = Bar + 0.03 * S;
+				FacadeBox(Frames, Face, U0 - Gap - Leaf, U0 - Gap, Z0 - Bar, Z1 + Bar, 0.0, 0.04 * S, *Dressing.Shutters);
+				FacadeBox(Frames, Face, U1 + Gap, U1 + Gap + Leaf, Z0 - Bar, Z1 + Bar, 0.0, 0.04 * S, *Dressing.Shutters);
+			}
 		}
 
 		/** A row of windows along one storey of one face: evenly spaced, clear of the corners and of the door. */
 		void AddWindowRow(FDTGSurfaceMeshes& Meshes, FFacade& Face, double Z0, double Z1, double WindowWide, double Pitch,
 			double S, double Recess, const FLinearColor& GlassColour, const FLinearColor& FrameColour, bool bAvoidDoor,
-			FDTGMesh& Walls, const FLinearColor& WallColour)
+			FDTGMesh& Walls, const FLinearColor& WallColour, const FWindowDressing& Dressing)
 		{
 			const double Margin = 0.9 * S;
 			const double Usable = Face.Width - 2.0 * Margin;
@@ -535,7 +558,7 @@ namespace DTGMeshBuilder
 				{
 					continue;
 				}
-				AddWindow(Meshes, Face, U0, U1, Z0, Z1, S, Recess, GlassColour, FrameColour, Walls, WallColour);
+				AddWindow(Meshes, Face, U0, U1, Z0, Z1, S, Recess, GlassColour, FrameColour, Walls, WallColour, Dressing);
 			}
 		}
 
@@ -599,12 +622,42 @@ namespace DTGMeshBuilder
 			H ^= H >> 13;
 			return H;
 		}
+
+		/**
+		 * The colour a wall is painted, by what it is made of. The simulation colours a building by its role,
+		 * which would paint every house on a street the same; siding and stucco take a colour of their own
+		 * from the palette a Southern street actually shows. Brick and concrete keep their own colour under
+		 * the photograph, and the civic buildings, churches and towers keep the role's.
+		 */
+		FLinearColor WallColourFor(const BuildingPlan& Building, EDTGSurface Kind, const FLinearColor& RoleColour)
+		{
+			static const FLinearColor Siding[] = {
+				FLinearColor(0.80f, 0.80f, 0.76f), FLinearColor(0.78f, 0.74f, 0.62f), FLinearColor(0.55f, 0.58f, 0.60f),
+				FLinearColor(0.52f, 0.62f, 0.70f), FLinearColor(0.78f, 0.72f, 0.45f), FLinearColor(0.50f, 0.58f, 0.46f),
+				FLinearColor(0.70f, 0.68f, 0.64f), FLinearColor(0.84f, 0.84f, 0.82f)};
+			static const FLinearColor Stucco[] = {
+				FLinearColor(0.82f, 0.78f, 0.68f), FLinearColor(0.80f, 0.62f, 0.48f), FLinearColor(0.74f, 0.66f, 0.52f),
+				FLinearColor(0.85f, 0.84f, 0.80f), FLinearColor(0.80f, 0.74f, 0.50f), FLinearColor(0.72f, 0.56f, 0.46f),
+				FLinearColor(0.62f, 0.66f, 0.60f)};
+			if (Building.bDowntown || Building.Role == LotRole::Church || Building.Role == LotRole::Jail || Building.Role == LotRole::PoliceStation)
+			{
+				return RoleColour;
+			}
+			const uint32 Pick = VarietyOf(Building, 7);
+			switch (Kind)
+			{
+			case EDTGSurface::WoodSiding: return Siding[Pick % 8u];
+			case EDTGSurface::Stucco: return Stucco[Pick % 7u];
+			default: return RoleColour;
+			}
+		}
 	}
 
 	void BuildBuilding(const BuildingPlan& Building, double GroundZ, double S, FDTGSurfaceMeshes& Meshes)
 	{
-		const FPalette Palette = PaletteFor(Building);
 		const EDTGSurface WallKind = WallSurfaceFor(Building);
+		FPalette Palette = PaletteFor(Building);
+		Palette.Wall = WallColourFor(Building, WallKind, Palette.Wall);
 		FDTGMesh& Walls = Meshes[WallKind];
 		FDTGMesh& Trim = Meshes[EDTGSurface::Matte];
 		FDTGMesh& Concrete = Meshes[EDTGSurface::Concrete];
@@ -710,20 +763,28 @@ namespace DTGMeshBuilder
 				1.35 * S, 1.4 * S, Awning);
 			FacadeBox(Trim, Front, 0.3 * S, Front.Width - 0.3 * S, ShopTop + 0.55 * S, ShopTop + 1.2 * S, 0.0, 0.1 * S, Bronze);
 			AddDoor(Meshes, Front, 0.0, S, 1.1 * S, Recess, true, Palette.Trim, Palette.Window, Bronze, Walls, Palette.Wall, ShopSill);
-			// Ordinary windows round the other sides, and on every storey above.
+			// Ordinary windows round the other sides, and on every storey above, with stone sills and lintels.
+			const FWindowDressing Masonry{&Concrete, Stone, true, nullptr};
 			for (FFacade& Face : Faces)
 			{
 				for (int32 Floor = Face.bDoor ? 1 : 0; Floor < Floors; ++Floor)
 				{
 					const double Sill = Floor * StoreyHeight + 0.9 * S;
 					AddWindowRow(Meshes, Face, Sill, Sill + FMath::Min(1.6 * S, StoreyHeight - 1.3 * S), 1.4 * S, 2.6 * S, S, Recess,
-						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall);
+						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall, Masonry);
 				}
 			}
 		}
 		else
 		{
-			// Houses, churches and the civic buildings: windows storey by storey, sized to what they are.
+			// Houses, churches and the civic buildings: windows storey by storey, sized to what they are. A house
+			// gets board sills, and about half of them shutters in a colour that is not the door's.
+			static const FLinearColor ShutterPaint[] = {
+				FLinearColor(0.04f, 0.12f, 0.06f), FLinearColor(0.02f, 0.02f, 0.02f), FLinearColor(0.03f, 0.05f, 0.14f),
+				FLinearColor(0.28f, 0.04f, 0.04f), FLinearColor(0.12f, 0.12f, 0.13f)};
+			const FLinearColor Shutter = ShutterPaint[VarietyOf(Building, 5) % 5u];
+			const bool bShutters = bHome && VarietyOf(Building, 8) % 2u == 0u;
+			const FWindowDressing Dressing{bHome ? &Trim : &Concrete, bHome ? White : Stone, !bHome, bShutters ? &Shutter : nullptr};
 			for (FFacade& Face : Faces)
 			{
 				if (bChurch)
@@ -732,7 +793,7 @@ namespace DTGMeshBuilder
 					if (!Face.bDoor)
 					{
 						AddWindowRow(Meshes, Face, 1.2 * S, Height - 1.8 * S, 1.0 * S, 3.4 * S, S, Recess, Palette.Window, FrameColour, false,
-							Walls, Palette.Wall);
+							Walls, Palette.Wall, Dressing);
 					}
 					continue;
 				}
@@ -741,7 +802,7 @@ namespace DTGMeshBuilder
 					const double Sill = Footing + Floor * StoreyHeight + (bCivic ? 1.4 : 0.95) * S;
 					const double Tall = bCivic ? 0.9 * S : FMath::Min(1.4 * S, StoreyHeight - 1.4 * S);
 					AddWindowRow(Meshes, Face, Sill, Sill + Tall, bCivic ? 0.6 * S : 1.0 * S, bCivic ? 2.6 * S : 2.8 * S, S, Recess,
-						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall);
+						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall, Dressing);
 				}
 			}
 			// A painted front door on a house: the one splash of colour a street of them has.
@@ -838,7 +899,8 @@ namespace DTGMeshBuilder
 		}
 		else
 		{
-			Concrete.AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MaxY, Top + 0.1 * S), Palette.Roof);
+			// Built-up roofing behind the parapet: dark, like the tar and gravel it is, not a slab of the wall's colour.
+			Meshes[EDTGSurface::Asphalt].AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MaxY, Top + 0.1 * S), FLinearColor(0.2f, 0.19f, 0.18f));
 			// The parapet is the wall carried up; the cornice under it is the line a facade finishes on.
 			const double Wall = 0.25 * S;
 			Walls.AddBox(FVector(MinX, MinY, Top), FVector(MaxX, MinY + Wall, Top + 0.9 * S), Palette.Wall);
@@ -848,7 +910,15 @@ namespace DTGMeshBuilder
 			for (const FFacade& Face : Faces)
 			{
 				FacadeBox(Concrete, Face, -0.2 * S, Face.Width + 0.2 * S, Height - 0.35 * S, Height, 0.0, 0.2 * S, Stone, false);
+				FacadeBox(Concrete, Face, -0.1 * S, Face.Width + 0.1 * S, Height - 0.5 * S, Height - 0.35 * S, 0.0, 0.1 * S, Stone, false);
 			}
+			// A cap on the parapet, a little proud of it, so the roofline is a line and not an edge.
+			const double Cap = Top + 0.9 * S;
+			const double Lip = 0.05 * S;
+			Concrete.AddBox(FVector(MinX - Lip, MinY - Lip, Cap), FVector(MaxX + Lip, MinY + Wall + Lip, Cap + 0.08 * S), Stone);
+			Concrete.AddBox(FVector(MinX - Lip, MaxY - Wall - Lip, Cap), FVector(MaxX + Lip, MaxY + Lip, Cap + 0.08 * S), Stone);
+			Concrete.AddBox(FVector(MinX - Lip, MinY, Cap), FVector(MinX + Wall + Lip, MaxY, Cap + 0.08 * S), Stone);
+			Concrete.AddBox(FVector(MaxX - Wall - Lip, MinY, Cap), FVector(MaxX + Lip, MaxY, Cap + 0.08 * S), Stone);
 			if (bTower)
 			{
 				const double Cx = 0.5 * (MinX + MaxX);
@@ -856,6 +926,37 @@ namespace DTGMeshBuilder
 				const double Hx = 0.2 * (MaxX - MinX);
 				const double Hy = 0.2 * (MaxY - MinY);
 				Concrete.AddBox(FVector(Cx - Hx, Cy - Hy, Top), FVector(Cx + Hx, Cy + Hy, Top + 3.5 * S), Stone);
+			}
+		}
+
+		// What a plain box lacks: a line at every floor on the street buildings, a downpipe at two corners of
+		// anything with a flat roof, and the plant that lives on top of it. Each is a few boxes; together they
+		// are most of what tells a building from a drawing of one.
+		if (bShop && Floors > 1)
+		{
+			for (const FFacade& Face : Faces)
+			{
+				for (int32 Floor = 1; Floor < Floors; ++Floor)
+				{
+					FacadeBox(Concrete, Face, 0.0, Face.Width, Floor * StoreyHeight - 0.07 * S, Floor * StoreyHeight + 0.07 * S, 0.0, 0.05 * S, Stone, false);
+				}
+			}
+		}
+		if (!bPitched)
+		{
+			const FLinearColor Pipe(0.3f, 0.3f, 0.31f);
+			for (int32 Side = 0; Side < 4; Side += 2)
+			{
+				FacadeBox(Trim, Faces[Side], 0.3 * S, 0.4 * S, Footing, Height + 0.7 * S, 0.02 * S, 0.12 * S, Pipe);
+			}
+			const int32 Units = 1 + static_cast<int32>(VarietyOf(Building, 6) % 3u);
+			for (int32 Unit = 0; Unit < Units; ++Unit)
+			{
+				const uint32 Where = VarietyOf(Building, 10u + static_cast<uint32>(Unit));
+				const double Ux = MinX + 1.0 * S + (Where % 1000u) / 1000.0 * FMath::Max(0.0, MaxX - MinX - 3.2 * S);
+				const double Uy = MinY + 1.0 * S + ((Where >> 10) % 1000u) / 1000.0 * FMath::Max(0.0, MaxY - MinY - 2.8 * S);
+				Trim.AddBox(FVector(Ux, Uy, Top + 0.1 * S), FVector(Ux + 1.8 * S, Uy + 1.1 * S, Top + 1.2 * S), FLinearColor(0.56f, 0.57f, 0.58f));
+				Trim.AddBox(FVector(Ux + 0.3 * S, Uy + 0.2 * S, Top + 1.2 * S), FVector(Ux + 1.5 * S, Uy + 0.9 * S, Top + 1.35 * S), FLinearColor(0.2f, 0.2f, 0.21f));
 			}
 		}
 

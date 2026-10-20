@@ -1,6 +1,7 @@
 #include "Game/DTGPhotoMode.h"
 
 #include "DustToGlory.h"
+#include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/HUD.h"
@@ -112,6 +113,36 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Photos"), Shots[Current].Name + TEXT(".png"));
 		FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI*/ false, /*bAddFilenameSuffix*/ false);
 		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s (%.0f fps)"), *Path, GAverageFPS);
+		// Once a run: the building shells must have collision. It is cooked once after every section is in
+		// (ADTGWorldBuilder::CookBuildingCollision), which is exactly the kind of thing that breaks without a
+		// sign, so a trace from above the first building must stop at its roof and not at the ground.
+		if (Current == 0 && Game && Game->IsContentLoaded() && !Game->Sim().City.Buildings.empty())
+		{
+			const dtg::sim::BuildingPlan& Building = Game->Sim().City.Buildings.front();
+			const double Cx = Building.Footprint.CenterX();
+			const double Cy = Building.Footprint.CenterY();
+			const double GroundM = Game->Sim().Map.HeightAt(Cx, Cy);
+			const double RoofM = GroundM + FMath::Max(3.0, Building.HeightM);
+			FHitResult Hit;
+			const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, FVector(Cx * DTGMetresToUnreal, Cy * DTGMetresToUnreal, (RoofM + 60.0) * DTGMetresToUnreal),
+				FVector(Cx * DTGMetresToUnreal, Cy * DTGMetresToUnreal, (GroundM - 5.0) * DTGMetresToUnreal), ECC_Visibility);
+			const double HitM = bHit ? Hit.ImpactPoint.Z / DTGMetresToUnreal : GroundM - 5.0;
+			if (HitM < RoofM - 1.5)
+			{
+				UE_LOG(LogDTG, Warning, TEXT("Photo mode: building collision MISSING: the trace over building %d stopped at %.1f m, roof at %.1f m, ground at %.1f m."),
+					Building.Id, HitM, RoofM, GroundM);
+			}
+			else
+			{
+				UE_LOG(LogDTG, Log, TEXT("Photo mode: building collision ok: the trace over building %d stopped at %.1f m on %s, roof at %.1f m."),
+					Building.Id, HitM, Hit.GetComponent() ? *Hit.GetComponent()->GetName() : TEXT("?"), RoofM);
+			}
+		}
+		// -DTGMemReport: what is in memory at the car shot, to Saved/Profiling/MemReports, for when the GPU is full.
+		if (GEngine && Shots[Current].Name == TEXT("car") && FParse::Param(FCommandLine::Get(), TEXT("DTGMemReport")))
+		{
+			GEngine->Exec(GetWorld(), TEXT("MemReport -full"));
+		}
 		bCaptured = true;
 		NextAt = Now + 1.0; // the request is served on a later frame
 		return;

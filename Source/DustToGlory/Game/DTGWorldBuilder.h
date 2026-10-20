@@ -97,6 +97,8 @@ private:
 	void BuildBuildings();
 	void BuildVenues();
 	void BuildWater();
+	/** Cooks the building shells' collision once, after every section is in; per section it took six minutes. */
+	void CookBuildingCollision();
 	/** The paint on the highways and the town streets, from Sim/RoadMarkings. */
 	void BuildRoadMarkings();
 	/**

@@ -56,6 +56,9 @@ metres; Unreal works in centimetres; that constant is the whole boundary.
   Unreal builds. Seen on the first real build: `Role` (`AActor::Role`), `Player`
   (`APlayerController::Player`), and UHT rejects a `UPROPERTY` called `Layers` (`AActor::Layers`).
 - `bUseUnity = false` in `Build.cs` is deliberate. Do not turn it back on.
+- **Never create procedural mesh sections with collision one at a time.** Each such section re-cooks
+  the whole component's collision; 191 of them cost six minutes of load. Create them without, flag
+  the sections, and cook once (`ADTGWorldBuilder::CookBuildingCollision`).
 
 ## Commands
 

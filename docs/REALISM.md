@@ -119,6 +119,31 @@ Still missing:
   instance per body with that off and the simulation's colour and finish drive it. Thirteen bodies,
   two of them static-mesh-only; the trailer is not used. Without the pack, cars are the boxes.
 
+- **Facades** (20 October): sills that throw a shadow, lintels over masonry openings, shutters on half the
+  houses, a line at every floor on the street buildings, a two-step cornice and a capped parapet, a
+  downpipe at two corners, plant on the flat roofs, and dark built-up roofing instead of a slab of the
+  wall's colour. Siding and stucco take a colour of their own per building from a Southern palette; the
+  simulation colours by role, which painted every house the same beige. The wall shader weathers: rain
+  streaks in patches and blotches, by surface (`Weathering` on each instance; none on the ground).
+
+**Memory, measured** (20 October, `-DTGMemReport` at the car shot, RTX 5070 Laptop, 8 GB): 5.7 GB of
+video memory in use at the shot, 7.7 GB at the peak during loading. It is not the car textures: the
+texture streaming pool held 277 MB of its 1000, and the City Sample textures are virtual (320 MB of
+pages). What it is: the whole map's 1160 building shells as one mesh per town -- 580 MB of vertex
+buffers and 300 MB of ray-tracing structures, built at startup and never streamed -- Nanite's streaming
+pool (528 MB), virtual shadow map pages (512 MB, now halved), Lumen's caches (600 MB, surface cache now
+halved), and 2.1 GB of transient render targets at 1600x900 with DLSS. The first full tour with the cars
+crashed the GPU at frame 6 with 6.7 GB of a 7.1 GB budget in use; ray tracing now sees Nanite's fallback
+meshes (`r.RayTracing.Nanite.Mode=0`), after which the same tour ran, but at the peak the card is still
+nearly full. Streaming the buildings by chunk, as the plants and props already are, is the real fix.
+
+**Load time, measured** (20 October, `Static world:` in the log): the static world took 400 s to build,
+381 of them in the building shells. Not the geometry (1.1 s): a procedural mesh section created with
+collision cooks the whole component's collision again, so 191 sections cooked the map 191 times over.
+The sections are now created without collision and cooked once at the end
+(`ADTGWorldBuilder::CookBuildingCollision`): 1.3 s for the whole static world, a 14-view photo tour in two
+minutes instead of ten, and the video memory peak down from 7.7 to 5.3 GB with it.
+
 One engine ensure seen once per photo-mode run (`!Geometry->IsEvicted()` in RayTracing.cpp); harmless
 so far, worth watching. The sun is six units, not a hundred thousand lux, so
 every light in the game is scaled to it rather than physical; the lamp heads themselves do not glow.

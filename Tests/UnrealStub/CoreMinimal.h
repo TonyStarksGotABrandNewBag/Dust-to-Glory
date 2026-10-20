@@ -134,6 +134,12 @@ inline bool IsValid(const T* Object) { return Object != nullptr; }
 
 /** Numeric limits, used where the engine layer seeds a running minimum. */
 template <typename T>
+/** Checked against UE 5.8.3: FPlatformTime::Seconds() comes in through CoreMinimal. */
+struct FPlatformTime
+{
+	static double Seconds();
+};
+
 struct TNumericLimits
 {
 	static constexpr T Min() { return std::numeric_limits<T>::lowest(); }
