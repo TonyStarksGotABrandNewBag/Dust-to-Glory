@@ -109,8 +109,18 @@ Still missing:
   street ran at 10 fps. A shot that moves the clock settles for ten seconds, not five, because the
   lit windows' pipeline states compile and the camera re-adapts; only photo mode jumps the clock.
 
-Still box geometry: cars. One engine ensure seen once per photo-mode run (`!Geometry->IsEvicted()` in
-RayTracing.cpp); harmless so far, worth watching. The sun is six units, not a hundred thousand lux, so
+- **Real cars** (20 October): Epic's City Sample vehicles dress the simulation's cars when the pack is
+  in the project (`Game/DTGVehicleModels`, which body for which body style). The pack's skeletal meshes
+  are empty armatures; its art is Nanite static meshes authored in one space with the wheels in place,
+  so one scaled rig carries the shell, the glass and each wheel, scaled to the simulation's wheelbase
+  and placed with its tires on the ground the simulation found; the wheels spin, steer and ride the
+  suspension travel from the chassis simulation. The pack's paint picks its colour from a gradient by
+  per-instance random, which an actor never has, so `Tools/Art/build_vehicle_paint.py` makes a child
+  instance per body with that off and the simulation's colour and finish drive it. Thirteen bodies,
+  two of them static-mesh-only; the trailer is not used. Without the pack, cars are the boxes.
+
+One engine ensure seen once per photo-mode run (`!Geometry->IsEvicted()` in RayTracing.cpp); harmless
+so far, worth watching. The sun is six units, not a hundred thousand lux, so
 every light in the game is scaled to it rather than physical; the lamp heads themselves do not glow.
 
 **Lighting.** Done: Lumen GI and reflections, a sky atmosphere with the sun and moon driven by the
@@ -121,9 +131,11 @@ lightning. The lights are tuned against each other rather than physical (see abo
 because there are tens per chunk, not thousands. Real forest density needs
 `UHierarchicalInstancedStaticMeshComponent` with proper LODs and wind, which needs tree assets.
 
-**Vehicle art.** Cars are built from tapered boxes. The chassis simulation, the engine audio and the
-tuning are all real; the shells are placeholders. Needs modelled bodies with glass, lights, grille,
-badges and interiors.
+**Vehicle art.** Done with the City Sample bodies (above): glass, lights, grille, plates and interiors
+come with them. Still generated: the box shell as the fallback, and the collision box the sweeps use,
+which is the simulation's length and width rather than the body's. Headlights are the game's own
+spotlights, not the model's lamps. The sim's fifteen body styles map onto the pack's eleven usable
+shapes, so open-wheelers and monster trucks stay boxes.
 
 **Character art.** Pedestrians and the player are capsules with simple meshes. Needs skeletal meshes and
 animation sets — idle, walk, run, enter and exit a vehicle, and the conversation poses the NPC minds

@@ -143,6 +143,16 @@ cloning.
      every material; with `DTG_MATERIAL_STAGES=window` (or `surfaces`) in the environment, only
      those. It keeps `MPC_DTG`'s existing parameters: the materials reference them by id, and a
      rebuilt collection leaves every material built against the old one failing to compile.
+- **Fab packs (City Sample Vehicles, City Sample Crowds, Megascans):** not committed (`.gitignore`),
+  gigabytes. They come in through the editor's own Fab window, not the launcher: Window -> Fab, sign in
+  (it opens an Epic device-activation page in the system browser), My Library, the + on each tile.
+  Each download link carries a token that expires in minutes, so queue them one at a time -- fourteen at
+  once left everything behind the first two packs with a 403. On this PC the launcher's "Add To Project"
+  is dead: its project list is empty because the engine was never registered in the registry
+  (launcher offers "Fix Now", one UAC prompt, never accepted). `Content/CitySampleVehicles` is read by
+  `Game/DTGVehicleModels`; without it cars are the generated boxes. After the pack is in, run
+  `Tools/Art/build_vehicle_paint.py` through `UnrealEditor-Cmd -run=pythonscript` (editor closed): it
+  makes the paint instances the game colours; without them every car is the pack's silver.
 - **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here

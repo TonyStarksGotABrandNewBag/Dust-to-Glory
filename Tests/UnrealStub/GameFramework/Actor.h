@@ -174,6 +174,8 @@ public:
 	void DetachFromComponent(const FAttachmentTransformRules& Rules) { (void)Rules; }
 
 	void SetRelativeLocation(const FVector& Location) { RelativeLocation = Location; }
+	void SetRelativeLocationAndRotation(const FVector& Location, const FRotator& Rotation) { RelativeLocation = Location; RelativeRotation = Rotation; }
+	void SetRelativeLocationAndRotation(const FVector& Location, const FQuat& Rotation) { RelativeLocation = Location; RelativeRotation = Rotation.Rotator(); }
 	void SetRelativeRotation(const FRotator& Rotation) { RelativeRotation = Rotation; }
 	void SetRelativeRotation(const FQuat& Rotation) { RelativeRotation = Rotation.Rotator(); }
 	void SetRelativeScale3D(const FVector& Scale) { RelativeScale = Scale; }
@@ -248,6 +250,7 @@ public:
 	FVector GetPhysicsLinearVelocity() const { return FVector(); }
 	void SetMaterial(int32 Index, UMaterialInterface* Material) { (void)Index; (void)Material; }
 	UMaterialInterface* GetMaterial(int32 Index) const { (void)Index; return nullptr; }
+	virtual int32 GetMaterialIndex(FName MaterialSlotName) const { (void)MaterialSlotName; return -1; }
 	void SetCastShadow(bool bCast) { (void)bCast; }
 	bool bUseAsOccluder = false;
 	void SetBoundsScale(float Value) { (void)Value; }

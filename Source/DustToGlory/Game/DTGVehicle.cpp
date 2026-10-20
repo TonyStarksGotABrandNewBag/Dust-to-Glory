@@ -4,6 +4,8 @@
 #include "Engine/GameInstance.h"
 #include "Components/BoxComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "ProceduralMeshComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -15,6 +17,7 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGSky.h"
+#include "Game/DTGVehicleModels.h"
 #include "Game/DTGWorldBuilder.h"
 
 using namespace dtg::sim;
@@ -177,9 +180,27 @@ void ADTGVehicle::ConfigureFromModel(const FString& ModelId)
 		WidthM = Def->WidthM;
 		HeightM = Def->HeightM;
 	}
-	// Traffic gets a colour of its own, derived from the model id so the same car is always the same colour.
+	// Traffic gets a colour of its own, derived from the model id so the same car is always the same colour,
+	// in the shares a real road shows: about a quarter white, a fifth black, a quarter silver and grey, and
+	// the rest properly coloured rather than every car a different pastel.
 	const uint32 Hash = GetTypeHash(ModelId);
-	PaintColour = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash & 0xFF), static_cast<uint8>(50 + (Hash >> 8) % 110), 185);
+	const uint32 Share = (Hash >> 24) % 100;
+	if (Share < 26)
+	{
+		PaintColour = FLinearColor(0.85f, 0.85f, 0.84f);
+	}
+	else if (Share < 46)
+	{
+		PaintColour = FLinearColor(0.02f, 0.02f, 0.025f);
+	}
+	else if (Share < 72)
+	{
+		PaintColour = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash & 0xFF), 12, static_cast<uint8>(90 + (Hash >> 8) % 110));
+	}
+	else
+	{
+		PaintColour = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash & 0xFF), static_cast<uint8>(170 + (Hash >> 8) % 86), static_cast<uint8>(110 + (Hash >> 12) % 110));
+	}
 	RimColour = FLinearColor(0.55f, 0.55f, 0.57f);
 	// Most traffic is ordinary gloss; a share of it is metallic, as on a real road.
 	PaintFinish = (Hash >> 16) % 5 < 2 ? 1 : 0;
@@ -239,6 +260,157 @@ void ADTGVehicle::ApplyVisuals()
 		WheelMeshes[Index]->ClearAllMeshSections();
 		Meshes.Apply(WheelMeshes[Index], 0, false);
 	}
+	DressWithModel();
+}
+
+namespace detail_vehicle
+{
+	/** The simulation's wheel at this end and side, found by where the wheels are rather than assumed from their order. */
+	int32 SimWheelAt(const std::array<dtg::sim::ChassisWheel, 4>& Wheels, bool bFront, bool bLeft)
+	{
+		double MeanX = 0.0;
+		for (const dtg::sim::ChassisWheel& Wheel : Wheels)
+		{
+			MeanX += 0.25 * Wheel.CenterLocal().X;
+		}
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			const dtg::sim::Vec3 At = Wheels[static_cast<std::size_t>(Index)].CenterLocal();
+			if ((At.X > MeanX) == bFront && (At.Y < 0.0) == bLeft)
+			{
+				return Index;
+			}
+		}
+		return bFront ? 0 : 2;
+	}
+
+	UStaticMeshComponent* NewPiece(AActor* Owner, USceneComponent* Parent, const FName& Name)
+	{
+		UStaticMeshComponent* Piece = Name.IsNone() ? NewObject<UStaticMeshComponent>(Owner) : NewObject<UStaticMeshComponent>(Owner, Name);
+		Piece->SetupAttachment(Parent);
+		Piece->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Piece->RegisterComponent();
+		return Piece;
+	}
+}
+
+void ADTGVehicle::DressWithModel()
+{
+	// A real body when Epic's City Sample vehicles are in the project, the same one for the same car.
+	// The pack's pieces are authored in one space with the wheels in place, so one scaled rig carries
+	// them all: scaled so the model's wheelbase is the simulation's, placed so its front wheels stand
+	// where the simulation's do and its tires touch the ground the simulation found. The simulation's
+	// box and wheels keep running underneath; only what is drawn changes, so the handling is the same
+	// with or without the pack.
+	DTGVehicleModels::FKit Kit;
+	const bool bDressed = DTGVehicleModels::For(Setup.Body, GetTypeHash(Model), Kit);
+	Shell->SetVisibility(!bDressed);
+	for (UProceduralMeshComponent* Wheel : WheelMeshes)
+	{
+		if (Wheel)
+		{
+			Wheel->SetVisibility(!bDressed);
+		}
+	}
+	// A reconfigured car may have a different set of wheels, so the old ones go.
+	for (UStaticMeshComponent* Wheel : RigWheels)
+	{
+		if (Wheel)
+		{
+			Wheel->DestroyComponent();
+		}
+	}
+	RigWheels.Reset();
+	RigWheelSim.Reset();
+	RigWheelCentre.Reset();
+	if (!bDressed)
+	{
+		if (Rig)
+		{
+			Rig->SetVisibility(false, true);
+		}
+		return;
+	}
+	if (!Rig)
+	{
+		Rig = NewObject<USceneComponent>(this, TEXT("Rig"));
+		Rig->SetupAttachment(Body);
+		Rig->RegisterComponent();
+		RigBody = detail_vehicle::NewPiece(this, Rig, TEXT("RigBody"));
+		RigGlass = detail_vehicle::NewPiece(this, Rig, TEXT("RigGlass"));
+	}
+	Rig->SetVisibility(true, true);
+	RigBody->SetStaticMesh(Kit.Body);
+	RigGlass->SetStaticMesh(Kit.Glass);
+
+	// The model's axles and ground, in its own space.
+	double FrontX = 0.0;
+	double RearX = 0.0;
+	int32 FrontCount = 0;
+	int32 RearCount = 0;
+	double Ground = TNumericLimits<double>::Max();
+	for (const DTGVehicleModels::FWheel& Wheel : Kit.Wheels)
+	{
+		if (Wheel.bFront)
+		{
+			FrontX += Wheel.Centre.X;
+			++FrontCount;
+		}
+		else if (!Wheel.bExtra)
+		{
+			RearX += Wheel.Centre.X;
+			++RearCount;
+		}
+		Ground = FMath::Min(Ground, Wheel.Centre.Z - Wheel.Radius);
+	}
+	FrontX /= FMath::Max(1, FrontCount);
+	RearX /= FMath::Max(1, RearCount);
+
+	// Against the simulation's.
+	const std::array<ChassisWheel, 4>& Wheels = Sim.Wheels();
+	const Vec3 FrontLeft = Wheels[static_cast<std::size_t>(detail_vehicle::SimWheelAt(Wheels, true, true))].CenterLocal();
+	const Vec3 FrontRight = Wheels[static_cast<std::size_t>(detail_vehicle::SimWheelAt(Wheels, true, false))].CenterLocal();
+	const Vec3 RearLeft = Wheels[static_cast<std::size_t>(detail_vehicle::SimWheelAt(Wheels, false, true))].CenterLocal();
+	const double SimFrontX = 0.5 * (FrontLeft.X + FrontRight.X) * DTGMetresToUnreal;
+	const double SimWheelbase = FMath::Abs(0.5 * (FrontLeft.X + FrontRight.X) - RearLeft.X) * DTGMetresToUnreal;
+	const double SimGround = (0.5 * (FrontLeft.Z + FrontRight.Z) - FMath::Max(0.2, Setup.FrontTire.RadiusM)) * DTGMetresToUnreal;
+	RigScale = SimWheelbase / FMath::Max(1.0, FrontX - RearX);
+	Rig->SetRelativeScale3D(FVector(RigScale, RigScale, RigScale));
+	Rig->SetRelativeLocation(FVector(SimFrontX - FrontX * RigScale, 0.0, SimGround - Ground * RigScale));
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		WheelRestZ[Index] = Wheels[static_cast<std::size_t>(Index)].CenterLocal().Z;
+	}
+	for (const DTGVehicleModels::FWheel& Wheel : Kit.Wheels)
+	{
+		UStaticMeshComponent* Piece = detail_vehicle::NewPiece(this, Rig, NAME_None);
+		Piece->SetStaticMesh(Wheel.Mesh);
+		RigWheels.Add(Piece);
+		RigWheelSim.Add(detail_vehicle::SimWheelAt(Wheels, Wheel.bFront, Wheel.bLeft));
+		RigWheelCentre.Add(Wheel.Centre);
+	}
+
+	// The body's car paint takes the colour and finish the simulation gave this car. The kit's paint
+	// instance has the pack's gradient variation switched off so BaseColor drives it; without that
+	// instance the body's own paint is used and the car comes out the gradient's first colour.
+	const int32 PaintSlot = RigBody->GetMaterialIndex(TEXT("veh_carPaint"));
+	if (PaintSlot != INDEX_NONE)
+	{
+		UMaterialInterface* const Parent = Kit.Paint ? Kit.Paint : RigBody->GetMaterial(PaintSlot);
+		if (UMaterialInstanceDynamic* Paint = UMaterialInstanceDynamic::Create(Parent, this))
+		{
+			// Gloss, metallic, matte, pearl, chrome: the pack's paint has a clear coat and flakes to turn.
+			static const float Clearcoat[] = {1.0f, 1.0f, 0.0f, 1.0f, 1.0f};
+			static const float Flakes[] = {0.2f, 0.7f, 0.0f, 0.5f, 0.0f};
+			const int32 Pick = FMath::Clamp(PaintFinish, 0, 4);
+			Paint->SetVectorParameterValue(TEXT("BaseColor"), PaintColour);
+			Paint->SetScalarParameterValue(TEXT("ClearcoatIntensity"), Clearcoat[Pick]);
+			Paint->SetScalarParameterValue(TEXT("FlakeDensity"), Flakes[Pick]);
+			RigBody->SetMaterial(PaintSlot, Paint);
+		}
+	}
+	UE_LOG(LogDTG, Log, TEXT("%s: body %s, wheelbase %.0f cm for the simulation's %.0f, scale %.3f, %d wheels, paint slot %d, rig at %s"),
+		*GetName(), *Kit.Name, FrontX - RearX, SimWheelbase, RigScale, Kit.Wheels.Num(), PaintSlot, *Rig->GetRelativeLocation().ToString());
 }
 
 void ADTGVehicle::PlaceAt(const FVector& WorldLocation, double YawDegrees)
@@ -302,10 +474,27 @@ void ADTGVehicle::Tick(float DeltaSeconds)
 		}
 		const Vec3 Local = Wheels[static_cast<std::size_t>(Index)].CenterLocal();
 		WheelMeshes[Index]->SetRelativeLocation(FVector(Local.X * DTGMetresToUnreal, Local.Y * DTGMetresToUnreal, Local.Z * DTGMetresToUnreal));
-		// The generated wheel already lies on its side, so this is simply spin and steer.
-		const FRotator Rotation(FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SpinAngle),
+		// The generated wheel already lies on its side, so this is simply spin and steer. Rolling forward
+		// is a negative pitch here: positive pitch tips the front of anything up.
+		const FRotator Rotation(-FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SpinAngle),
 			FMath::RadiansToDegrees(Wheels[static_cast<std::size_t>(Index)].SteerAngle), 0.0);
 		WheelMeshes[Index]->SetRelativeRotation(Rotation);
+	}
+	for (int32 Index = 0; Index < RigWheels.Num(); ++Index)
+	{
+		UStaticMeshComponent* Piece = RigWheels[Index];
+		if (!Piece)
+		{
+			continue;
+		}
+		// The model's wheel is authored in place, so it turns about its own centre: rotate, then put the
+		// centre back where it was, lifted by the suspension travel in the rig's own scale.
+		const int32 SimIndex = RigWheelSim[Index];
+		const ChassisWheel& Wheel = Wheels[static_cast<std::size_t>(SimIndex)];
+		const FQuat Turn = FQuat(FVector(0.0, 0.0, 1.0), Wheel.SteerAngle) * FQuat(FVector(0.0, 1.0, 0.0), -Wheel.SpinAngle);
+		const FVector& Centre = RigWheelCentre[Index];
+		const FVector Lift(0.0, 0.0, (Wheel.CenterLocal().Z - WheelRestZ[SimIndex]) * DTGMetresToUnreal / RigScale);
+		Piece->SetRelativeLocationAndRotation(Centre + Lift - Turn.RotateVector(Centre), Turn);
 	}
 
 	// Headlights come on when the sky says it is dark, and only for cars near enough to matter.

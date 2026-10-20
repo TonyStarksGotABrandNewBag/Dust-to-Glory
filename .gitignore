@@ -49,3 +49,9 @@ Plugins/Streamline*/
 
 # Epic's UE5 mannequins, copied from the engine by Tools/fetch_mannequins.py (126 MB, Unreal Engine EULA).
 Content/Characters/
+
+# Fab packs: added through the editor Fab window (see docs/HANDOFF.md), gigabytes, never committed.
+Content/CitySampleVehicles/
+Content/CitySampleCrowd/
+Content/Fab/
+Content/Megascans/

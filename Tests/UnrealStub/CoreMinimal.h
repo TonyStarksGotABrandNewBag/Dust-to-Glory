@@ -324,6 +324,7 @@ public:
 	FName() = default;
 	FName(const TCHAR* InText) : Value(InText ? InText : L"") {}
 	FName(const FString& InText) : Value(InText.Text) {}
+	bool IsNone() const { return Value.empty(); }
 	FString ToString() const { return FString(Value); }
 	bool operator==(const FName& Other) const { return Value == Other.Value; }
 	std::wstring Value;
@@ -709,6 +710,7 @@ struct FTransform
 	FTransform operator*(const FTransform& Other) const;
 
 	FVector GetLocation() const { return Translation; }
+	FVector GetTranslation() const { return Translation; }
 	void SetLocation(const FVector& In) { Translation = In; }
 	FQuat GetRotation() const { return Rotation; }
 	void SetRotation(const FQuat& In) { Rotation = In; }

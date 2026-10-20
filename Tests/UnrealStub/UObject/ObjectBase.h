@@ -77,6 +77,14 @@ inline T* NewObject(UObject* Outer, FName Name)
 	return nullptr;
 }
 
+/** Checked against UE 5.8.3's ObjectMacros.h ELoadFlags. */
+enum ELoadFlags : uint32
+{
+	LOAD_None = 0x0,
+	LOAD_NoWarn = 0x4,
+	LOAD_Quiet = 0x2000,
+};
+
 inline UObject* StaticLoadObject(UClass* Class, UObject* Outer, const TCHAR* Path,
 	const TCHAR* Filename = nullptr, uint32 LoadFlags = 0, UObject* Sandbox = nullptr)
 {

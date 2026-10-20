@@ -20,6 +20,7 @@ class UBoxComponent;
 class UDTGEngineAudio;
 class UDTGGameSubsystem;
 class UProceduralMeshComponent;
+class UStaticMeshComponent;
 
 UCLASS()
 class DUSTTOGLORY_API ADTGVehicle : public APawn
@@ -78,6 +79,8 @@ public:
 
 private:
 	void ApplyVisuals();
+	/** Dresses the car in a City Sample body when the pack is in the project; otherwise the generated shell shows. */
+	void DressWithModel();
 	void StepPhysics(double Dt);
 	void ResolveCollisions(const FVector& PreviousLocation);
 
@@ -89,6 +92,29 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UProceduralMeshComponent>> WheelMeshes;
+
+	/**
+	 * A City Sample body (DTGVehicleModels), when the pack is in the project: one scaled rig carrying
+	 * the shell, the glass and the wheels, with the generated shell and wheels hidden behind it.
+	 */
+	UPROPERTY()
+	TObjectPtr<USceneComponent> Rig;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> RigBody;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> RigGlass;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> RigWheels;
+
+	/** Per rig wheel: which of the simulation's four wheels drives it, and its centre in the model's space. */
+	TArray<int32> RigWheelSim;
+	TArray<FVector> RigWheelCentre;
+	/** Where the simulation had each wheel's centre when the body was fitted, so the model's wheels ride only the suspension travel. */
+	double WheelRestZ[4] = {};
+	double RigScale = 1.0;
 
 	UPROPERTY()
 	TObjectPtr<UDTGEngineAudio> Audio;

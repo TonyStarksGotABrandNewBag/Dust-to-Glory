@@ -423,4 +423,13 @@ void ADTGPhotoMode::PlanShots()
 			}
 		}
 	}
+
+	// -DTGPhotoShots=car,street keeps only those, for a quick look at one thing without the full tour.
+	FString Only;
+	if (FParse::Value(FCommandLine::Get(), TEXT("DTGPhotoShots="), Only, /*bShouldStopOnSeparator*/ false) && !Only.IsEmpty())
+	{
+		TArray<FString> Wanted;
+		Only.ParseIntoArray(Wanted, TEXT(","), true);
+		Shots.RemoveAll([&Wanted](const FDTGPhotoShot& Shot) { return !Wanted.Contains(Shot.Name); });
+	}
 }
