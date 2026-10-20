@@ -90,8 +90,11 @@ private:
 	double Visibility = 4000.0;
 	double Flash = 0.0;            // 0..1, the current flash, falling away
 	double NextStrike = 8.0;       // seconds until the next one
-	float SunBase = 6.0f;          // eased daylight level of the sun
+	float SunBase = 100000.0f;     // eased strength of the sun, lux
 	bool bSunSettled = false;      // false until the first frame has set it from the clock
-	float Brightness = 6.0f;
+	float Brightness = 1.0f;       // the weather's fraction of a clear sky's sun
 	float FogDensity = 0.004f;
+	float FogLuminance = 3000.3f;  // what the fog scatters: the sky's brightness, nits
+	FRotator SunStep = FRotator(9999.0, 0.0, 0.0);   // where the sun was last turned to; pitch 9999 = never
+	FRotator MoonStep = FRotator(9999.0, 0.0, 0.0);
 };

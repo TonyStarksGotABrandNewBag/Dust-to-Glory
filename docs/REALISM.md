@@ -193,6 +193,79 @@ Still missing:
   in the chassis simulation is the likely answer. Not verified: what happens to a pedestrian a moving car
   drives into now that the body blocks them (the character's own depenetration decides).
 
+## Visual fidelity audit, 20 October
+
+Kenny's brief: investigate before guessing, then the smallest high-impact set, validated on identical
+views. The investigation used `Tools/Art/inventory_assets.py` (every asset with its Nanite flag),
+`-DTGGpuProfile` read by `Tools/gpu_profile.py`, `-DTGMemReport`, and the logs. Before and after are the
+tour's 17 fixed views at the same clock, 1600x900, DLSS quality; the before set is kept in
+`Saved/Photos/before` with its log and memory report.
+
+**What the inventory says.** 1,176 materials, 325 Nanite static meshes: the City Sample car kits, the
+Poly Haven trees (pines and firs among them), the Megascans palms, grasses, kerbs, bins and poles are all
+Nanite. The only big non-Nanite static meshes are City Sample's own full-detail `_LOD` car meshes (up to
+3.2 M triangles), which nothing draws. Everything procedural (terrain chunks, roads, pavements, buildings,
+the ocean) is `UProceduralMeshComponent`, which cannot be Nanite. The Megascans road surface
+(`Fine_American_Road`) and the yellow road-line decal are imported and used by nothing.
+
+**Root causes found and fixed.**
+- `[VSM] Non-Nanite Marking Job Queue overflow`: one ocean sheet from four kilometres past the coast to
+  four past the far side, a non-Nanite shadow caster covering every page of the shadow map at every
+  level. The water casts no shadow now. The warning fires once at frame 2, while the world is first
+  built, and never again (eleven times across the earlier logs).
+- `Ray Tracing Geometry requested memory over budget (~406/400 MiB)`: the resident geometry pool is
+  400 MB by default and the scene asked 402-408 (static BLASes 398 MB: the procedural world, which
+  nothing streams out), so the engine evicted every frame. `r.RayTracing.ResidentGeometryMemoryPoolSizeInMB=768`:
+  requested 408 MB, resident 444, no eviction, no warning; video memory in use 5.3 GB of 7.1 at the car
+  view (was 5.7).
+- Shadow depths were half the frame: 12.8 of 27.2 ms GPU on the street view, 9.7 of it non-Nanite
+  virtual shadow maps, because every world mesh was Movable (the default for a component made in code)
+  and the sun turned every frame with the clock, and a directional light that has moved at all drops
+  its whole cached shadow map. Now the world's meshes and instance components are Static and the sun and
+  moon turn in steps of a third of a degree (a 20 m shadow moves 12 cm a step). Nanite shadow rendering
+  went 2.8 to 0.9 ms (cached); non-Nanite 9.7 to 7.4.
+- Exposure was not physical: a 6 "lux" sun against 2,000-lumen street lamps and 14,000-lumen room lights,
+  with a night held 2.5 stops under to paper over it. Now: a 100,000 lux sun with per-pixel atmosphere
+  transmittance (the horizon reddens by physics, not a colour ramp), the weather's fraction of it under
+  cloud, a 3 lux moon, 12,000-lumen lamps, the camera metering between EV 0 and EV 16 and half a stop
+  under by day, and the windows' glow in nits through the Night parameter (`ADTGSky`, `DTGWorldBuilder`).
+
+**Measured, before to after:** street 27.2 to 23.4 ms GPU (36 to 40 fps); downtown 22.6 to 20.8;
+country-road 23.3 to 20.2; person 25.5 to 20.4; walker 27.9 to 20.7; kerb 27.6 to 21.3; night-street
+34.9 to 22.6 (22 to 31 fps); night-downtown 32.0 to 20.8 (25 to 33 fps). Native 1600x900 with DLSS off:
+street 22.0 ms, house 28.0, downtown 23.5 (39, 30, 34 fps). DLSS ray reconstruction costs 2.7 ms of
+post-processing here and saves about 1 ms of rendering, because the frame is shadow-bound, not
+pixel-bound. Without pedestrians and traffic (`-DTGPedestrians=0 -DTGTraffic=0`) the street is 19.8 ms
+with non-Nanite shadows at 6.9: the crowd is not what remains. Held fifteen seconds before the profile (`-DTGSettle=15`) the street is 20.9 ms GPU (42 fps) with non-Nanite shadows at
+6.2 and the house 23.3 with 7.7: it does not settle away. What remains is the procedural world itself being
+redrawn into the shadow map every frame, and the cause is not found. The candidates, in order: a
+`UProceduralMeshComponent` draws through the dynamic path, with no cached static mesh draw commands, so its
+shadow pages may never be treated as static however its mobility is set; the whole town's buildings and
+surfaces are one component each, so any section change recreates the proxy and drops every page; and chunk
+streaming. The step that settles it either way is building chunks as real static meshes (Nanite where the
+build allows), which also gets them out of the non-Nanite shadow path altogether.
+
+**What the pictures say** (`Saved/Photos/before` against `Saved/Photos`, by eye): the day views are the
+same scene with a deeper sky, warmer sunlit surfaces and a stop less bleaching; the dusk view
+(`golden-street`) is the first that looks like the reference evening, a low warm sun through the
+atmosphere, long shadows, haze towards the towers; the night views went from a grey rainy afternoon to a
+dark street with lamp pools, warm windows and a moonlit sky, and stay readable.
+
+**Remaining realism gaps, in the order they matter:** (1) the country outside town is bare bright lawn
+with scattered trees to the horizon: there is no forest beyond the chunk radius and no pine stands, which
+is the world generator, not the renderer; (2) downtown is glass office towers, and Conway has none; (3)
+roads have no markings, wear or shoulders, and the imported Megascans road surface and line decal are
+unused; (4) facades are flat textured boxes; (5) terrain is one lawn material; (6) the crowd's skinned
+shadows (about 0.5 ms). Session briefs for 1 to 5 exist (golden-hour, conway-facades, roads-ground,
+sc-setting) and wait on the worktree trust prompt.
+
+**New dependencies, purchases, licences:** none. Everything used was already in the project: City
+Sample and Megascans through Fab, Poly Haven CC0, NVIDIA DLSS under NVIDIA's licence.
+
+**Not verified:** the Longs screenshot the brief refers to never arrived, so the views are the tour's
+17 viewpoints around the spawn; night-time play (not just stills) under the new exposure; the half-stop
+daytime bias in rain and fog; the shadowless ocean from the beach at low sun.
+
 **Memory, measured** (20 October, `-DTGMemReport` at the car shot, RTX 5070 Laptop, 8 GB): 5.7 GB of
 video memory in use at the shot, 7.7 GB at the peak during loading. It is not the car textures: the
 texture streaming pool held 277 MB of its 1000, and the City Sample textures are virtual (320 MB of

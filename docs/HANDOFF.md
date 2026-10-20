@@ -173,6 +173,16 @@ cloning.
   builds and runs it one editor at a time, so several worktrees can share the GPU), `-DTGPushCheck`
   (walks the player into a standing car and logs whether it moved). A worktree needs the gitignored packs
   junctioned in first: `Tools/link_local_assets.ps1`.
+- **Measuring the frame:** `-DTGGpuProfile` with the tour runs `ProfileGPU` on every settled view and
+  `Tools/gpu_profile.py <log>` prints the passes per view; `-DTGMemReport` writes a MemReport at the car
+  view (ray-tracing geometry and video memory are in it); `-DTGPedestrians=N -DTGTraffic=N` set the
+  street's population, so a profile can say what the crowd costs by running without one;
+  `-ExecCmds="r.NGX.DLSS.Enable 0,r.ScreenPercentage 100"` shoots at native resolution;
+  `-DTGSettle=15` holds each view longer first, so a profile is of the view and not of the chunks still
+  streaming in after the camera jumped.
+  `Tools/Art/inventory_assets.py` (headless) writes `Saved/inventory.txt`: every mesh with its Nanite
+  flag and triangle count, every material with its master, every texture with its size. The 20 October
+  audit in docs/REALISM.md was built from these.
 - **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here

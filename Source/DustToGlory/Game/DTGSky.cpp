@@ -18,6 +18,21 @@
 
 using namespace dtg::sim;
 
+namespace detail_sky
+{
+	/** Turns a light to Wanted only once it is a third of a degree off where it was last turned to. */
+	void Step(UDirectionalLightComponent* Light, const FRotator& Wanted, FRotator& Current)
+	{
+		constexpr double StepDegrees = 1.0 / 3.0;
+		if (FMath::Abs(FRotator::NormalizeAxis(Wanted.Pitch - Current.Pitch)) >= StepDegrees
+			|| FMath::Abs(FRotator::NormalizeAxis(Wanted.Yaw - Current.Yaw)) >= StepDegrees || Current.Pitch > 1000.0)
+		{
+			Current = Wanted;
+			Light->SetWorldRotation(Wanted);
+		}
+	}
+}
+
 ADTGSky::ADTGSky()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -28,10 +43,14 @@ ADTGSky::ADTGSky()
 	Sun = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("Sun"));
 	Sun->SetupAttachment(Root);
 	Sun->SetMobility(EComponentMobility::Movable);
-	Sun->SetIntensity(6.0f);
+	// Physical units: the sun is a hundred thousand lux at full strength, the lamps thousands of lumens,
+	// and the camera below meters the scene the way a real one would. The atmosphere dims and reddens the
+	// sun per pixel as it drops, so its colour is never faked.
+	Sun->SetIntensity(100000.0f);
 	// Lumen wants a sun that tells it where the light is coming from, and shadows that follow it.
 	Sun->SetDynamicShadowDistanceMovableLight(30000.0f);
 	Sun->bAtmosphereSunLight = true;
+	Sun->bPerPixelAtmosphereTransmittance = true;
 	Sun->SetCastShadows(true);
 
 	// The moon: a faint, cool second sun that gives the night a direction, shadows and a sky that is not
@@ -45,6 +64,7 @@ ADTGSky::ADTGSky()
 	Moon->SetDynamicShadowDistanceMovableLight(20000.0f);
 	Moon->bAtmosphereSunLight = true;
 	Moon->AtmosphereSunLightIndex = 1;
+	Moon->bPerPixelAtmosphereTransmittance = true;
 	Moon->SetCastShadows(true);
 
 	Atmosphere = CreateDefaultSubobject<USkyAtmosphereComponent>(TEXT("Atmosphere"));
@@ -95,10 +115,20 @@ ADTGSky::ADTGSky()
 	Look.MotionBlurAmount = 0.3f;
 	Look.bOverride_Sharpen = true;
 	Look.Sharpen = 0.4f;
-	// The exposure is set each frame: left to itself the camera opens up until a moonlit street looks
-	// like an overcast afternoon, so after dark it is held two and a half stops under.
+	// The exposure meters the physical scene between EV 0 and EV 16: a moonlit street and noon. Left to
+	// itself the camera opened up until a moonlit street looked like an overcast afternoon; the floor is
+	// what keeps the night dark, instead of the bias that used to. By day it is held half a stop
+	// under what the meter wants (set each frame), which is where a sunny street stops looking bleached.
 	Look.bOverride_AutoExposureBias = true;
 	Look.AutoExposureBias = 0.0f;
+	Look.bOverride_AutoExposureMinBrightness = true;
+	Look.AutoExposureMinBrightness = 0.0f;
+	Look.bOverride_AutoExposureMaxBrightness = true;
+	Look.AutoExposureMaxBrightness = 16.0f;
+	Look.bOverride_HistogramLogMin = true;
+	Look.HistogramLogMin = -2.0f;
+	Look.bOverride_HistogramLogMax = true;
+	Look.HistogramLogMax = 18.0f;
 	Look.bOverride_LumenFinalGatherQuality = true;
 	Look.LumenFinalGatherQuality = 2.0f;
 	Look.bOverride_LumenSceneDetail = true;
@@ -154,45 +184,54 @@ void ADTGSky::Tick(float DeltaSeconds)
 												  : (Fraction + 1.0 - Sunset) / (1.0 - Sunset + Sunrise);
 		SunPitch = -40.0 * FMath::Sin(Through * UE_PI);
 	}
-	// South Carolina and Florida both face east, so the sun comes up over the Atlantic.
-	Sun->SetWorldRotation(FRotator(-SunPitch, 100.0 + Fraction * 200.0, 0.0));
+	// South Carolina and Florida both face east, so the sun comes up over the Atlantic. The sun turns in
+	// steps of a third of a degree rather than every frame: a directional light that has moved at all
+	// throws away every cached page of its virtual shadow map, and with the whole world redrawn into it
+	// each frame that was 9 ms of a 25 ms street frame. A step moves a 20 m shadow about 12 cm.
+	detail_sky::Step(Sun, FRotator(-SunPitch, 100.0 + Fraction * 200.0, 0.0), SunStep);
 
 	const Weather Now = Game->Sim().Weather.Current();
 	ApplyWeather(Now, DeltaSeconds);
 	Strike(Now == Weather::Storm, DeltaSeconds);
 
-	// Night is lit by the sky rather than the sun, and never goes fully black. A flash is added on top
-	// of all of it, so lightning lights a midnight road as well as a grey afternoon.
+	// Daylight, 0 at night to 1 by day, is what the lamps, the lit windows and the fog follow.
 	Daylight = FMath::Clamp((SunPitch + 6.0) / 18.0, 0.0, 1.0);
-	const float TargetIntensity = static_cast<float>(0.15 + Daylight * Brightness);
-	// The daylight level is kept separately from what the light is actually set to, in case anything
-	// else is ever added on top of it. It starts where the first frame wants it, so a game that begins
-	// at night does not open with a second of daylight easing away.
+	// The sun in lux: a hundred thousand in clear air, the weather's fraction of that under cloud, and
+	// the atmosphere's per-pixel transmittance takes it down to orange at the horizon. It goes out over
+	// the few degrees around the horizon: pitched under it, a sun of this strength lights roofs and tree
+	// crowns from underneath, so the sky light carries the twilight instead.
+	const double Up = FMath::Clamp((SunPitch + 1.0) / 4.0, 0.0, 1.0);
+	const float TargetIntensity = static_cast<float>(100000.0 * Up * Brightness);
+	// Eased, and started where the first frame wants it, so a game that begins at night does not open
+	// with a second of daylight easing away.
 	SunBase = bSunSettled ? FMath::FInterpTo(SunBase, TargetIntensity, DeltaSeconds, 2.0f) : TargetIntensity;
 	bSunSettled = true;
 	Sun->SetIntensity(SunBase);
-	// Warm at the horizon, white overhead: the cheapest trick there is for making dusk look like dusk.
-	const double Warmth = 1.0 - FMath::Clamp(SunPitch / 25.0, 0.0, 1.0);
-	Sun->SetLightColor(FLinearColor(1.0f, static_cast<float>(1.0 - 0.35 * Warmth), static_cast<float>(1.0 - 0.6 * Warmth)));
-	// A flash is sky light rather than sun light. The sun is pitched below the horizon at night, so
-	// adding it there would light the world from underneath at exactly the moment it shows most.
-	// Lightning is instantaneous; the decay is what you actually see.
-	Ambient->SetIntensity(static_cast<float>(0.25 + Daylight * 0.9 + Flash * 11.0));
+	Sun->SetVisibility(SunBase > 1.0f);
+	// The sky light is the captured sky at its real strength. A flash is sky light rather than sun light
+	// (the sun is under the horizon at night, when it shows most): a sky thirty times brighter for a
+	// moment, decaying, which is what you actually see of lightning.
+	Ambient->SetIntensity(static_cast<float>(1.0 + Flash * 30.0));
 	// The moon stands opposite the sun, highest when the sun is deepest, and comes up as the sun goes
-	// under. Hidden while it is off: a light of any intensity is a second set of shadow maps.
+	// under. Three lux, a dozen times the real thing, because a night you cannot see is not playable. Hidden
+	// while it is off: a light of any intensity is a second set of shadow maps.
 	const double Moonlight = FMath::Clamp(-SunPitch / 6.0, 0.0, 1.0);
 	const double MoonPitch = FMath::Clamp(-SunPitch * 1.5, 0.0, 60.0);
-	Moon->SetWorldRotation(FRotator(-MoonPitch, 280.0 + Fraction * 200.0, 0.0));
-	Moon->SetIntensity(static_cast<float>(0.14 * Moonlight));
+	detail_sky::Step(Moon, FRotator(-MoonPitch, 280.0 + Fraction * 200.0, 0.0), MoonStep);
+	Moon->SetIntensity(static_cast<float>(3.0 * Moonlight));
 	Moon->SetVisibility(Moonlight > 0.0);
-	Grade->Settings.AutoExposureBias = static_cast<float>(-2.5 * (1.0 - Daylight));
+	Grade->Settings.AutoExposureBias = static_cast<float>(-0.5 * Daylight);
+	// What the fog scatters is the sky's own brightness: thousands of nits by day, under one by moonlight.
+	FogLuminance = static_cast<float>(3000.0 * Daylight + 0.3);
 	// What the materials read: windows light up as the day goes, and the roads darken and shine in the rain,
 	// which takes a while to wet them and a while to dry.
 	const double TargetWet = Now == Weather::Rain ? 0.85 : (Now == Weather::Storm ? 1.0 : (Now == Weather::Fog ? 0.3 : 0.0));
 	Wetness = FMath::FInterpTo(Wetness, static_cast<float>(TargetWet), DeltaSeconds, 0.15f);
 	if (Parameters)
 	{
-		UKismetMaterialLibrary::SetScalarParameterValue(this, Parameters, TEXT("Night"), static_cast<float>(1.0 - Daylight));
+		// Night drives the windows' glow, which is in nits now that the exposure is physical: a lit room
+		// shows a few of them through the glass, bright against a street at EV 1 without blowing out.
+		UKismetMaterialLibrary::SetScalarParameterValue(this, Parameters, TEXT("Night"), static_cast<float>(4.0 * (1.0 - Daylight)));
 		UKismetMaterialLibrary::SetScalarParameterValue(this, Parameters, TEXT("Wet"), Wetness);
 	}
 	if (Flash > 0.0)
@@ -201,7 +240,7 @@ void ADTGSky::Tick(float DeltaSeconds)
 		Fog->SetFogInscatteringColor(FLinearColor(
 			FMath::Min(1.0f, 0.45f + static_cast<float>(Flash) * 0.6f),
 			FMath::Min(1.0f, 0.5f + static_cast<float>(Flash) * 0.6f),
-			FMath::Min(1.0f, 0.6f + static_cast<float>(Flash) * 0.5f)));
+			FMath::Min(1.0f, 0.6f + static_cast<float>(Flash) * 0.5f)) * FogLuminance * (1.0f + static_cast<float>(Flash) * 30.0f));
 	}
 }
 
@@ -227,11 +266,11 @@ void ADTGSky::Strike(bool bStormy, float DeltaSeconds)
 
 void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 {
-	// Each weather is a visibility and a thickness of air; everything else follows from those. Clear air
-	// is thin: the sky atmosphere already gives distance its aerial perspective, and the 0.015 this used
-	// to be washed every long view out to grey.
+	// Each weather is a visibility, a thickness of air and the fraction of the sun that gets through;
+	// everything else follows from those. Clear air is thin: the sky atmosphere already gives distance
+	// its aerial perspective, and the 0.015 this used to be washed every long view out to grey.
 	float TargetDensity = 0.004f;
-	float TargetBrightness = 6.0f;
+	float TargetBrightness = 1.0f;
 	double TargetVisibility = 6000.0;
 	FLinearColor FogColour(0.45f, 0.52f, 0.6f);
 	switch (Value)
@@ -239,30 +278,30 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 	case Weather::Clear:
 		break;
 	case Weather::PartlyCloudy:
-		TargetBrightness = 5.2f;
+		TargetBrightness = 0.85f;
 		TargetVisibility = 5000.0;
 		break;
 	case Weather::Overcast:
 		TargetDensity = 0.012f;
-		TargetBrightness = 3.0f;
+		TargetBrightness = 0.2f;
 		TargetVisibility = 3000.0;
 		FogColour = FLinearColor(0.42f, 0.44f, 0.47f);
 		break;
 	case Weather::Rain:
 		TargetDensity = 0.025f;
-		TargetBrightness = 2.0f;
+		TargetBrightness = 0.12f;
 		TargetVisibility = 1400.0;
 		FogColour = FLinearColor(0.36f, 0.39f, 0.43f);
 		break;
 	case Weather::Storm:
 		TargetDensity = 0.045f;
-		TargetBrightness = 1.1f;
+		TargetBrightness = 0.06f;
 		TargetVisibility = 700.0;
 		FogColour = FLinearColor(0.25f, 0.27f, 0.31f);
 		break;
 	case Weather::Fog:
 		TargetDensity = 0.16f;
-		TargetBrightness = 2.4f;
+		TargetBrightness = 0.35f;
 		TargetVisibility = 220.0;
 		FogColour = FLinearColor(0.62f, 0.64f, 0.66f);
 		break;
@@ -274,5 +313,5 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 	Brightness = FMath::FInterpTo(Brightness, TargetBrightness, DeltaSeconds, 0.35f);
 	Visibility = FMath::FInterpTo(Visibility, TargetVisibility, static_cast<double>(DeltaSeconds), 0.35);
 	Fog->SetFogDensity(FogDensity);
-	Fog->SetFogInscatteringColor(FogColour);
+	Fog->SetFogInscatteringColor(FogColour * FogLuminance);
 }

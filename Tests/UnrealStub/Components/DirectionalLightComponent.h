@@ -24,6 +24,7 @@ public:
 	void SetLightSourceAngle(float Value) { (void)Value; }
 	float DynamicShadowDistanceMovableLight = 20000.0f;
 	bool bAtmosphereSunLight = false;
+	bool bPerPixelAtmosphereTransmittance = false;
 	bool bUsedAsAtmosphereSunLight = false;
 	int32 AtmosphereSunLightIndex = 0;
 };

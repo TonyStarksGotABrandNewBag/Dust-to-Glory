@@ -34,7 +34,9 @@ using namespace dtg::sim;
 namespace detail_worldbuilder
 {
 	/** A street lamp at full dark. Real lamps are 5000 to 10000 lumens; this sun is six units, not a hundred thousand. */
-	constexpr float LampLumens = 2000.0f;
+	// A real street lamp, now that the camera meters physical light: a 150 W sodium lamp puts out about
+	// this much. At 2000 it was a porch light.
+	constexpr float LampLumens = 12000.0f;
 }
 
 ADTGWorldBuilder::ADTGWorldBuilder()
@@ -46,21 +48,32 @@ ADTGWorldBuilder::ADTGWorldBuilder()
 	// root is a plain scene component and everything hangs off it.
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
+	// Nothing here ever moves, and that is worth saying: a Movable mesh is drawn into the virtual shadow
+	// maps again every frame, and with the whole world Movable that was 9.6 ms of a 24 ms frame on the
+	// street. Static, its shadow pages are cached and only redrawn when a chunk is rebuilt.
+	Root->SetMobility(EComponentMobility::Static);
 
 	Surfaces = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Surfaces"));
 	Surfaces->SetupAttachment(Root);
+	Surfaces->SetMobility(EComponentMobility::Static);
 	Surfaces->bUseAsyncCooking = true;
 	Surfaces->SetCollisionProfileName(TEXT("BlockAll"));
 
 	Buildings = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Buildings"));
 	Buildings->SetupAttachment(Root);
+	Buildings->SetMobility(EComponentMobility::Static);
 	Buildings->bUseAsyncCooking = true;
 	Buildings->SetCollisionProfileName(TEXT("BlockAll"));
 
 	Water = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Water"));
 	Water->SetupAttachment(Root);
+	Water->SetMobility(EComponentMobility::Static);
 	// Water is see-through and swum through, not stood on; vehicles test for it through the world builder.
 	Water->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// And casts no shadow: one sheet from four kilometres past the coast to four past the far side
+	// covers every page of the shadow map at every level, which is what overflowed the virtual shadow
+	// maps' non-Nanite marking queue every frame ("[VSM] Non-Nanite Marking Job Queue overflow").
+	Water->SetCastShadow(false);
 }
 
 void ADTGWorldBuilder::BeginPlay()
@@ -371,6 +384,7 @@ UInstancedStaticMeshComponent* ADTGWorldBuilder::PlantComponent(int32 Part, int3
 	{
 		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
 		Instances->SetupAttachment(GetRootComponent());
+		Instances->SetMobility(EComponentMobility::Static);
 		Instances->RegisterComponent();
 		Instances->SetStaticMesh(DTGPlantModels::Mesh(Model));
 		detail_worldbuilder::ApplyScalarOverride(Instances, this);
@@ -407,6 +421,7 @@ UInstancedStaticMeshComponent* ADTGWorldBuilder::PropComponent(int32 Part, int32
 	{
 		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
 		Instances->SetupAttachment(GetRootComponent());
+		Instances->SetMobility(EComponentMobility::Static);
 		Instances->RegisterComponent();
 		Instances->SetStaticMesh(DTGPropModels::Mesh(Mesh));
 		// Drawn, not collided with, for now: a car body sweep against thousands of poles is its own job.
@@ -1101,6 +1116,7 @@ UProceduralMeshComponent* ADTGWorldBuilder::TakeTerrainPart(int32& OutIndex)
 		return nullptr;
 	}
 	Mesh->SetupAttachment(GetRootComponent());
+	Mesh->SetMobility(EComponentMobility::Static);
 	Mesh->RegisterComponent();
 	// Cooked on the spot. A chunk is a few thousand triangles of its own now rather than a slice of the
 	// whole world, so this is cheap -- and async cooking would serve the *old* body setup for several

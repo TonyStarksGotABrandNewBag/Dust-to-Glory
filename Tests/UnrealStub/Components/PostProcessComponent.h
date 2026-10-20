@@ -35,6 +35,14 @@ struct FPostProcessSettings
 	float LumenReflectionQuality = 1.0f;
 	bool bOverride_AutoExposureBias = false;
 	float AutoExposureBias = 0.0f;
+	bool bOverride_AutoExposureMinBrightness = false;
+	float AutoExposureMinBrightness = -10.0f;
+	bool bOverride_AutoExposureMaxBrightness = false;
+	float AutoExposureMaxBrightness = 20.0f;
+	bool bOverride_HistogramLogMin = false;
+	float HistogramLogMin = -10.0f;
+	bool bOverride_HistogramLogMax = false;
+	float HistogramLogMax = 20.0f;
 };
 
 class UPostProcessComponent : public USceneComponent

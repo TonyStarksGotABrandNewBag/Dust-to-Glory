@@ -7,6 +7,8 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
@@ -70,6 +72,10 @@ void ADTGTrafficDirector::BeginPlay()
 {
 	Super::BeginPlay();
 	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
+	// For measuring: -DTGPedestrians=N and -DTGTraffic=N set how many people and cars the street gets,
+	// so a profile can say what the crowd costs by running without one.
+	FParse::Value(FCommandLine::Get(), TEXT("DTGPedestrians="), Pedestrians);
+	FParse::Value(FCommandLine::Get(), TEXT("DTGTraffic="), TrafficCars);
 }
 
 FVector ADTGTrafficDirector::NodeLocation(int32 NodeId) const

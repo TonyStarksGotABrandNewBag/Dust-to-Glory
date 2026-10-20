@@ -38,6 +38,18 @@ namespace detail_photo
 {
 	/** Long enough for the chunks under a new viewpoint to stream in and the lighting to settle. */
 	constexpr double SettleSeconds = 5.0;
+	/** The settle, or -DTGSettle=N seconds: chunks stream in for a while after the camera jumps, and a
+	 * profile taken while they do measures the streaming, not the view. */
+	double Settle()
+	{
+		static double Seconds = -1.0;
+		if (Seconds < 0.0)
+		{
+			Seconds = SettleSeconds;
+			FParse::Value(FCommandLine::Get(), TEXT("DTGSettle="), Seconds);
+		}
+		return Seconds;
+	}
 	/** A walker is framed where they will be after this long, so it is short: the further ahead, the more they turn or stop. */
 	constexpr double WalkerSettleSeconds = 2.0;
 	/** The first shot also waits out shader compilation on a fresh machine. */
@@ -151,6 +163,13 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 			}
 		}
 		// -DTGMemReport: what is in memory at the car shot, to Saved/Profiling/MemReports, for when the GPU is full.
+		if (GEngine && FParse::Param(FCommandLine::Get(), TEXT("DTGGpuProfile")))
+		{
+			// A GPU profile of this settled frame, per pass, into the log (LogRHI "GPU" lines), so a change
+			// can be measured against the same view rather than against a feeling.
+			UE_LOG(LogDTG, Log, TEXT("Photo mode: GPU profile of the %s view follows."), *Shots[Current].Name);
+			GEngine->Exec(GetWorld(), TEXT("ProfileGPU"));
+		}
 		if (GEngine && Shots[Current].Name == TEXT("car") && FParse::Param(FCommandLine::Get(), TEXT("DTGMemReport")))
 		{
 			GEngine->Exec(GetWorld(), TEXT("MemReport -full"));
@@ -174,7 +193,7 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 	// A shot that moves the clock gets twice as long: the camera has to re-adapt, the lit windows' shaders
 	// have to compile, and the frame rate logged with it should be the settled one.
 	NextAt = Now + (Shots[Current].bWalker && bWalkerFound ? detail_photo::WalkerSettleSeconds
-		: (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0) * detail_photo::SettleSeconds);
+		: (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0) * detail_photo::Settle());
 }
 
 namespace detail_photo
@@ -248,7 +267,7 @@ void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
 		}
 		if (Subject)
 		{
-			const double Settle = Shot.bWalker ? detail_photo::WalkerSettleSeconds : detail_photo::SettleSeconds;
+			const double Settle = Shot.bWalker ? detail_photo::WalkerSettleSeconds : detail_photo::Settle();
 			const FVector Velocity = Subject->GetVelocity();
 			const bool bMoving = Velocity.Size2D() >= 60.0;
 			const FVector Centre = Subject->GetActorLocation() + (bMoving ? FVector(Velocity.X, Velocity.Y, 0.0) * Settle : FVector::ZeroVector);
