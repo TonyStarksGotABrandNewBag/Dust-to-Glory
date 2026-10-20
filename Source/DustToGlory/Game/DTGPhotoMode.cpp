@@ -14,12 +14,22 @@
 #include "UnrealClient.h"
 
 #include <array>
+#include <vector>
 
+#include "Sim/StreetFurniture.h"
+
+#include "EngineUtils.h"
+
+#include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGVehicle.h"
 #include "Game/DTGWorldBuilder.h"
 
 using namespace dtg::sim;
+
+// The engine keeps its running frame-rate average in UnrealEngine.cpp with no public declaration, so every
+// reader declares it, as the engine's own analytics does.
+extern ENGINE_API float GAverageFPS;
 
 namespace detail_photo
 {
@@ -72,6 +82,7 @@ void ADTGPhotoMode::BeginPlay()
 		}
 		if (APawn* Player = Controller->GetPawn())
 		{
+			PlayerPawn = Player;
 			Player->SetActorHiddenInGame(true);
 			Controller->UnPossess();
 		}
@@ -100,7 +111,7 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 	{
 		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Photos"), Shots[Current].Name + TEXT(".png"));
 		FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI*/ false, /*bAddFilenameSuffix*/ false);
-		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s"), *Path);
+		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s (%.0f fps)"), *Path, GAverageFPS);
 		bCaptured = true;
 		NextAt = Now + 1.0; // the request is served on a later frame
 		return;
@@ -126,6 +137,11 @@ void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
 		Clock.SetTotalMinutes(Clock.Day() * 1440.0 + Shot.ClockMinutes);
 	}
 	SetActorLocationAndRotation(Shot.At, Shot.Facing);
+	if (PlayerPawn)
+	{
+		// Unpossessed in BeginPlay, so still standing where it started.
+		PlayerPawn->SetActorHiddenInGame(!Shot.bShowPlayer);
+	}
 	if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
 	{
 		Builder->EnsureGroundAt(Shot.At);
@@ -278,6 +294,75 @@ void ADTGPhotoMode::PlanShots()
 					break;
 				}
 			}
+		}
+	}
+
+	// A country road: the nearest run of utility poles outside town, from the lane, looking down the lines.
+	{
+		FurnitureRules Rules;
+		Rules.Limit = 100000;
+		bool bFound = false;
+		for (int32 Ring = 1; Ring <= 8 && !bFound; ++Ring)
+		{
+			for (int32 Step = 0; Step < 8 && !bFound; ++Step)
+			{
+				const double Angle = Step * 0.785398;
+				const double Cx = SpawnX + Ring * 2000.0 * FMath::Cos(Angle);
+				const double Cy = SpawnY + Ring * 2000.0 * FMath::Sin(Angle);
+				const dtg::sim::Rect Patch{Cx - 400.0, Cy - 400.0, Cx + 400.0, Cy + 400.0};
+				std::vector<Prop> Poles;
+				for (const Prop& Value : FurnitureIn(Map, City, Patch, Rules))
+				{
+					if (Value.Kind == PropKind::UtilityPole)
+					{
+						Poles.push_back(Value);
+					}
+				}
+				if (Poles.size() < 6)
+				{
+					continue;
+				}
+				// Back down the road from the first pole, moved in off the verge onto the near lane.
+				const Prop& Pole = Poles[Poles.size() / 2];
+				const double Dx = FMath::Cos(Pole.Yaw);
+				const double Dy = FMath::Sin(Pole.Yaw);
+				const double In = Rules.PoleSetbackM + 4.0;
+				const double X = Pole.X - Dx * 28.0 + Dy * In;
+				const double Y = Pole.Y - Dy * 28.0 - Dx * In;
+				Shots.Add({TEXT("country-road"), At(X, Y, Map.RoadHeightAt(X, Y) + 1.6), FRotator(2.0, FMath::RadiansToDegrees(Pole.Yaw), 0.0)});
+				bFound = true;
+			}
+		}
+	}
+
+	// A person: the nearest character that is not the player, from the front, close enough to judge.
+	{
+		const APawn* Player = GetWorld()->GetFirstPlayerController() ? GetWorld()->GetFirstPlayerController()->GetPawn() : nullptr;
+		const AActor* Nearest = nullptr;
+		double BestPerson = 1e18;
+		for (TActorIterator<ADTGCharacter> It(GetWorld()); It; ++It)
+		{
+			if (*It == Player)
+			{
+				continue;
+			}
+			const double Distance = FVector::DistSquared(It->GetActorLocation(), At(SpawnX, SpawnY, 0.0));
+			if (Distance < BestPerson)
+			{
+				BestPerson = Distance;
+				Nearest = *It;
+			}
+		}
+		// Nobody else is about yet when the tour is planned (walkers spawn as the game runs), so it is usually
+		// the player, shown for this one shot.
+		const AActor* Subject = Nearest ? Nearest : Player;
+		if (Subject)
+		{
+			const FVector Centre = Subject->GetActorLocation();
+			const FVector Eye = Centre + Subject->GetActorForwardVector() * 320.0 + Subject->GetActorRightVector() * 120.0 + FVector(0.0, 0.0, 40.0);
+			FDTGPhotoShot Shot{TEXT("person"), Eye, detail_photo::Looking(Eye, Centre)};
+			Shot.bShowPlayer = Subject == Player;
+			Shots.Add(Shot);
 		}
 	}
 

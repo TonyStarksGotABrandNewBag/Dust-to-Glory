@@ -16,6 +16,7 @@
 class UDTGGameSubsystem;
 class UDirectionalLightComponent;
 class UExponentialHeightFogComponent;
+class UMaterialParameterCollection;
 class UPostProcessComponent;
 class USkyAtmosphereComponent;
 class USkyLightComponent;
@@ -70,6 +71,12 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
+
+	/** What every material reads from the sky: Night, for the windows that light up, and Wet, for the roads. */
+	UPROPERTY()
+	TObjectPtr<UMaterialParameterCollection> Parameters;
+
+	float Wetness = 0.0f;
 
 	double Fraction = 0.5;
 	double SunPitch = 60.0;

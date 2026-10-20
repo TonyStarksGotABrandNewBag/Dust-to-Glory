@@ -127,13 +127,12 @@ namespace DTGPropModels
 
 	bool Ready()
 	{
-		for (int32 Kind = 0; Kind < static_cast<int32>(PropKind::Count); ++Kind)
+		// Only what these models draw. Street trees and grass are drawn with the plant models, and a new
+		// kind added to the enum must not quietly switch every pole and hydrant off, as two have before.
+		static const PropKind Drawn[] = {PropKind::UtilityPole, PropKind::StreetLamp, PropKind::Hydrant, PropKind::Barrier};
+		for (const PropKind Kind : Drawn)
 		{
-			if (static_cast<PropKind>(Kind) == PropKind::StreetTree)
-			{
-				continue; // drawn with the plant models, not these
-			}
-			if (PartsFor(static_cast<PropKind>(Kind), 1).IsEmpty())
+			if (PartsFor(Kind, 1).IsEmpty())
 			{
 				return false;
 			}

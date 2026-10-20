@@ -27,6 +27,33 @@ MATERIALS = "/Game/Art/Materials"
 mel = unreal.MaterialEditingLibrary
 tools = unreal.AssetToolsHelpers.get_asset_tools()
 
+# The parameters the game drives at runtime (ADTGSky): Night, for the windows that light up, and Wet, for
+# the roads in the rain. Made once and kept, since the materials reference it.
+COLLECTION = None
+
+
+def build_collection():
+    path = MATERIALS + "/MPC_DTG"
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        collection = unreal.load_asset(path)
+    else:
+        collection = tools.create_asset("MPC_DTG", MATERIALS, unreal.MaterialParameterCollection, unreal.MaterialParameterCollectionFactoryNew())
+    params = []
+    for name, value in (("Night", 0.0), ("Wet", 0.0)):
+        param = unreal.CollectionScalarParameter()
+        param.set_editor_property("parameter_name", name)
+        param.set_editor_property("default_value", value)
+        params.append(param)
+    collection.set_editor_property("scalar_parameters", params)
+    return collection
+
+
+def collection_param(material, name, x, y):
+    node = expr(material, unreal.MaterialExpressionCollectionParameter, x, y)
+    node.set_editor_property("collection", COLLECTION)
+    node.set_editor_property("parameter_name", name)
+    return node
+
 # Kind -> (tile size in cm, how much the vertex colour tints it, roughness scale).
 # Tint 0 keeps the photo's own colour (roads, ground, bark); facades take the building's colour.
 SURFACES = {
@@ -122,6 +149,8 @@ float Lum = dot(C, float3(0.3, 0.59, 0.11));
 C = lerp(C, saturate(Lum * 2.0 * Tint), TintStrength);
 // Grime and damp gather at the foot of a wall: vertex alpha is the height above the ground, 0 to 1 over 2.5 m.
 C *= lerp(0.62, 1.0, Grime) * lerp(0.92, 1.0, Mask);
+// Rain darkens whatever faces up.
+C *= lerp(1.0, 0.5, Wet * saturate(N.z));
 return C;
 """
 
@@ -129,8 +158,8 @@ ORM_CODE = TRIPLANAR_SETUP + """
 float3 O1 = Texture2DSample(Tex, TexSampler, UvX).rgb * W.x + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
 float3 O2 = Texture2DSample(Tex, TexSampler, VX).rgb * W.x + Texture2DSample(Tex, TexSampler, VY).rgb * W.y + Texture2DSample(Tex, TexSampler, VZ).rgb * W.z;
 float3 O = lerp(O1, O2, Blend);
-// Damp at the foot of the wall is glossier.
-O.g *= lerp(0.8, 1.0, Grime);
+// Damp at the foot of the wall is glossier, and rain makes whatever faces up shine.
+O.g *= lerp(0.8, 1.0, Grime) * lerp(1.0, 0.18, Wet * saturate(N.z));
 return O;
 """
 
@@ -283,7 +312,7 @@ def build_window_master():
     mel.connect_material_expressions(rgb, "", tinted, "A")
     mel.connect_material_expressions(tint, "", tinted, "B")
     # Lit rooms glow after dark: Night is 0 by day; the sky can raise it.
-    night = scalar(material, "Night", 0.0, -500, 300)
+    night = collection_param(material, "Night", -500, 300)
     glow = expr(material, unreal.MaterialExpressionMultiply, -300, 150)
     mel.connect_material_expressions(rgb, "", glow, "A")
     mel.connect_material_expressions(alpha, "", glow, "B")
@@ -403,9 +432,9 @@ def build_surface_master():
     orm_tex.set_editor_property("texture", unreal.load_asset(TEXTURES + "/T_Concrete_ORM"))
 
     float3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
-    colour = custom(material, COLOUR_CODE, float3, ["Tex", "P", "Nrm", "Tint", "TintStrength", "Mask", "Grime"], -600, -600, "Triplanar colour")
+    colour = custom(material, COLOUR_CODE, float3, ["Tex", "P", "Nrm", "Tint", "TintStrength", "Mask", "Grime", "Wet"], -600, -600, "Triplanar colour")
     normal = custom(material, NORMAL_CODE, float3, ["Tex", "P", "Nrm", "Mask"], -600, -400, "Triplanar world normal")
-    orm = custom(material, ORM_CODE, float3, ["Tex", "P", "Nrm", "Mask", "Grime"], -600, -200, "Triplanar ORM")
+    orm = custom(material, ORM_CODE, float3, ["Tex", "P", "Nrm", "Mask", "Grime", "Wet"], -600, -200, "Triplanar ORM")
     mask = world_noise(material, -1600, 700)
     for node, tex in ((colour, colour_tex), (normal, normal_tex), (orm, orm_tex)):
         mel.connect_material_expressions(tex, "", node, "Tex")
@@ -416,6 +445,9 @@ def build_surface_master():
     # The vertex colour reaches a custom node as three channels; its alpha, the height above ground, goes in on its own.
     mel.connect_material_expressions(vertex_colour, "A", colour, "Grime")
     mel.connect_material_expressions(vertex_colour, "A", orm, "Grime")
+    wet = collection_param(material, "Wet", -1600, 850)
+    mel.connect_material_expressions(wet, "", colour, "Wet")
+    mel.connect_material_expressions(wet, "", orm, "Wet")
     mel.connect_material_expressions(tint, "", colour, "TintStrength")
 
     def channel(r, g, b, y):
@@ -503,6 +535,8 @@ def build_instances(surface, plain, paint):
 
 
 def main():
+    global COLLECTION
+    COLLECTION = build_collection()
     import_textures()
     surface = build_surface_master()
     paint = build_paint_master()

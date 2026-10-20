@@ -15,7 +15,7 @@ namespace detail_plantmodels
 	/** The imported roles, in the order their instanced components are kept. See Tools/Art/fetch_models.py. */
 	const TCHAR* const Roles[] = {
 		TEXT("Pine"), TEXT("Fir"), TEXT("Jacaranda"), TEXT("SmallTree"), TEXT("Palm1"), TEXT("Palm2"), TEXT("Palm3"),
-		TEXT("Fern"), TEXT("Shrub1"), TEXT("Shrub2"), TEXT("Shrub3"), TEXT("Shrub4")};
+		TEXT("Fern"), TEXT("Shrub1"), TEXT("Shrub2"), TEXT("Shrub3"), TEXT("Shrub4"), TEXT("Bermuda"), TEXT("GrassA"), TEXT("GrassB")};
 	constexpr int32 RoleCount = static_cast<int32>(sizeof(Roles) / sizeof(Roles[0]));
 
 	/**
@@ -58,6 +58,13 @@ namespace DTGPlantModels
 	int32 Count()
 	{
 		return detail_plantmodels::RoleCount;
+	}
+
+	int32 GrassModel(int32 Variant)
+	{
+		// The two meadow grasses, by position in Roles. The Bermuda scan is a 6 cm patch, too small to use.
+		static const int32 Grasses[] = {13, 14};
+		return Grasses[FMath::Abs(Variant) % 2];
 	}
 
 	UStaticMesh* Mesh(int32 Index)
@@ -127,9 +134,12 @@ namespace DTGPlantModels
 		// angles to the aim carries the top of the plant toward it.
 		const FVector LeanAxis(-FMath::Sin(Value.LeanAim), FMath::Cos(Value.LeanAim), 0.0);
 		const FQuat Rotation = FQuat(LeanAxis, Value.Lean) * FQuat(FVector(0.0, 0.0, 1.0), Value.Spin);
-		// Standing on the ground, sunk a hand's width so a slope never shows daylight under the roots.
+		// Standing on the ground, sunk a hand's width so a slope never shows daylight under the roots. The
+		// island trees were scanned with a mound of sand round their base, which a street tree would spread
+		// over the sidewalk, so those go in deeper.
+		const bool bMound = Model >= 4 && Model <= 6;
 		const FVector At(Value.X * DTGMetresToUnreal, Value.Y * DTGMetresToUnreal,
-			(Value.GroundM - 0.1) * DTGMetresToUnreal - ModelBase * Scale);
+			(Value.GroundM - (bMound ? 0.45 : 0.1)) * DTGMetresToUnreal - ModelBase * Scale);
 		return FTransform(Rotation, At, FVector(Scale, Scale, Scale));
 	}
 }

@@ -93,6 +93,58 @@ namespace dtg::sim
 			return Road.DeckM[Low] + (Road.DeckM[High] - Road.DeckM[Low]) * (Slot - static_cast<double>(Low));
 		}
 
+		/** 0..1, stable per spot, for jitter. */
+		double Jitter(double X, double Y, int Salt)
+		{
+			const auto Cx = static_cast<std::int64_t>(std::llround(X * 10.0));
+			const auto Cy = static_cast<std::int64_t>(std::llround(Y * 10.0));
+			std::uint64_t H = static_cast<std::uint64_t>(Cx) * 0x9E3779B97F4A7C15ull ^ static_cast<std::uint64_t>(Cy) * 0xC2B2AE3D27D4EB4Full;
+			H ^= static_cast<std::uint64_t>(Salt) * 0xD6E8FEB86659FD93ull;
+			H ^= H >> 29;
+			H *= 0xBF58476D1CE4E5B9ull;
+			H ^= H >> 32;
+			return static_cast<double>(H & 0xFFFFFFull) / static_cast<double>(0xFFFFFFull);
+		}
+
+		/**
+		 * The pole Along metres down Road, if one stands there: on the right-hand verge, not in a town (lit
+		 * by street lamps instead), not in a river, not on another road. The one rule the poles and the
+		 * lines between them share, so a line never reaches for a pole that is not there.
+		 */
+		bool PoleSpot(const StatePlan& Map, const CityPlan& World, const HighwayPlan& Road, double Along, const FurnitureRules& Rules, Prop& Out)
+		{
+			const double Length = Road.LengthM();
+			const std::array<double, 3> Here = Road.At(Along);
+			const std::array<double, 3> Ahead = Road.At(std::min(Length, Along + 1.0));
+			double Dx = Ahead[0] - Here[0];
+			double Dy = Ahead[1] - Here[1];
+			if (std::fabs(Dx) + std::fabs(Dy) < 1e-6)
+			{
+				const std::array<double, 3> Behind = Road.At(std::max(0.0, Along - 1.0));
+				Dx = Here[0] - Behind[0];
+				Dy = Here[1] - Behind[1];
+			}
+			const double Len = std::max(1e-9, std::hypot(Dx, Dy));
+			Dx /= Len;
+			Dy /= Len;
+			const double Out_ = 0.5 * Road.WidthM + Rules.PoleSetbackM;
+			const double X = Here[0] - Dy * Out_;
+			const double Y = Here[1] + Dx * Out_;
+			if (!Map.InsideState(X, Y) || World.CityAt(X, Y) != nullptr)
+			{
+				return false;
+			}
+			const SurfaceInfo Info = Map.SurfaceAt(X, Y);
+			// RoadNearness fades across the whole verge, so a pole on its own verge already reads as "near a
+			// road"; bRoad is the carriageway and shoulder, which is what a pole must not be on.
+			if (Info.bWater || Info.bRoad)
+			{
+				return false;
+			}
+			Out = {PropKind::UtilityPole, X, Y, Info.GroundM, std::atan2(Dy, Dx), VariantOf(X, Y)};
+			return true;
+		}
+
 		void Highways(const StatePlan& Map, const CityPlan& World, const Rect& Area, const FurnitureRules& Rules, std::vector<Prop>& Out)
 		{
 			for (const HighwayPlan& Road : World.Highways)
@@ -128,21 +180,11 @@ namespace dtg::sim
 					// Poles on the right-hand verge, on a grid of whole spacings along the road.
 					for (double Along = std::ceil(Start / Rules.PoleSpacingM) * Rules.PoleSpacingM; Along < Walked; Along += Rules.PoleSpacingM)
 					{
-						const double T = Along - Start;
-						const double X = Ax + Dx * T + Nx * (Half + Rules.PoleSetbackM);
-						const double Y = Ay + Dy * T + Ny * (Half + Rules.PoleSetbackM);
-						if (!InArea(Area, X, Y) || !Map.InsideState(X, Y) || World.CityAt(X, Y) != nullptr)
+						Prop Pole;
+						if (PoleSpot(Map, World, Road, Along, Rules, Pole) && InArea(Area, Pole.X, Pole.Y))
 						{
-							continue; // towns are lit by street lamps instead
+							Out.push_back(Pole);
 						}
-						const SurfaceInfo Info = Map.SurfaceAt(X, Y);
-						// RoadNearness fades across the whole verge, so a pole on its own verge already reads as
-						// "near a road"; bRoad is the carriageway and shoulder, which is what a pole must not be on.
-						if (Info.bWater || Info.bRoad)
-						{
-							continue; // in a river, or on another road
-						}
-						Out.push_back({PropKind::UtilityPole, X, Y, Info.GroundM, Heading, VariantOf(X, Y)});
 					}
 
 					// Barriers along both edges wherever the deck stands well above the ground beneath.
@@ -306,9 +348,103 @@ namespace dtg::sim
 		case PropKind::Hydrant: return "Hydrant";
 		case PropKind::Barrier: return "Barrier";
 		case PropKind::StreetTree: return "StreetTree";
+		case PropKind::Grass: return "Grass";
 		case PropKind::Count: break;
 		}
 		return "Unknown";
+	}
+
+	std::vector<WireSpan> WiresIn(const StatePlan& Map, const CityPlan& World, const Rect& Area, const FurnitureRules& Rules)
+	{
+		using namespace detail_furniture;
+		std::vector<WireSpan> Out;
+		for (const HighwayPlan& Road : World.Highways)
+		{
+			const double Length = Road.LengthM();
+			// The next pole may be a whole spacing past this chunk, so the reach includes it.
+			const double Reach = 0.5 * Road.WidthM + Rules.PoleSetbackM + Rules.PoleSpacingM + 2.0;
+			double Walked = 0.0;
+			for (std::size_t Index = 0; Index + 1 < Road.Points.size(); ++Index)
+			{
+				const double Ax = Road.Points[Index][0];
+				const double Ay = Road.Points[Index][1];
+				const double Bx = Road.Points[Index + 1][0];
+				const double By = Road.Points[Index + 1][1];
+				const double Start = Walked;
+				Walked += std::hypot(Bx - Ax, By - Ay);
+				if (std::max(Ax, Bx) + Reach < Area.MinX || std::min(Ax, Bx) - Reach > Area.MaxX ||
+					std::max(Ay, By) + Reach < Area.MinY || std::min(Ay, By) - Reach > Area.MaxY)
+				{
+					continue;
+				}
+				for (double Along = std::ceil(Start / Rules.PoleSpacingM) * Rules.PoleSpacingM; Along < Walked; Along += Rules.PoleSpacingM)
+				{
+					Prop From;
+					Prop To;
+					if (!PoleSpot(Map, World, Road, Along, Rules, From) || !InArea(Area, From.X, From.Y))
+					{
+						continue;
+					}
+					if (Along + Rules.PoleSpacingM > Length || !PoleSpot(Map, World, Road, Along + Rules.PoleSpacingM, Rules, To))
+					{
+						continue; // the line ends here, or there is a gap
+					}
+					Out.push_back({From.X, From.Y, From.Z + Rules.PoleHeightM, To.X, To.Y, To.Z + Rules.PoleHeightM});
+				}
+			}
+		}
+		return Out;
+	}
+
+	std::vector<Prop> GroundCoverIn(const StatePlan& Map, const CityPlan& World, const Rect& Area, const FurnitureRules& Rules)
+	{
+		using namespace detail_furniture;
+		std::vector<Prop> Out;
+		const double Pitch = Rules.GrassPitchM;
+		for (const Rect& Block : World.Blocks)
+		{
+			if (Out.size() >= Rules.Limit)
+			{
+				break;
+			}
+			if (!Block.Overlaps(Area) || !HasLawn(World, Block))
+			{
+				continue;
+			}
+			// The lawn: the block inside its sidewalk ring.
+			const Rect Lawn{Block.MinX + Rules.SidewalkM, Block.MinY + Rules.SidewalkM, Block.MaxX - Rules.SidewalkM, Block.MaxY - Rules.SidewalkM};
+			const double X0 = std::ceil(std::max(Lawn.MinX, Area.MinX - Pitch) / Pitch) * Pitch;
+			const double Y0 = std::ceil(std::max(Lawn.MinY, Area.MinY - Pitch) / Pitch) * Pitch;
+			for (double Gx = X0; Gx <= std::min(Lawn.MaxX, Area.MaxX + Pitch) && Out.size() < Rules.Limit; Gx += Pitch)
+			{
+				for (double Gy = Y0; Gy <= std::min(Lawn.MaxY, Area.MaxY + Pitch) && Out.size() < Rules.Limit; Gy += Pitch)
+				{
+					// Jittered off the grid so it does not read as one, by the grid point, so it never moves.
+					const double X = Gx + (Jitter(Gx, Gy, 1) - 0.5) * 0.8 * Pitch;
+					const double Y = Gy + (Jitter(Gx, Gy, 2) - 0.5) * 0.8 * Pitch;
+					if (!InArea(Area, X, Y) || !Lawn.Contains(X, Y))
+					{
+						continue;
+					}
+					bool bInside = false;
+					for (const BuildingPlan& Building : World.Buildings)
+					{
+						const Rect& F = Building.Footprint;
+						if (X >= F.MinX - 0.5 && X <= F.MaxX + 0.5 && Y >= F.MinY - 0.5 && Y <= F.MaxY + 0.5)
+						{
+							bInside = true;
+							break;
+						}
+					}
+					if (bInside)
+					{
+						continue;
+					}
+					Out.push_back({PropKind::Grass, X, Y, Map.HeightAt(X, Y) + 0.08, Jitter(Gx, Gy, 3) * 6.283185307179586, VariantOf(X, Y)});
+				}
+			}
+		}
+		return Out;
 	}
 
 	std::vector<Prop> FurnitureIn(const StatePlan& Map, const CityPlan& World, const Rect& Area, const FurnitureRules& Rules)

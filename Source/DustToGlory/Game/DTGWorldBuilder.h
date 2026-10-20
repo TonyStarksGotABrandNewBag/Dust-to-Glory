@@ -112,6 +112,8 @@ private:
 	UInstancedStaticMeshComponent* PropComponent(int32 Part, int32 Mesh);
 	/** Empties and hides a part's furniture, when its chunk is released. */
 	void ClearProps(int32 Part);
+	/** The lines between the utility poles, as a third section on the chunk's component (Sim/StreetFurniture WiresIn). */
+	void BuildChunkWires(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh);
 	void UpdateChunks(const FVector& Around);
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);

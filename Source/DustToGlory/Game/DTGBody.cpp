@@ -1,5 +1,11 @@
 #include "Game/DTGBody.h"
 
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "UObject/UObjectGlobals.h"
+
 #include "DustToGlory.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
@@ -39,8 +45,52 @@ UDTGBody::UDTGBody()
 	PrimaryComponentTick.TickGroup = TG_PostPhysics;
 }
 
+namespace detail_body
+{
+	UAnimSequence* LoadClip(const TCHAR* Path)
+	{
+		return Cast<UAnimSequence>(StaticLoadObject(UAnimSequence::StaticClass(), nullptr, Path));
+	}
+}
+
 void UDTGBody::Build(int32 Seed)
 {
+	// Epic's mannequins, Manny or Quinn by the seed, with their unarmed clips. They stand with their feet
+	// at the capsule's bottom and face +Y as authored, so the figure sits a half-height down and turns to
+	// face the actor's forward. Missing (the assets are copied in by Tools/fetch_mannequins.py, not
+	// committed), the generated box figure below stands in.
+	const TCHAR* const MeshPath = (Seed % 2 == 0) ? TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple")
+												  : TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple");
+	if (USkeletalMesh* Mannequin = Cast<USkeletalMesh>(StaticLoadObject(USkeletalMesh::StaticClass(), nullptr, MeshPath)))
+	{
+		IdleAnim = detail_body::LoadClip(TEXT("/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"));
+		WalkAnim = detail_body::LoadClip(TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd.MF_Unarmed_Walk_Fwd"));
+		JogAnim = detail_body::LoadClip(TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd.MF_Unarmed_Jog_Fwd"));
+		SwingAnim = detail_body::LoadClip(TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"));
+		if (IdleAnim && WalkAnim && JogAnim)
+		{
+			if (Figure)
+			{
+				Figure->DestroyComponent();
+			}
+			Figure = NewObject<USkeletalMeshComponent>(this, TEXT("Figure"));
+			Figure->SetupAttachment(this);
+			Figure->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Figure->RegisterComponent();
+			Figure->SetSkeletalMesh(Mannequin);
+			Figure->SetRelativeLocationAndRotation(FVector(0.0, 0.0, -90.0), FRotator(0.0, -90.0, 0.0));
+			Figure->PlayAnimation(IdleAnim, true);
+			if (UAnimInstance* Anim = Figure->GetAnimInstance())
+			{
+				// The walk and jog clips carry root motion; played as clips it would walk the figure off its capsule.
+				Anim->RootMotionMode = ERootMotionMode::IgnoreRootMotion;
+			}
+			Playing = 0;
+			LastLocation = GetComponentLocation();
+			return;
+		}
+	}
+
 	FLinearColor Clothes;
 	FLinearColor Skin;
 	PaletteFor(Seed, Clothes, Skin);
@@ -102,12 +152,46 @@ void UDTGBody::Build(int32 Seed)
 void UDTGBody::Swing()
 {
 	Punching = 0.35f;
+	if (Figure && SwingAnim)
+	{
+		Figure->PlayAnimation(SwingAnim, false);
+		Figure->SetPlayRate(1.0f);
+		Playing = 3;
+		SwingLeft = SwingAnim->GetPlayLength();
+	}
 }
 
 void UDTGBody::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (Limbs.Num() < 4 || DeltaTime <= 0.0f)
+	if (DeltaTime <= 0.0f)
+	{
+		return;
+	}
+	if (Figure)
+	{
+		// The mannequin: idle, walk or jog by how fast the actor is actually going, with the clip's rate
+		// matched to the ground speed so the feet do not slide. A swing plays out before the pace resumes.
+		const FVector Here = GetComponentLocation();
+		const float Travelled = static_cast<float>(FVector::Dist2D(Here, LastLocation));
+		LastLocation = Here;
+		Speed = FMath::FInterpTo(Speed, Travelled / DeltaTime, DeltaTime, 8.0f);
+		if (SwingLeft > 0.0f)
+		{
+			SwingLeft -= DeltaTime;
+			return;
+		}
+		const int32 Wanted = Speed < 15.0f ? 0 : (Speed < 330.0f ? 1 : 2);
+		if (Wanted != Playing)
+		{
+			Figure->PlayAnimation(Wanted == 0 ? IdleAnim : (Wanted == 1 ? WalkAnim : JogAnim), true);
+			Playing = Wanted;
+		}
+		// The clips were captured at roughly a walk of 1.6 m/s and a jog of 4 m/s.
+		Figure->SetPlayRate(Wanted == 0 ? 1.0f : FMath::Clamp(Speed / (Wanted == 1 ? 160.0f : 400.0f), 0.6f, 1.6f));
+		return;
+	}
+	if (Limbs.Num() < 4)
 	{
 		return;
 	}

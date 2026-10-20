@@ -14,3 +14,9 @@ public:
 	class UFont* GetTinyFont() const { return nullptr; }
 };
 extern UEngine* GEngine;
+
+/** The engine's running average frame rate (EngineGlobals.h). */
+#ifndef ENGINE_API
+#define ENGINE_API
+#endif
+extern float GAverageFPS;

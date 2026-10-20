@@ -22,6 +22,8 @@ struct FDTGPhotoShot
 	FRotator Facing = FRotator::ZeroRotator;
 	/** Minutes past midnight to set the game clock to first, or -1 to leave it. */
 	double ClockMinutes = -1.0;
+	/** Show the player, hidden for every other shot, because this one is of them. */
+	bool bShowPlayer = false;
 };
 
 UCLASS()
@@ -51,4 +53,8 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;
+
+	/** The player's pawn, kept because the controller forgets it once unpossessed. */
+	UPROPERTY()
+	TObjectPtr<APawn> PlayerPawn;
 };

@@ -220,6 +220,94 @@ DTG_TEST(StreetTreesLineTheLawns)
 	EXPECT_MSG(AlongX > 0 && AlongY > 0, std::to_string(AlongX) + " along X edges, " + std::to_string(AlongY) + " along Y");
 }
 
+// The lines run pole top to pole top, one spacing at a time, and stop where a pole is missing.
+DTG_TEST(WiresFollowThePoles)
+{
+	using namespace detail_furniture_test;
+	const GameState& State = dtg_test::LoadedState();
+	FurnitureRules Rules;
+	Rules.Limit = 1000000;
+	// Somewhere with a run of poles: the first place out from the start that has a few.
+	Rect Where = Around(State.City.SpawnX, State.City.SpawnY, 400.0);
+	bool bFound = false;
+	for (int Ring = 1; Ring <= 8 && !bFound; ++Ring)
+	{
+		for (int Step = 0; Step < 8 && !bFound; ++Step)
+		{
+			const double Angle = Step * 0.785398;
+			const Rect Try = Around(State.City.SpawnX + Ring * 2000.0 * std::cos(Angle), State.City.SpawnY + Ring * 2000.0 * std::sin(Angle), 400.0);
+			if (OfKind(FurnitureIn(State.Map, State.City, Try, Rules), PropKind::UtilityPole).size() >= 6)
+			{
+				Where = Try;
+				bFound = true;
+			}
+		}
+	}
+	EXPECT(bFound);
+	const std::vector<WireSpan> Spans = WiresIn(State.Map, State.City, Where, Rules);
+	// Poles from a wider area, so the far end of a span at the edge can be matched.
+	const Rect Wider{Where.MinX - 100.0, Where.MinY - 100.0, Where.MaxX + 100.0, Where.MaxY + 100.0};
+	const std::vector<Prop> Poles = OfKind(FurnitureIn(State.Map, State.City, Wider, Rules), PropKind::UtilityPole);
+	EXPECT_MSG(Spans.size() >= 4, std::to_string(Spans.size()) + " spans among " + std::to_string(Poles.size()) + " poles");
+	auto OnAPole = [&](double X, double Y, double Z)
+	{
+		for (const Prop& Pole : Poles)
+		{
+			if (std::hypot(Pole.X - X, Pole.Y - Y) < 0.05 && std::fabs(Pole.Z + Rules.PoleHeightM - Z) < 0.05)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	for (const WireSpan& Span : Spans)
+	{
+		EXPECT_MSG(OnAPole(Span.Ax, Span.Ay, Span.Az), "span starts off a pole at " + std::to_string(Span.Ax) + "," + std::to_string(Span.Ay));
+		EXPECT_MSG(OnAPole(Span.Bx, Span.By, Span.Bz), "span ends off a pole at " + std::to_string(Span.Bx) + "," + std::to_string(Span.By));
+		const double Run = std::hypot(Span.Bx - Span.Ax, Span.By - Span.Ay);
+		EXPECT_MSG(Run > 0.5 * Rules.PoleSpacingM && Run < Rules.PoleSpacingM + 0.5, "span of " + std::to_string(Run) + " m");
+	}
+}
+
+// Grass grows on the lawns: inside the sidewalk ring, outside the buildings, and the same clumps however
+// the ground is asked for.
+DTG_TEST(GrassStaysOnTheLawns)
+{
+	using namespace detail_furniture_test;
+	const GameState& State = dtg_test::LoadedState();
+	FurnitureRules Rules;
+	Rules.Limit = 1000000; // the cap is per streamed chunk; this asks for a whole neighbourhood
+	const Rect Whole = Around(State.City.SpawnX, State.City.SpawnY, 300.0);
+	const std::vector<Prop> Clumps = GroundCoverIn(State.Map, State.City, Whole, Rules);
+	EXPECT_MSG(Clumps.size() > 100, std::to_string(Clumps.size()) + " clumps near the start");
+	for (const Prop& Clump : Clumps)
+	{
+		const Rect* Home = nullptr;
+		for (const Rect& Block : State.City.Blocks)
+		{
+			if (Block.Contains(Clump.X, Clump.Y))
+			{
+				Home = &Block;
+			}
+		}
+		EXPECT_MSG(Home != nullptr, "grass off the blocks at " + Key(Clump));
+		if (Home)
+		{
+			const double FromEdge = std::min({Clump.X - Home->MinX, Home->MaxX - Clump.X, Clump.Y - Home->MinY, Home->MaxY - Clump.Y});
+			EXPECT_MSG(FromEdge >= Rules.SidewalkM - 0.01, "grass on the sidewalk at " + Key(Clump));
+		}
+		for (const BuildingPlan& Building : State.City.Buildings)
+		{
+			EXPECT_MSG(!Building.Footprint.Contains(Clump.X, Clump.Y), "grass inside " + Building.Name + " at " + Key(Clump));
+		}
+	}
+	const double Split = State.City.SpawnX + 13.7;
+	std::vector<Prop> Halves = GroundCoverIn(State.Map, State.City, Rect{Whole.MinX, Whole.MinY, Split, Whole.MaxY}, Rules);
+	const std::vector<Prop> Right = GroundCoverIn(State.Map, State.City, Rect{Split, Whole.MinY, Whole.MaxX, Whole.MaxY}, Rules);
+	Halves.insert(Halves.end(), Right.begin(), Right.end());
+	EXPECT_MSG(Census(Halves) == Census(Clumps), std::to_string(Halves.size()) + " in halves vs " + std::to_string(Clumps.size()) + " whole");
+}
+
 // Utility poles stand on the verge: never on a carriageway, never in a town, never in the water.
 DTG_TEST(PolesStayOffTheCarriageway)
 {

@@ -11,7 +11,9 @@
 
 #include "DTGBody.generated.h"
 
+class UAnimSequence;
 class UProceduralMeshComponent;
+class USkeletalMeshComponent;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class DUSTTOGLORY_API UDTGBody : public USceneComponent
@@ -42,6 +44,26 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UProceduralMeshComponent>> Limbs; // 0,1 legs; 2,3 arms
+
+	/** Epic's mannequin, when Tools/fetch_mannequins.py has copied it in; the parts above are not built then. */
+	UPROPERTY()
+	TObjectPtr<USkeletalMeshComponent> Figure;
+
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> IdleAnim;
+
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> WalkAnim;
+
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> JogAnim;
+
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> SwingAnim;
+
+	/** Which of idle, walk, jog or swing is playing, so a change of pace restarts the clip once, not every frame. */
+	int32 Playing = -1;
+	float SwingLeft = 0.0f;
 
 	FVector LastLocation = FVector::ZeroVector;
 	float Phase = 0.0f;

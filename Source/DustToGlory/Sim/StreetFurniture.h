@@ -26,6 +26,7 @@ namespace dtg::sim
 		Hydrant,     // one per block, on a corner
 		Barrier,     // a concrete barrier along the edge of a raised deck
 		StreetTree,  // on the lawn strip inside the sidewalk, round every block that has one
+		Grass,       // a clump of grass blades on a lawn (GroundCoverIn, not FurnitureIn)
 		Count
 	};
 	const char* PropKindName(PropKind Kind);
@@ -56,6 +57,12 @@ namespace dtg::sim
 		double TreeSetbackM = 3.3;
 		/** Palms this near the coast (metres), live oaks inland. */
 		double PalmCoastM = 25000.0;
+		/** Pole top above the ground: where the lines hang from. Matches the model the game draws. */
+		double PoleHeightM = 9.8;
+		/** Grass clumps on a jittered grid this far apart, on the lawns. */
+		double GrassPitchM = 1.8;
+		/** The sidewalk ring round a block, which the grass stays off. Matches the world builder. */
+		double SidewalkM = 2.5;
 		/** A deck this far above the natural ground beneath gets barriers on both edges. */
 		double ElevatedM = 2.5;
 		/** Hard cap on one request, so a huge area cannot blow the frame budget. */
@@ -64,5 +71,30 @@ namespace dtg::sim
 
 	/** Every prop standing in Area. Deterministic in world space, like PlantsIn. */
 	std::vector<Prop> FurnitureIn(const StatePlan& Map, const CityPlan& World, const Rect& Area,
+		const FurnitureRules& Rules = FurnitureRules());
+
+	/** One span of the lines between two utility poles, pole top to pole top. World metres. */
+	struct WireSpan
+	{
+		double Ax = 0.0;
+		double Ay = 0.0;
+		double Az = 0.0;
+		double Bx = 0.0;
+		double By = 0.0;
+		double Bz = 0.0;
+	};
+
+	/**
+	 * Every span whose first pole stands in Area. A span exists only between two consecutive poles that
+	 * both stand: where a pole was skipped (water, a town, another road), the line has a gap.
+	 */
+	std::vector<WireSpan> WiresIn(const StatePlan& Map, const CityPlan& World, const Rect& Area,
+		const FurnitureRules& Rules = FurnitureRules());
+
+	/**
+	 * Grass clumps in Area: a jittered grid over every lawn, off the sidewalk ring and out of the
+	 * buildings. Kept apart from FurnitureIn because there are far more of them.
+	 */
+	std::vector<Prop> GroundCoverIn(const StatePlan& Map, const CityPlan& World, const Rect& Area,
 		const FurnitureRules& Rules = FurnitureRules());
 }

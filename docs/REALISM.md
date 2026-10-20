@@ -92,7 +92,16 @@ Still missing:
   in `Sim/StreetFurniture`.
 - **Golden hour** in photo mode: the same street and highway at 19:05, the light the game is meant for.
 
-Still box geometry: cars and people. No power lines between the poles, and no grass blades.
+- **Power lines** between the utility poles (`Sim/StreetFurniture` `WiresIn`, tested), three sagging
+  lines a span, with a gap wherever a pole was skipped.
+- **Grass clumps** on every lawn (`GroundCoverIn`, tested), scanned tufts scaled to about a metre.
+- **Rain wets the roads** and **windows light up after dark**: `ADTGSky` drives `MPC_DTG` (Wet, Night).
+- **People are Epic's mannequins** (`Tools/fetch_mannequins.py`) with idle, walk and jog clips matched
+  to ground speed; the box figure stands in when the assets are not there.
+- **Frame rate** is logged per photo-mode shot: 32-67 fps at 1600x900 with everything on (RTX 5070).
+
+Still box geometry: cars. One engine ensure seen once in photo mode (`!Geometry->IsEvicted()` in
+RayTracing.cpp); harmless so far, worth watching.
 Not checked: the frame rate with all of it on.
 
 **Lighting.** Lumen GI and reflections, a sky atmosphere driven by the existing time-of-day clock, and

@@ -9,6 +9,8 @@
 #include "Components/SkyLightComponent.h"
 #include "Components/VolumetricCloudComponent.h"
 #include "Engine/GameInstance.h"
+#include "Kismet/KismetMaterialLibrary.h"
+#include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -102,6 +104,12 @@ void ADTGSky::BeginPlay()
 	{
 		UE_LOG(LogDTG, Warning, TEXT("No volumetric cloud material; the sky will be clear."));
 	}
+	Parameters = Cast<UMaterialParameterCollection>(StaticLoadObject(UMaterialParameterCollection::StaticClass(), nullptr,
+		TEXT("/Game/Art/Materials/MPC_DTG.MPC_DTG")));
+	if (!Parameters)
+	{
+		UE_LOG(LogDTG, Warning, TEXT("No material parameter collection; windows will not light up and rain will not wet the roads."));
+	}
 }
 
 void ADTGSky::Tick(float DeltaSeconds)
@@ -153,6 +161,15 @@ void ADTGSky::Tick(float DeltaSeconds)
 	// adding it there would light the world from underneath at exactly the moment it shows most.
 	// Lightning is instantaneous; the decay is what you actually see.
 	Ambient->SetIntensity(static_cast<float>(0.25 + Daylight * 0.9 + Flash * 11.0));
+	// What the materials read: windows light up as the day goes, and the roads darken and shine in the rain,
+	// which takes a while to wet them and a while to dry.
+	const double TargetWet = Now == Weather::Rain ? 0.85 : (Now == Weather::Storm ? 1.0 : (Now == Weather::Fog ? 0.3 : 0.0));
+	Wetness = FMath::FInterpTo(Wetness, static_cast<float>(TargetWet), DeltaSeconds, 0.15f);
+	if (Parameters)
+	{
+		UKismetMaterialLibrary::SetScalarParameterValue(this, Parameters, TEXT("Night"), static_cast<float>(1.0 - Daylight));
+		UKismetMaterialLibrary::SetScalarParameterValue(this, Parameters, TEXT("Wet"), Wetness);
+	}
 	if (Flash > 0.0)
 	{
 		// The fog lights up with it, which is what makes a flash read across a whole wet street.

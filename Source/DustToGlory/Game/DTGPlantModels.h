@@ -23,6 +23,9 @@ namespace DTGPlantModels
 	/** True when every species has at least one model to draw it with. */
 	bool Ready();
 
+	/** The grass clump model for a clump's variant: Bermuda and two meadow grasses. */
+	int32 GrassModel(int32 Variant);
+
 	/** Which model draws this plant -- the same one every time the chunk is built -- or INDEX_NONE. */
 	int32 ModelFor(const dtg::sim::Plant& Value);
 

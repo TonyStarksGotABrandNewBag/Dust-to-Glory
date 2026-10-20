@@ -6,12 +6,16 @@
 
 #include "DustToGlory.h"
 #include "Engine/GameInstance.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
+
+#include <cmath>
+#include <vector>
 
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
@@ -396,6 +400,26 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 			PerMesh[Piece.Mesh].Add(Piece.Local * Placed);
 		}
 	}
+	// Grass clumps on the lawns, drawn with the grass models on the plant components. Their size and spin
+	// come from the clump itself, so a reloaded chunk shows the same lawn.
+	for (const dtg::sim::Prop& Clump : dtg::sim::GroundCoverIn(Game->Sim().Map, Game->Sim().City, Area))
+	{
+		const int32 Model = DTGPlantModels::GrassModel(Clump.Variant);
+		const UStaticMesh* Source = DTGPlantModels::Mesh(Model);
+		if (!Source)
+		{
+			continue;
+		}
+		const FBoxSphereBounds Bounds = Source->GetBounds();
+		// The scans are small tufts a few tens of centimetres across, sitting wherever they were scanned:
+		// scaled to about a metre, varied a little, and centred on the clump with their base on the lawn.
+		const double Across = 2.0 * FMath::Max(1.0, FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y));
+		const double Scale = (0.8 + 0.4 * std::fmod(Clump.Yaw * 1.1141, 1.0)) * FMath::Clamp(95.0 / Across, 1.0, 4.0);
+		const FTransform Centre(FQuat::Identity, FVector(-Bounds.Origin.X, -Bounds.Origin.Y, -(Bounds.Origin.Z - Bounds.BoxExtent.Z)));
+		const FTransform Placed(FRotator(0.0, FMath::RadiansToDegrees(Clump.Yaw), 0.0),
+			FVector(Clump.X * DTGMetresToUnreal, Clump.Y * DTGMetresToUnreal, Clump.Z * DTGMetresToUnreal), FVector(Scale, Scale, Scale));
+		PerTree[Model].Add(Centre * Placed);
+	}
 	for (int32 Mesh = 0; Mesh < PerMesh.Num(); ++Mesh)
 	{
 		if (PerMesh[Mesh].IsEmpty())
@@ -416,6 +440,64 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 		Instances->AddInstances(PerTree[Model], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
 		Instances->SetVisibility(true);
 	}
+}
+
+void ADTGWorldBuilder::BuildChunkWires(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh)
+{
+	if (!Mesh)
+	{
+		return;
+	}
+	Mesh->ClearMeshSection(2);
+	if (!DTGPropModels::Ready())
+	{
+		return; // no poles, so no lines
+	}
+	const double OriginX = ChunkX * static_cast<double>(ChunkSizeM);
+	const double OriginY = ChunkY * static_cast<double>(ChunkSizeM);
+	const dtg::sim::Rect Area{OriginX, OriginY, OriginX + ChunkSizeM, OriginY + ChunkSizeM};
+	const std::vector<dtg::sim::WireSpan> Spans = dtg::sim::WiresIn(Game->Sim().Map, Game->Sim().City, Area);
+	if (Spans.empty())
+	{
+		return;
+	}
+	// Three lines a span, sagging between the poles, each a thin cross of two ribbons so it reads from any angle.
+	const double S = DTGMetresToUnreal;
+	const FLinearColor Dark(0.02f, 0.02f, 0.022f);
+	const double HalfWidth = 1.8;
+	const double Sag = 95.0;
+	constexpr int32 Segments = 10;
+	FDTGMesh Lines;
+	for (const dtg::sim::WireSpan& Span : Spans)
+	{
+		const FVector A(Span.Ax * S, Span.Ay * S, Span.Az * S);
+		const FVector B(Span.Bx * S, Span.By * S, Span.Bz * S);
+		const FVector Side = FVector(-(B.Y - A.Y), B.X - A.X, 0.0).GetSafeNormal();
+		const double Offsets[3] = {-85.0, 0.0, 85.0};
+		const double Lifts[3] = {0.0, 18.0, 0.0};
+		for (int32 Line = 0; Line < 3; ++Line)
+		{
+			FVector Previous = FVector::ZeroVector;
+			for (int32 Step = 0; Step <= Segments; ++Step)
+			{
+				const double T = static_cast<double>(Step) / Segments;
+				const FVector Point = A + (B - A) * T + Side * Offsets[Line] + FVector(0.0, 0.0, Lifts[Line] - Sag * 4.0 * T * (1.0 - T));
+				if (Step > 0)
+				{
+					const FVector Up(0.0, 0.0, HalfWidth);
+					Lines.AddQuad(Previous - Side * HalfWidth, Point - Side * HalfWidth, Point + Side * HalfWidth, Previous + Side * HalfWidth,
+						FVector::UpVector, Dark);
+					Lines.AddQuad(Previous - Side * HalfWidth, Point - Side * HalfWidth, Point + Side * HalfWidth, Previous + Side * HalfWidth,
+						-FVector::UpVector, Dark);
+					Lines.AddQuad(Previous - Up, Point - Up, Point + Up, Previous + Up, Side, Dark);
+					Lines.AddQuad(Previous - Up, Point - Up, Point + Up, Previous + Up, -Side, Dark);
+				}
+				Previous = Point;
+			}
+		}
+	}
+	Mesh->CreateMeshSection_LinearColor(2, Lines.Verts, Lines.Tris, Lines.Normals, Lines.Uvs, Lines.Colors, Lines.Tangents, /*bCreateCollision*/ false);
+	Mesh->SetMaterial(2, DTGSurface::Material(EDTGSurface::Rubber));
 }
 
 void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh)
@@ -803,6 +885,7 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	Mesh->SetMaterial(0, DTGSurface::Material(EDTGSurface::Terrain));
 	BuildChunkPlants(ChunkX, ChunkY, Part, Mesh);
 	BuildChunkProps(ChunkX, ChunkY, Part);
+	BuildChunkWires(ChunkX, ChunkY, Mesh);
 	Mesh->SetVisibility(true);
 
 	FDTGTerrainChunk Chunk;
@@ -909,6 +992,7 @@ void ADTGWorldBuilder::ReleaseChunk(int32 Index)
 		// And its instanced plants, for the same reason.
 		ClearPlants(Chunks[Index].Part);
 		ClearProps(Chunks[Index].Part);
+		TerrainParts[Chunks[Index].Part]->ClearMeshSection(2);
 		TerrainParts[Chunks[Index].Part]->SetVisibility(false);
 		FreeParts.Add(Chunks[Index].Part);
 	}
