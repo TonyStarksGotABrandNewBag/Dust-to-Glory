@@ -29,6 +29,7 @@ namespace DTGSurface
 		case EDTGSurface::Bark: return TEXT("Bark");
 		case EDTGSurface::Matte: return TEXT("Matte");
 		case EDTGSurface::Glass: return TEXT("Glass");
+		case EDTGSurface::Window: return TEXT("Window");
 		case EDTGSurface::Chrome: return TEXT("Chrome");
 		case EDTGSurface::Rubber: return TEXT("Rubber");
 		case EDTGSurface::Skin: return TEXT("Skin");

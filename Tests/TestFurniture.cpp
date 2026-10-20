@@ -179,6 +179,47 @@ DTG_TEST(HydrantsOnePerBlockOnACorner)
 	}
 }
 
+// Street trees stand on the lawn strip just inside the sidewalk, round every block that has a lawn:
+// never on the sidewalk itself, never inside a building, and on both axes of the block.
+DTG_TEST(StreetTreesLineTheLawns)
+{
+	using namespace detail_furniture_test;
+	const GameState& State = dtg_test::LoadedState();
+	const FurnitureRules Rules;
+	const std::vector<Prop> Trees = OfKind(FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 900.0)),
+		PropKind::StreetTree);
+	EXPECT_MSG(Trees.size() > 20, std::to_string(Trees.size()) + " street trees in the start town");
+	int AlongX = 0; // trees on a block's north or south edge
+	int AlongY = 0; // on its east or west edge
+	for (const Prop& Tree : Trees)
+	{
+		const Rect* Home = nullptr;
+		for (const Rect& Block : State.City.Blocks)
+		{
+			if (Block.Contains(Tree.X, Tree.Y))
+			{
+				Home = &Block;
+			}
+		}
+		EXPECT_MSG(Home != nullptr, "tree off the blocks at " + Key(Tree));
+		if (!Home)
+		{
+			continue;
+		}
+		const double FromX = std::min(Tree.X - Home->MinX, Home->MaxX - Tree.X);
+		const double FromY = std::min(Tree.Y - Home->MinY, Home->MaxY - Tree.Y);
+		const double FromEdge = std::min(FromX, FromY);
+		(FromY < FromX ? AlongX : AlongY) += 1;
+		EXPECT_MSG(std::fabs(FromEdge - Rules.TreeSetbackM) < 0.01, "tree " + std::to_string(FromEdge) + " m from the kerb at " + Key(Tree));
+		for (const BuildingPlan& Building : State.City.Buildings)
+		{
+			EXPECT_MSG(!Building.Footprint.Contains(Tree.X, Tree.Y), "tree inside " + Building.Name + " at " + Key(Tree));
+		}
+	}
+	// Round the block, not just along two sides of it.
+	EXPECT_MSG(AlongX > 0 && AlongY > 0, std::to_string(AlongX) + " along X edges, " + std::to_string(AlongY) + " along Y");
+}
+
 // Utility poles stand on the verge: never on a carriageway, never in a town, never in the water.
 DTG_TEST(PolesStayOffTheCarriageway)
 {

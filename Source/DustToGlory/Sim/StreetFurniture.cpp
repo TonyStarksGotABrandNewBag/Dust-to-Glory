@@ -236,6 +236,67 @@ namespace dtg::sim
 		}
 	}
 
+	namespace detail_furniture
+	{
+		/** A block with a lawn, as the world builder draws it: wide enough, and not downtown. */
+		bool HasLawn(const CityPlan& World, const Rect& Block)
+		{
+			if (Block.Width() < 10.0 || Block.Depth() < 10.0)
+			{
+				return false;
+			}
+			for (const BuildingPlan& Building : World.Buildings)
+			{
+				if (Building.bDowntown && Block.Contains(Building.Footprint.CenterX(), Building.Footprint.CenterY()))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void StreetTrees(const StatePlan& Map, const CityPlan& World, const Rect& Area, const FurnitureRules& Rules, std::vector<Prop>& Out)
+		{
+			const double In = Rules.TreeSetbackM;
+			for (const Rect& Block : World.Blocks)
+			{
+				if (Out.size() >= Rules.Limit)
+				{
+					return;
+				}
+				if (!Block.Overlaps(Area) || !HasLawn(World, Block))
+				{
+					continue;
+				}
+				// Along each edge on a world grid, inset onto the lawn, clear of the corners.
+				auto Plant = [&](double X, double Y)
+				{
+					if (!InArea(Area, X, Y))
+					{
+						return;
+					}
+					const int Species = Map.CoastDistance(X, Y) < Rules.PalmCoastM ? 0 : 1;
+					const double Spin = VariantOf(X, Y) * HalfPi * 0.5;
+					Out.push_back({PropKind::StreetTree, X, Y, Map.HeightAt(X, Y) + 0.08, Spin, Species});
+				};
+				for (double X = std::ceil((Block.MinX + In) / Rules.TreeSpacingM) * Rules.TreeSpacingM; X <= Block.MaxX - In; X += Rules.TreeSpacingM)
+				{
+					Plant(X, Block.MinY + In);
+					Plant(X, Block.MaxY - In);
+				}
+				for (double Y = std::ceil((Block.MinY + In) / Rules.TreeSpacingM) * Rules.TreeSpacingM; Y <= Block.MaxY - In; Y += Rules.TreeSpacingM)
+				{
+					if (std::fabs(Y - (Block.MinY + In)) < 0.01 || std::fabs(Y - (Block.MaxY - In)) < 0.01)
+					{
+						continue; // a corner already planted from the other edge
+					}
+					Plant(Block.MinX + In, Y);
+					Plant(Block.MaxX - In, Y);
+				}
+			}
+		}
+	}
+
 	const char* PropKindName(PropKind Kind)
 	{
 		switch (Kind)
@@ -244,6 +305,7 @@ namespace dtg::sim
 		case PropKind::StreetLamp: return "StreetLamp";
 		case PropKind::Hydrant: return "Hydrant";
 		case PropKind::Barrier: return "Barrier";
+		case PropKind::StreetTree: return "StreetTree";
 		case PropKind::Count: break;
 		}
 		return "Unknown";
@@ -255,6 +317,7 @@ namespace dtg::sim
 		detail_furniture::Highways(Map, World, Area, Rules, Out);
 		detail_furniture::TownStreets(Map, World, Area, Rules, Out);
 		detail_furniture::Hydrants(Map, World, Area, Rules, Out);
+		detail_furniture::StreetTrees(Map, World, Area, Rules, Out);
 		if (Out.size() > Rules.Limit)
 		{
 			Out.resize(Rules.Limit);

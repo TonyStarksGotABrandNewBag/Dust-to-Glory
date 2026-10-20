@@ -30,6 +30,7 @@ enum class EDTGSurface : uint8
 	Bark,
 	Matte,
 	Glass,
+	Window, // building glass: reflective, with a room mapped behind it
 	Chrome,
 	Rubber,
 	Skin,

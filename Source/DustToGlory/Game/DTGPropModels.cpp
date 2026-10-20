@@ -129,6 +129,10 @@ namespace DTGPropModels
 	{
 		for (int32 Kind = 0; Kind < static_cast<int32>(PropKind::Count); ++Kind)
 		{
+			if (static_cast<PropKind>(Kind) == PropKind::StreetTree)
+			{
+				continue; // drawn with the plant models, not these
+			}
 			if (PartsFor(static_cast<PropKind>(Kind), 1).IsEmpty())
 			{
 				return false;

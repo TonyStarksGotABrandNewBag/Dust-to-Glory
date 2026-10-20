@@ -89,6 +89,28 @@ void FDTGMesh::AddQuad(const FVector& A, const FVector& B, const FVector& C, con
 	}
 }
 
+void FDTGMesh::AddQuadAlpha(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
+	const FLinearColor& Colour, float AlphaAB, float AlphaCD)
+{
+	const int32 Base = Verts.Num();
+	AddQuad(A, B, C, D, Normal, Colour);
+	Colors[Base].A = AlphaAB;
+	Colors[Base + 1].A = AlphaAB;
+	Colors[Base + 2].A = AlphaCD;
+	Colors[Base + 3].A = AlphaCD;
+}
+
+void FDTGMesh::AddPanel(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
+	const FLinearColor& Colour, double RepeatU, double RepeatV)
+{
+	const int32 Base = Verts.Num();
+	AddQuad(A, B, C, D, Normal, Colour);
+	Uvs[Base] = FVector2D(0.0, 0.0);
+	Uvs[Base + 1] = FVector2D(RepeatU, 0.0);
+	Uvs[Base + 2] = FVector2D(RepeatU, RepeatV);
+	Uvs[Base + 3] = FVector2D(0.0, RepeatV);
+}
+
 void FDTGMesh::AddBox(const FVector& Min, const FVector& Max, const FLinearColor& Colour, bool bSkipBottom)
 {
 	const FVector A(Min.X, Min.Y, Min.Z);
@@ -341,14 +363,24 @@ namespace DTGMeshBuilder
 		 * from the wall. Footprints are axis-aligned, so every box built on a face is axis-aligned too, and a
 		 * window layout written once works on all four sides.
 		 */
+		/** An opening in a face: a window, a door, a shopfront. Facade coordinates. */
+		struct FHole
+		{
+			double U0 = 0.0;
+			double U1 = 0.0;
+			double Z0 = 0.0;
+			double Z1 = 0.0;
+		};
+
 		struct FFacade
 		{
 			FVector Origin = FVector::ZeroVector; // one end of the face, on the wall plane, at ground level
-			FVector Along = FVector::ZeroVector;  // unit, along the face
+			FVector Along = FVector::ZeroVector;  // unit, along the face: always Cross(Up, Out), so UVs read the same way on every face
 			FVector Out = FVector::ZeroVector;    // unit, outward
 			double Width = 0.0;                   // Unreal units
 			bool bDoor = false;                   // the door is on this face
 			double DoorU = 0.0;                   // and this far along it
+			TArray<FHole> Holes;                  // what the wall is built around
 		};
 
 		FVector OnFacade(const FFacade& Face, double U, double Z, double D)
@@ -373,25 +405,118 @@ namespace DTGMeshBuilder
 				Face.Out, Colour);
 		}
 
-		/** A framed window: glass just proud of the wall, a frame round it, a glazing bar, and a sill that throws a shadow. */
-		void AddWindow(FDTGSurfaceMeshes& Meshes, const FFacade& Face, double U0, double U1, double Z0, double Z1, double S,
-			const FLinearColor& GlassColour, const FLinearColor& FrameColour)
+		/** Window glass, with UVs of one unit per room so the material can put a room behind it. */
+		void FacadeGlass(FDTGMesh& Mesh, const FFacade& Face, double U0, double U1, double Z0, double Z1, double D, const FLinearColor& Colour,
+			double RepeatU, double RepeatV)
+		{
+			Mesh.AddPanel(OnFacade(Face, U0, Z0, D), OnFacade(Face, U1, Z0, D), OnFacade(Face, U1, Z1, D), OnFacade(Face, U0, Z1, D),
+				Face.Out, Colour, RepeatU, RepeatV);
+		}
+
+		/**
+		 * The reveal of an opening: the four inner faces of the wall where it has been cut through, from the wall
+		 * plane back to the recess. This is what makes a window read as a window instead of a picture of one --
+		 * the jambs catch the sun and the head throws a shadow onto the glass.
+		 */
+		void AddReveal(FDTGMesh& Walls, const FFacade& Face, const FHole& Hole, double Recess, const FLinearColor& Colour, bool bHead = true)
+		{
+			if (Recess <= 0.0)
+			{
+				return;
+			}
+			const double Back = -Recess;
+			Walls.AddQuad(OnFacade(Face, Hole.U0, Hole.Z0, 0.0), OnFacade(Face, Hole.U0, Hole.Z0, Back), OnFacade(Face, Hole.U0, Hole.Z1, Back),
+				OnFacade(Face, Hole.U0, Hole.Z1, 0.0), Face.Along, Colour);
+			Walls.AddQuad(OnFacade(Face, Hole.U1, Hole.Z0, 0.0), OnFacade(Face, Hole.U1, Hole.Z0, Back), OnFacade(Face, Hole.U1, Hole.Z1, Back),
+				OnFacade(Face, Hole.U1, Hole.Z1, 0.0), -Face.Along, Colour);
+			if (bHead)
+			{
+				Walls.AddQuad(OnFacade(Face, Hole.U0, Hole.Z1, 0.0), OnFacade(Face, Hole.U1, Hole.Z1, 0.0), OnFacade(Face, Hole.U1, Hole.Z1, Back),
+					OnFacade(Face, Hole.U0, Hole.Z1, Back), FVector(0.0, 0.0, -1.0), Colour);
+			}
+			Walls.AddQuad(OnFacade(Face, Hole.U0, Hole.Z0, 0.0), OnFacade(Face, Hole.U1, Hole.Z0, 0.0), OnFacade(Face, Hole.U1, Hole.Z0, Back),
+				OnFacade(Face, Hole.U0, Hole.Z0, Back), FVector(0.0, 0.0, 1.0), Colour);
+		}
+
+		/**
+		 * The wall of one face, built around its openings: a scanline through every opening edge, and between
+		 * each pair of edges a run of wall from the left corner to the right, skipping the openings in it.
+		 * Overlapping openings (a door in a shopfront) merge. Vertex alpha carries the height above the ground.
+		 */
+		void AddWallFace(FDTGMesh& Walls, const FFacade& Face, double Z0, double Z1, double S, const FLinearColor& Colour)
+		{
+			auto Alpha = [S](double Z) { return static_cast<float>(FMath::Clamp(Z / (2.5 * S), 0.0, 1.0)); };
+			TArray<double> Cuts;
+			Cuts.Add(Z0);
+			Cuts.Add(Z1);
+			for (const FHole& Hole : Face.Holes)
+			{
+				Cuts.Add(FMath::Clamp(Hole.Z0, Z0, Z1));
+				Cuts.Add(FMath::Clamp(Hole.Z1, Z0, Z1));
+			}
+			Cuts.Sort();
+			for (int32 Index = 0; Index + 1 < Cuts.Num(); ++Index)
+			{
+				const double Za = Cuts[Index];
+				const double Zb = Cuts[Index + 1];
+				if (Zb - Za < 0.01)
+				{
+					continue;
+				}
+				TArray<FHole> Spans;
+				for (const FHole& Hole : Face.Holes)
+				{
+					if (Hole.Z0 <= Za + 0.01 && Hole.Z1 >= Zb - 0.01)
+					{
+						Spans.Add(Hole);
+					}
+				}
+				Spans.Sort([](const FHole& A, const FHole& B) { return A.U0 < B.U0; });
+				double U = 0.0;
+				auto Run = [&](double Ua, double Ub)
+				{
+					if (Ub - Ua > 0.01)
+					{
+						Walls.AddQuadAlpha(OnFacade(Face, Ua, Za, 0.0), OnFacade(Face, Ub, Za, 0.0), OnFacade(Face, Ub, Zb, 0.0),
+							OnFacade(Face, Ua, Zb, 0.0), Face.Out, Colour, Alpha(Za), Alpha(Zb));
+					}
+				};
+				for (const FHole& Span : Spans)
+				{
+					Run(U, FMath::Max(U, FMath::Min(Span.U0, Face.Width)));
+					U = FMath::Max(U, FMath::Min(Span.U1, Face.Width));
+				}
+				Run(U, Face.Width);
+			}
+		}
+
+		/**
+		 * A framed window set back into the wall: the reveal, then the frame and glass at the back of it, a glazing
+		 * bar, and a sill that runs out past the wall to throw its own shadow.
+		 */
+		void AddWindow(FDTGSurfaceMeshes& Meshes, FFacade& Face, double U0, double U1, double Z0, double Z1, double S, double Recess,
+			const FLinearColor& GlassColour, const FLinearColor& FrameColour, FDTGMesh& Walls, const FLinearColor& WallColour)
 		{
 			const double Bar = 0.07 * S;
-			const double Proud = 0.06 * S;
+			const double Proud = 0.05 * S;
+			const double Back = -Recess;
 			FDTGMesh& Frames = Meshes[EDTGSurface::Matte];
-			FacadePanel(Meshes[EDTGSurface::Glass], Face, U0, U1, Z0, Z1, 0.015 * S, GlassColour);
-			FacadeBox(Frames, Face, U0 - Bar, U1 + Bar, Z1, Z1 + Bar, 0.0, Proud, FrameColour);
-			FacadeBox(Frames, Face, U0 - Bar, U0, Z0, Z1, 0.0, Proud, FrameColour);
-			FacadeBox(Frames, Face, U1, U1 + Bar, Z0, Z1, 0.0, Proud, FrameColour);
-			FacadeBox(Frames, Face, U0 - 1.6 * Bar, U1 + 1.6 * Bar, Z0 - Bar, Z0, 0.0, 0.11 * S, FrameColour, false);
+			const FHole Hole{U0 - Bar, U1 + Bar, Z0 - Bar, Z1 + Bar};
+			Face.Holes.Add(Hole);
+			AddReveal(Walls, Face, Hole, Recess, WallColour);
+			FacadeGlass(Meshes[EDTGSurface::Window], Face, U0, U1, Z0, Z1, Back + 0.01 * S, GlassColour, 1.0, 1.0);
+			FacadeBox(Frames, Face, U0 - Bar, U1 + Bar, Z1, Z1 + Bar, Back, Back + Proud, FrameColour);
+			FacadeBox(Frames, Face, U0 - Bar, U0, Z0, Z1, Back, Back + Proud, FrameColour);
+			FacadeBox(Frames, Face, U1, U1 + Bar, Z0, Z1, Back, Back + Proud, FrameColour);
+			FacadeBox(Frames, Face, U0 - 1.6 * Bar, U1 + 1.6 * Bar, Z0 - Bar, Z0, Back, 0.05 * S, FrameColour, false);
 			const double Mid = 0.5 * (Z0 + Z1);
-			FacadeBox(Frames, Face, U0, U1, Mid - 0.02 * S, Mid + 0.02 * S, 0.0, 0.035 * S, FrameColour);
+			FacadeBox(Frames, Face, U0, U1, Mid - 0.02 * S, Mid + 0.02 * S, Back, Back + 0.03 * S, FrameColour);
 		}
 
 		/** A row of windows along one storey of one face: evenly spaced, clear of the corners and of the door. */
-		void AddWindowRow(FDTGSurfaceMeshes& Meshes, const FFacade& Face, double Z0, double Z1, double WindowWide, double Pitch,
-			double S, const FLinearColor& GlassColour, const FLinearColor& FrameColour, bool bAvoidDoor)
+		void AddWindowRow(FDTGSurfaceMeshes& Meshes, FFacade& Face, double Z0, double Z1, double WindowWide, double Pitch,
+			double S, double Recess, const FLinearColor& GlassColour, const FLinearColor& FrameColour, bool bAvoidDoor,
+			FDTGMesh& Walls, const FLinearColor& WallColour)
 		{
 			const double Margin = 0.9 * S;
 			const double Usable = Face.Width - 2.0 * Margin;
@@ -410,30 +535,45 @@ namespace DTGMeshBuilder
 				{
 					continue;
 				}
-				AddWindow(Meshes, Face, U0, U1, Z0, Z1, S, GlassColour, FrameColour);
+				AddWindow(Meshes, Face, U0, U1, Z0, Z1, S, Recess, GlassColour, FrameColour, Walls, WallColour);
 			}
 		}
 
-		/** The door: a leaf (or glass, for a shop) in a frame, where the simulation says the way in is. */
-		void AddDoor(FDTGSurfaceMeshes& Meshes, const FFacade& Face, double FloorZ, double S, double Wide, bool bGlass,
-			const FLinearColor& LeafColour, const FLinearColor& GlassColour, const FLinearColor& FrameColour)
+		/**
+		 * The door, set back into the wall like the windows: a leaf (or glass, for a shop) in a frame, where the
+		 * simulation says the way in is. RevealTop limits the reveal where the door stands in a shopfront that
+		 * has its own; Recess 0 draws it on the wall instead (the towers, whose walls are solid).
+		 */
+		void AddDoor(FDTGSurfaceMeshes& Meshes, FFacade& Face, double FloorZ, double S, double Wide, double Recess, bool bGlass,
+			const FLinearColor& LeafColour, const FLinearColor& GlassColour, const FLinearColor& FrameColour, FDTGMesh& Walls,
+			const FLinearColor& WallColour, double RevealTop = -1.0)
 		{
+			const double Bar = 0.09 * S;
+			const double Back = -Recess;
 			const double U0 = Face.DoorU - 0.5 * Wide;
 			const double U1 = Face.DoorU + 0.5 * Wide;
 			const double Head = FloorZ + 2.2 * S;
+			const FHole Hole{U0 - Bar, U1 + Bar, FloorZ, Head + Bar};
+			Face.Holes.Add(Hole);
+			FHole Reveal = Hole;
+			const bool bOwnHead = RevealTop < 0.0;
+			if (!bOwnHead)
+			{
+				Reveal.Z1 = RevealTop;
+			}
+			AddReveal(Walls, Face, Reveal, Recess, WallColour, bOwnHead);
 			if (bGlass)
 			{
-				FacadePanel(Meshes[EDTGSurface::Glass], Face, U0, U1, FloorZ, Head, 0.02 * S, GlassColour);
+				FacadeGlass(Meshes[EDTGSurface::Window], Face, U0, U1, FloorZ, Head, Back + 0.01 * S, GlassColour, 1.0, 1.0);
 			}
 			else
 			{
-				FacadeBox(Meshes[EDTGSurface::Matte], Face, U0, U1, FloorZ, Head, 0.0, 0.04 * S, LeafColour);
+				FacadeBox(Meshes[EDTGSurface::Matte], Face, U0, U1, FloorZ, Head, Back, Back + 0.04 * S, LeafColour);
 			}
-			const double Bar = 0.09 * S;
 			FDTGMesh& Frames = Meshes[EDTGSurface::Matte];
-			FacadeBox(Frames, Face, U0 - Bar, U1 + Bar, Head, Head + Bar, 0.0, 0.08 * S, FrameColour);
-			FacadeBox(Frames, Face, U0 - Bar, U0, FloorZ, Head, 0.0, 0.08 * S, FrameColour);
-			FacadeBox(Frames, Face, U1, U1 + Bar, FloorZ, Head, 0.0, 0.08 * S, FrameColour);
+			FacadeBox(Frames, Face, U0 - Bar, U1 + Bar, Head, Head + Bar, Back, Back + 0.08 * S, FrameColour);
+			FacadeBox(Frames, Face, U0 - Bar, U0, FloorZ, Head, Back, Back + 0.08 * S, FrameColour);
+			FacadeBox(Frames, Face, U1, U1 + Bar, FloorZ, Head, Back, Back + 0.08 * S, FrameColour);
 		}
 
 		/** A sloped shed roof standing out from a face: a porch roof or a shop awning. Top and underside. */
@@ -492,20 +632,26 @@ namespace DTGMeshBuilder
 		FFacade Faces[4];
 		Faces[0] = {FVector(MinX, MinY, Base), FVector(1.0, 0.0, 0.0), FVector(0.0, -1.0, 0.0), MaxX - MinX};
 		Faces[1] = {FVector(MaxX, MinY, Base), FVector(0.0, 1.0, 0.0), FVector(1.0, 0.0, 0.0), MaxY - MinY};
-		Faces[2] = {FVector(MinX, MaxY, Base), FVector(1.0, 0.0, 0.0), FVector(0.0, 1.0, 0.0), MaxX - MinX};
-		Faces[3] = {FVector(MinX, MinY, Base), FVector(0.0, 1.0, 0.0), FVector(-1.0, 0.0, 0.0), MaxY - MinY};
+		Faces[2] = {FVector(MaxX, MaxY, Base), FVector(-1.0, 0.0, 0.0), FVector(0.0, 1.0, 0.0), MaxX - MinX};
+		Faces[3] = {FVector(MinX, MaxY, Base), FVector(0.0, -1.0, 0.0), FVector(-1.0, 0.0, 0.0), MaxY - MinY};
 		const int32 DoorSide = FMath::Clamp(Building.DoorSide, 0, 3);
 		FFacade& Front = Faces[DoorSide];
 		Front.bDoor = true;
-		Front.DoorU = FMath::Clamp(DoorSide == 0 || DoorSide == 2 ? Building.DoorX * S - MinX : Building.DoorY * S - MinY,
-			1.0 * S, FMath::Max(1.0 * S, Front.Width - 1.0 * S));
+		const double DoorAlong[] = {Building.DoorX * S - MinX, Building.DoorY * S - MinY, MaxX - Building.DoorX * S, MaxY - Building.DoorY * S};
+		Front.DoorU = FMath::Clamp(DoorAlong[DoorSide], 1.0 * S, FMath::Max(1.0 * S, Front.Width - 1.0 * S));
+		// How far the openings sit back into the wall: a stud wall's worth on a house, a brick's length on the rest.
+		const double Recess = (bHome ? 0.12 : 0.22) * S;
 
 		// The base: a house stands on a raised foundation, everything else on a plinth a little proud of the wall.
 		const double Footing = bHome ? 0.6 * S : 0.0;
 		const double Proud = bHome ? 0.03 * S : 0.04 * S;
 		Concrete.AddBox(FVector(MinX - Proud, MinY - Proud, Base - 0.3 * S), FVector(MaxX + Proud, MaxY + Proud, Base + (bHome ? Footing : 0.45 * S)),
 			Stone);
-		Walls.AddBox(FVector(MinX, MinY, Base + Footing), FVector(MaxX, MaxY, Top), Palette.Wall);
+		if (bTower)
+		{
+			// Solid: the curtain wall hangs on the outside of it.
+			Walls.AddBox(FVector(MinX, MinY, Base + Footing), FVector(MaxX, MaxY, Top), Palette.Wall);
+		}
 
 		const double StoreyHeight = (Height - Footing) / Floors;
 		if (bTower)
@@ -516,7 +662,8 @@ namespace DTGMeshBuilder
 			const FLinearColor Mullion(0.32f, 0.33f, 0.35f);
 			for (const FFacade& Face : Faces)
 			{
-				FacadePanel(Meshes[EDTGSurface::Glass], Face, 0.0, Face.Width, Lobby, Height, 0.03 * S, Palette.Window);
+				FacadeGlass(Meshes[EDTGSurface::Window], Face, 0.0, Face.Width, Lobby, Height, 0.03 * S, Palette.Window,
+					FMath::Max(1.0, static_cast<double>(FMath::RoundToInt(Face.Width / (4.0 * S)))), FMath::Max(1.0, static_cast<double>(Floors - 1)));
 				for (int32 Floor = 1; Floor < Floors; ++Floor)
 				{
 					const double Line = Lobby + (Floor - 1) * (Height - Lobby) / FMath::Max(1, Floors - 1);
@@ -527,7 +674,8 @@ namespace DTGMeshBuilder
 					FacadeBox(Metal, Face, U - 0.04 * S, U + 0.04 * S, Lobby, Height, 0.0, 0.12 * S, Mullion);
 				}
 				// The lobby: shopfront glass between piers.
-				FacadePanel(Meshes[EDTGSurface::Glass], Face, 0.6 * S, Face.Width - 0.6 * S, 0.45 * S, Lobby - 0.6 * S, 0.02 * S, Palette.Window);
+				FacadeGlass(Meshes[EDTGSurface::Window], Face, 0.6 * S, Face.Width - 0.6 * S, 0.45 * S, Lobby - 0.6 * S, 0.02 * S, Palette.Window,
+					FMath::Max(1.0, static_cast<double>(FMath::RoundToInt((Face.Width - 1.2 * S) / (3.0 * S)))), 1.0);
 				for (double U = 0.6 * S; U <= Face.Width - 0.6 * S; U += 3.0 * S)
 				{
 					FacadeBox(Concrete, Face, U - 0.25 * S, U + 0.25 * S, 0.0, Lobby, 0.0, 0.15 * S, Stone);
@@ -535,18 +683,23 @@ namespace DTGMeshBuilder
 			}
 			// A canopy over the way in.
 			FacadeBox(Concrete, Front, Front.DoorU - 3.0 * S, Front.DoorU + 3.0 * S, Lobby - 0.5 * S, Lobby - 0.25 * S, 0.0, 2.5 * S, Stone, false);
-			AddDoor(Meshes, Front, 0.0, S, 2.0 * S, true, Palette.Trim, Palette.Window, Bronze);
+			AddDoor(Meshes, Front, 0.0, S, 2.0 * S, 0.0, true, Palette.Trim, Palette.Window, Bronze, Walls, Palette.Wall);
 		}
 		else if (bShop)
 		{
 			// A shopfront on the street side: glass between thin mullions, an awning, and a sign band.
 			const double ShopTop = FMath::Min(3.0 * S, StoreyHeight - 0.4 * S);
-			FacadePanel(Meshes[EDTGSurface::Glass], Front, 0.5 * S, Front.Width - 0.5 * S, 0.45 * S, ShopTop, 0.02 * S, Palette.Window);
+			const double ShopSill = 0.45 * S;
+			const FHole ShopHole{0.5 * S, Front.Width - 0.5 * S, ShopSill, ShopTop};
+			Front.Holes.Add(ShopHole);
+			AddReveal(Walls, Front, ShopHole, Recess, Palette.Wall);
+			FacadeGlass(Meshes[EDTGSurface::Window], Front, ShopHole.U0, ShopHole.U1, ShopSill, ShopTop, -Recess + 0.01 * S, Palette.Window,
+				FMath::Max(1.0, static_cast<double>(FMath::RoundToInt((Front.Width - 1.0 * S) / (3.0 * S)))), 1.0);
 			for (double U = 0.5 * S; U <= Front.Width - 0.5 * S + 1.0; U += 2.2 * S)
 			{
-				FacadeBox(Trim, Front, U - 0.05 * S, U + 0.05 * S, 0.45 * S, ShopTop, 0.0, 0.08 * S, Bronze);
+				FacadeBox(Trim, Front, U - 0.05 * S, U + 0.05 * S, ShopSill, ShopTop, -Recess, -Recess + 0.08 * S, Bronze);
 			}
-			FacadeBox(Trim, Front, 0.5 * S, Front.Width - 0.5 * S, ShopTop - 0.6 * S, ShopTop - 0.54 * S, 0.0, 0.06 * S, Bronze);
+			FacadeBox(Trim, Front, 0.5 * S, Front.Width - 0.5 * S, ShopTop - 0.6 * S, ShopTop - 0.54 * S, -Recess, -Recess + 0.06 * S, Bronze);
 			static const FLinearColor Canvas[] = {
 				FLinearColor(0.05f, 0.18f, 0.09f), FLinearColor(0.32f, 0.04f, 0.05f), FLinearColor(0.04f, 0.07f, 0.2f),
 				FLinearColor(0.36f, 0.3f, 0.2f), FLinearColor(0.12f, 0.12f, 0.12f)};
@@ -556,29 +709,30 @@ namespace DTGMeshBuilder
 			FacadeBox(Meshes[EDTGSurface::Cloth], Front, 0.3 * S, Front.Width - 0.3 * S, ShopTop - 0.3 * S, ShopTop - 0.05 * S,
 				1.35 * S, 1.4 * S, Awning);
 			FacadeBox(Trim, Front, 0.3 * S, Front.Width - 0.3 * S, ShopTop + 0.55 * S, ShopTop + 1.2 * S, 0.0, 0.1 * S, Bronze);
-			AddDoor(Meshes, Front, 0.0, S, 1.1 * S, true, Palette.Trim, Palette.Window, Bronze);
+			AddDoor(Meshes, Front, 0.0, S, 1.1 * S, Recess, true, Palette.Trim, Palette.Window, Bronze, Walls, Palette.Wall, ShopSill);
 			// Ordinary windows round the other sides, and on every storey above.
-			for (const FFacade& Face : Faces)
+			for (FFacade& Face : Faces)
 			{
 				for (int32 Floor = Face.bDoor ? 1 : 0; Floor < Floors; ++Floor)
 				{
 					const double Sill = Floor * StoreyHeight + 0.9 * S;
-					AddWindowRow(Meshes, Face, Sill, Sill + FMath::Min(1.6 * S, StoreyHeight - 1.3 * S), 1.4 * S, 2.6 * S, S,
-						Palette.Window, FrameColour, Floor == 0);
+					AddWindowRow(Meshes, Face, Sill, Sill + FMath::Min(1.6 * S, StoreyHeight - 1.3 * S), 1.4 * S, 2.6 * S, S, Recess,
+						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall);
 				}
 			}
 		}
 		else
 		{
 			// Houses, churches and the civic buildings: windows storey by storey, sized to what they are.
-			for (const FFacade& Face : Faces)
+			for (FFacade& Face : Faces)
 			{
 				if (bChurch)
 				{
 					// Tall narrow windows down the nave, none on the gable with the door.
 					if (!Face.bDoor)
 					{
-						AddWindowRow(Meshes, Face, 1.2 * S, Height - 1.8 * S, 1.0 * S, 3.4 * S, S, Palette.Window, FrameColour, false);
+						AddWindowRow(Meshes, Face, 1.2 * S, Height - 1.8 * S, 1.0 * S, 3.4 * S, S, Recess, Palette.Window, FrameColour, false,
+							Walls, Palette.Wall);
 					}
 					continue;
 				}
@@ -586,8 +740,8 @@ namespace DTGMeshBuilder
 				{
 					const double Sill = Footing + Floor * StoreyHeight + (bCivic ? 1.4 : 0.95) * S;
 					const double Tall = bCivic ? 0.9 * S : FMath::Min(1.4 * S, StoreyHeight - 1.4 * S);
-					AddWindowRow(Meshes, Face, Sill, Sill + Tall, bCivic ? 0.6 * S : 1.0 * S, bCivic ? 2.6 * S : 2.8 * S, S,
-						Palette.Window, FrameColour, Floor == 0);
+					AddWindowRow(Meshes, Face, Sill, Sill + Tall, bCivic ? 0.6 * S : 1.0 * S, bCivic ? 2.6 * S : 2.8 * S, S, Recess,
+						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall);
 				}
 			}
 			// A painted front door on a house: the one splash of colour a street of them has.
@@ -595,7 +749,18 @@ namespace DTGMeshBuilder
 				FLinearColor(0.3f, 0.03f, 0.03f), FLinearColor(0.03f, 0.05f, 0.14f), FLinearColor(0.02f, 0.02f, 0.02f),
 				FLinearColor(0.04f, 0.14f, 0.07f), FLinearColor(0.22f, 0.13f, 0.06f), FLinearColor(0.6f, 0.58f, 0.52f)};
 			const FLinearColor Leaf = bHome ? DoorPaint[VarietyOf(Building, 2) % 6u] : Palette.Trim;
-			AddDoor(Meshes, Front, Footing, S, bChurch ? 1.8 * S : 1.0 * S, false, Leaf, Palette.Window, FrameColour);
+			AddDoor(Meshes, Front, Footing, S, bChurch ? 1.8 * S : 1.0 * S, Recess, false, Leaf, Palette.Window, FrameColour, Walls, Palette.Wall);
+		}
+
+		// The walls themselves, built around every opening, and the top of them under the roof.
+		if (!bTower)
+		{
+			for (const FFacade& Face : Faces)
+			{
+				AddWallFace(Walls, Face, Footing, Height, S, Palette.Wall);
+			}
+			Walls.AddQuad(FVector(MinX, MinY, Top), FVector(MaxX, MinY, Top), FVector(MaxX, MaxY, Top), FVector(MinX, MaxY, Top),
+				FVector::UpVector, Palette.Wall);
 		}
 
 		// Houses: a front porch on most, steps up to the door, and a chimney on some.

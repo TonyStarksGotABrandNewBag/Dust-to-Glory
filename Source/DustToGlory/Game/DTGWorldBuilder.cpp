@@ -368,8 +368,28 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 
 	TArray<TArray<FTransform>> PerMesh;
 	PerMesh.SetNum(DTGPropModels::MeshCount());
+	TArray<TArray<FTransform>> PerTree;
+	PerTree.SetNum(DTGPlantModels::Count());
 	for (const dtg::sim::Prop& Value : Props)
 	{
+		if (Value.Kind == dtg::sim::PropKind::StreetTree)
+		{
+			// A street tree is a plant the furniture placed: drawn with the plant models, on the plant components.
+			dtg::sim::Plant Tree;
+			Tree.X = Value.X;
+			Tree.Y = Value.Y;
+			Tree.GroundM = Value.Z;
+			Tree.Kind = Value.Variant == 0 ? dtg::sim::PlantKind::Palm : dtg::sim::PlantKind::Oak;
+			Tree.HeightM = Value.Variant == 0 ? 9.5 : 8.0;
+			Tree.RadiusM = Value.Variant == 0 ? 2.5 : 4.0;
+			Tree.Spin = Value.Yaw;
+			const int32 Model = DTGPlantModels::ModelFor(Tree);
+			if (Model != INDEX_NONE)
+			{
+				PerTree[Model].Add(DTGPlantModels::TransformFor(Tree, Model));
+			}
+			continue;
+		}
 		const FTransform Placed = DTGPropModels::TransformFor(Value);
 		for (const DTGPropModels::FPart& Piece : DTGPropModels::PartsFor(Value.Kind, Value.Variant))
 		{
@@ -384,6 +404,16 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 		}
 		UInstancedStaticMeshComponent* Instances = PropComponent(Part, Mesh);
 		Instances->AddInstances(PerMesh[Mesh], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+		Instances->SetVisibility(true);
+	}
+	for (int32 Model = 0; Model < PerTree.Num(); ++Model)
+	{
+		if (PerTree[Model].IsEmpty())
+		{
+			continue;
+		}
+		UInstancedStaticMeshComponent* Instances = PlantComponent(Part, Model);
+		Instances->AddInstances(PerTree[Model], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
 		Instances->SetVisibility(true);
 	}
 }

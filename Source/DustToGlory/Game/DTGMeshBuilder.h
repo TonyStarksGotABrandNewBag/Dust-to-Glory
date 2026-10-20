@@ -41,6 +41,15 @@ struct FDTGMesh
 	 */
 	void AddQuad(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
 		const FLinearColor& Colour, double UvScale = 0.01);
+	/**
+	 * A quad whose vertex alpha runs from AlphaAB along edge A-B to AlphaCD along C-D. The surface material
+	 * reads alpha as height above the ground, for the grime and damp that gather at the foot of a wall.
+	 */
+	void AddQuadAlpha(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
+		const FLinearColor& Colour, float AlphaAB, float AlphaCD);
+	/** A flat panel with UVs running 0..RepeatU along A-B and 0..RepeatV up B-C: one unit per room, for window glass. */
+	void AddPanel(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
+		const FLinearColor& Colour, double RepeatU, double RepeatV);
 	/** One triangle, wound to match the normal given. For fans and gables, where a quad would be half empty. */
 	void AddTri(const FVector& A, const FVector& B, const FVector& C, const FVector& Normal, const FLinearColor& Colour);
 	/** An axis-aligned box between two corners. */

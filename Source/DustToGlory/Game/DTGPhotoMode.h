@@ -20,6 +20,8 @@ struct FDTGPhotoShot
 	FString Name;
 	FVector At = FVector::ZeroVector;
 	FRotator Facing = FRotator::ZeroRotator;
+	/** Minutes past midnight to set the game clock to first, or -1 to leave it. */
+	double ClockMinutes = -1.0;
 };
 
 UCLASS()

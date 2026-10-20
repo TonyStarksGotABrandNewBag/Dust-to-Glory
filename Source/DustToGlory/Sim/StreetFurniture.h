@@ -25,6 +25,7 @@ namespace dtg::sim
 		StreetLamp,  // on the sidewalk by the kerb, its arm reaching over the street
 		Hydrant,     // one per block, on a corner
 		Barrier,     // a concrete barrier along the edge of a raised deck
+		StreetTree,  // on the lawn strip inside the sidewalk, round every block that has one
 		Count
 	};
 	const char* PropKindName(PropKind Kind);
@@ -36,7 +37,7 @@ namespace dtg::sim
 		double Y = 0.0;
 		double Z = 0.0;   // the surface it stands on
 		double Yaw = 0.0; // radians. A lamp faces the street; a pole and a barrier run with the road
-		int Variant = 0;  // 0..3, stable per prop, for the renderer to choose a model by
+		int Variant = 0;  // 0..3, stable per prop, for the renderer to choose a model by. A street tree's species: 0 palm, 1 oak
 	};
 
 	struct FurnitureRules
@@ -50,6 +51,11 @@ namespace dtg::sim
 		/** The sidewalk's height above the street pad; matches the kerb the world builder draws. */
 		double KerbM = 0.15;
 		double BarrierLengthM = 3.0;
+		double TreeSpacingM = 11.0;
+		/** In from the kerb to the tree: past the sidewalk, on the lawn. */
+		double TreeSetbackM = 3.3;
+		/** Palms this near the coast (metres), live oaks inland. */
+		double PalmCoastM = 25000.0;
 		/** A deck this far above the natural ground beneath gets barriers on both edges. */
 		double ElevatedM = 2.5;
 		/** Hard cap on one request, so a huge area cannot blow the frame budget. */

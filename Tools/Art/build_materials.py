@@ -101,32 +101,43 @@ return normalize(float3(TN.xy + N.xy, abs(TN.z) * N.z));
 """
 
 # Shared by the three triplanar nodes: weights and per-axis UVs (after Ben Golus's whiteout triplanar).
+# A second copy of the texture, rotated a quarter turn and rescaled, is blended in by a world-space
+# noise (Mask), so the repeat never lines up along a wall: the thing that made every brick building
+# read as a texture rather than as brick.
 TRIPLANAR_SETUP = """
 float3 N = normalize(Nrm);
 float3 W = pow(abs(N), 4.0); W /= dot(W, float3(1.0, 1.0, 1.0));
 float3 S = float3(N.x < 0 ? -1.0 : 1.0, N.y < 0 ? -1.0 : 1.0, N.z < 0 ? -1.0 : 1.0);
 float2 UvX = P.zy; float2 UvY = P.xz; float2 UvZ = P.xy;
 UvX.x *= S.x; UvY.x *= S.y; UvZ.x *= -S.z;
+float2 VX = float2(-UvX.y, UvX.x) * 0.71 + 0.37; float2 VY = float2(-UvY.y, UvY.x) * 0.71 + 0.37; float2 VZ = float2(-UvZ.y, UvZ.x) * 0.71 + 0.37;
+float Blend = smoothstep(0.35, 0.65, Mask);
 """
 
 COLOUR_CODE = TRIPLANAR_SETUP + """
-float3 C = Texture2DSample(Tex, TexSampler, UvX).rgb * W.x
-         + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y
-         + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
+float3 C1 = Texture2DSample(Tex, TexSampler, UvX).rgb * W.x + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
+float3 C2 = Texture2DSample(Tex, TexSampler, VX).rgb * W.x + Texture2DSample(Tex, TexSampler, VY).rgb * W.y + Texture2DSample(Tex, TexSampler, VZ).rgb * W.z;
+float3 C = lerp(C1, C2, Blend);
 float Lum = dot(C, float3(0.3, 0.59, 0.11));
-return lerp(C, saturate(Lum * 2.0 * Tint), TintStrength);
+C = lerp(C, saturate(Lum * 2.0 * Tint), TintStrength);
+// Grime and damp gather at the foot of a wall: vertex alpha is the height above the ground, 0 to 1 over 2.5 m.
+C *= lerp(0.62, 1.0, Grime) * lerp(0.92, 1.0, Mask);
+return C;
 """
 
 ORM_CODE = TRIPLANAR_SETUP + """
-return Texture2DSample(Tex, TexSampler, UvX).rgb * W.x
-     + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y
-     + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
+float3 O1 = Texture2DSample(Tex, TexSampler, UvX).rgb * W.x + Texture2DSample(Tex, TexSampler, UvY).rgb * W.y + Texture2DSample(Tex, TexSampler, UvZ).rgb * W.z;
+float3 O2 = Texture2DSample(Tex, TexSampler, VX).rgb * W.x + Texture2DSample(Tex, TexSampler, VY).rgb * W.y + Texture2DSample(Tex, TexSampler, VZ).rgb * W.z;
+float3 O = lerp(O1, O2, Blend);
+// Damp at the foot of the wall is glossier.
+O.g *= lerp(0.8, 1.0, Grime);
+return O;
 """
 
 NORMAL_CODE = TRIPLANAR_SETUP + """
-float2 Nx = Texture2DSample(Tex, TexSampler, UvX).rg * 2.0 - 1.0;
-float2 Ny = Texture2DSample(Tex, TexSampler, UvY).rg * 2.0 - 1.0;
-float2 Nz = Texture2DSample(Tex, TexSampler, UvZ).rg * 2.0 - 1.0;
+float2 Nx = lerp(Texture2DSample(Tex, TexSampler, UvX).rg, Texture2DSample(Tex, TexSampler, VX).gr * float2(1.0, -1.0) + float2(0.0, 1.0), Blend) * 2.0 - 1.0;
+float2 Ny = lerp(Texture2DSample(Tex, TexSampler, UvY).rg, Texture2DSample(Tex, TexSampler, VY).gr * float2(1.0, -1.0) + float2(0.0, 1.0), Blend) * 2.0 - 1.0;
+float2 Nz = lerp(Texture2DSample(Tex, TexSampler, UvZ).rg, Texture2DSample(Tex, TexSampler, VZ).gr * float2(1.0, -1.0) + float2(0.0, 1.0), Blend) * 2.0 - 1.0;
 float3 TX = float3(Nx, sqrt(saturate(1.0 - dot(Nx, Nx))));
 float3 TY = float3(Ny, sqrt(saturate(1.0 - dot(Ny, Ny))));
 float3 TZ = float3(Nz, sqrt(saturate(1.0 - dot(Nz, Nz))));
@@ -205,6 +216,88 @@ def custom(material, code, output_type, inputs, x, y, description):
         pins.append(pin)
     node.set_editor_property("inputs", pins)
     return node
+
+
+def world_noise(material, x, y):
+    """Smooth world-space noise, 0..1, with features a few metres across."""
+    node = expr(material, unreal.MaterialExpressionNoise, x, y)
+    node.set_editor_property("scale", 0.003)
+    node.set_editor_property("levels", 2)
+    node.set_editor_property("output_min", 0.0)
+    node.set_editor_property("output_max", 1.0)
+    node.set_editor_property("noise_function", unreal.NoiseFunction.NOISEFUNCTION_GRADIENT_ALU)
+    world = expr(material, unreal.MaterialExpressionWorldPosition, x - 250, y)
+    mel.connect_material_expressions(world, "", node, "Position")
+    return node
+
+
+# Window glass with a room behind it, computed in the shader from the view direction (interior
+# mapping): a lit or dark box per window, the back wall, ceiling and floor shaded differently, fading
+# with depth. The glass itself is a smooth dielectric, so Lumen puts the sky and the street in it.
+INTERIOR_CODE = """
+float3 T = normalize(cross(float3(0.0, 0.0, 1.0), N));
+float3 d = -float3(dot(V, T), V.z, dot(V, N));
+d.z = min(d.z, -0.08);
+float2 cell = floor(UV);
+float2 f = UV - cell;
+float3 p = float3(f.x, f.y, 0.0);
+float3 inv = 1.0 / d;
+float3 tm = float3(d.x > 0.0 ? (1.0 - p.x) : -p.x, d.y > 0.0 ? (1.0 - p.y) : -p.y, -Depth) * inv;
+float t = min(min(tm.x, tm.y), tm.z);
+float3 hit = p + d * t;
+float h = frac(sin(dot(cell + Seed, float2(12.9898, 78.233))) * 43758.5453);
+float lit = h < LitFraction ? 1.0 : 0.0;
+float3 room = float3(0.60, 0.56, 0.50) * (0.3 + 0.7 * lit);
+float3 c;
+if (t == tm.z) { c = room * 0.6 + lit * 0.25 * float3(1.0, 0.93, 0.8) * saturate(1.0 - 1.4 * abs(hit.x - 0.5)); }
+else if (t == tm.y) { c = d.y > 0.0 ? room * 1.1 : room * 0.35; }
+else { c = room * 0.75; }
+c *= lerp(1.0, 0.5, saturate(-hit.z / Depth));
+return float4(c, lit);
+"""
+
+
+def build_window_master():
+    material = fresh_material("M_DTG_Window")
+    uv = expr(material, unreal.MaterialExpressionTextureCoordinate, -1200, -200)
+    uv.set_editor_property("coordinate_index", 0)
+    normal_ws = expr(material, unreal.MaterialExpressionVertexNormalWS, -1200, -50)
+    camera = expr(material, unreal.MaterialExpressionCameraVectorWS, -1200, 100)
+    depth = scalar(material, "RoomDepth", 1.1, -1200, 250)
+    lit = scalar(material, "LitFraction", 0.45, -1200, 350)
+    seed = scalar(material, "Seed", 0.0, -1200, 450)
+    interior = custom(material, INTERIOR_CODE, unreal.CustomMaterialOutputType.CMOT_FLOAT4, ["UV", "N", "V", "Depth", "LitFraction", "Seed"],
+                      -800, 0, "Interior mapping")
+    for node, name in ((uv, "UV"), (normal_ws, "N"), (camera, "V"), (depth, "Depth"), (lit, "LitFraction"), (seed, "Seed")):
+        mel.connect_material_expressions(node, "", interior, name)
+    rgb = expr(material, unreal.MaterialExpressionComponentMask, -500, -50)
+    for flag, value in (("r", True), ("g", True), ("b", True), ("a", False)):
+        rgb.set_editor_property(flag, value)
+    mel.connect_material_expressions(interior, "", rgb, "")
+    alpha = expr(material, unreal.MaterialExpressionComponentMask, -500, 150)
+    for flag, value in (("r", False), ("g", False), ("b", False), ("a", True)):
+        alpha.set_editor_property(flag, value)
+    mel.connect_material_expressions(interior, "", alpha, "")
+    tint = scalar(material, "GlassTint", 0.5, -500, -200)
+    tinted = expr(material, unreal.MaterialExpressionMultiply, -300, -100)
+    mel.connect_material_expressions(rgb, "", tinted, "A")
+    mel.connect_material_expressions(tint, "", tinted, "B")
+    # Lit rooms glow after dark: Night is 0 by day; the sky can raise it.
+    night = scalar(material, "Night", 0.0, -500, 300)
+    glow = expr(material, unreal.MaterialExpressionMultiply, -300, 150)
+    mel.connect_material_expressions(rgb, "", glow, "A")
+    mel.connect_material_expressions(alpha, "", glow, "B")
+    glow_night = expr(material, unreal.MaterialExpressionMultiply, -150, 200)
+    mel.connect_material_expressions(glow, "", glow_night, "A")
+    mel.connect_material_expressions(night, "", glow_night, "B")
+    roughness = scalar(material, "Roughness", 0.06, -500, 450)
+    specular = scalar(material, "Specular", 1.0, -500, 550)
+    mel.connect_material_property(tinted, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(glow_night, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.connect_material_property(roughness, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(specular, "", unreal.MaterialProperty.MP_SPECULAR)
+    mel.recompile_material(material)
+    return material
 
 
 def tile_position(material, tile_cm):
@@ -310,14 +403,19 @@ def build_surface_master():
     orm_tex.set_editor_property("texture", unreal.load_asset(TEXTURES + "/T_Concrete_ORM"))
 
     float3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
-    colour = custom(material, COLOUR_CODE, float3, ["Tex", "P", "Nrm", "Tint", "TintStrength"], -600, -600, "Triplanar colour")
-    normal = custom(material, NORMAL_CODE, float3, ["Tex", "P", "Nrm"], -600, -400, "Triplanar world normal")
-    orm = custom(material, ORM_CODE, float3, ["Tex", "P", "Nrm"], -600, -200, "Triplanar ORM")
+    colour = custom(material, COLOUR_CODE, float3, ["Tex", "P", "Nrm", "Tint", "TintStrength", "Mask", "Grime"], -600, -600, "Triplanar colour")
+    normal = custom(material, NORMAL_CODE, float3, ["Tex", "P", "Nrm", "Mask"], -600, -400, "Triplanar world normal")
+    orm = custom(material, ORM_CODE, float3, ["Tex", "P", "Nrm", "Mask", "Grime"], -600, -200, "Triplanar ORM")
+    mask = world_noise(material, -1600, 700)
     for node, tex in ((colour, colour_tex), (normal, normal_tex), (orm, orm_tex)):
         mel.connect_material_expressions(tex, "", node, "Tex")
         mel.connect_material_expressions(position, "", node, "P")
         mel.connect_material_expressions(normal_ws, "", node, "Nrm")
+        mel.connect_material_expressions(mask, "", node, "Mask")
     mel.connect_material_expressions(vertex_colour, "", colour, "Tint")
+    # The vertex colour reaches a custom node as three channels; its alpha, the height above ground, goes in on its own.
+    mel.connect_material_expressions(vertex_colour, "A", colour, "Grime")
+    mel.connect_material_expressions(vertex_colour, "A", orm, "Grime")
     mel.connect_material_expressions(tint, "", colour, "TintStrength")
 
     def channel(r, g, b, y):
@@ -411,6 +509,7 @@ def main():
     plain = build_plain_master()
     build_instances(surface, plain, paint)
     fresh_instance("MI_Terrain", build_terrain_master())
+    fresh_instance("MI_Window", build_window_master())
     unreal.EditorAssetLibrary.save_directory("/Game/Art", only_if_is_dirty=False, recursive=True)
     log("saved /Game/Art")
 

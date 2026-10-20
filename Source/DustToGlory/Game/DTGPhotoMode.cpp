@@ -120,6 +120,11 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 
 void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
 {
+	if (Shot.ClockMinutes >= 0.0 && Game && Game->IsContentLoaded())
+	{
+		auto& Clock = Game->Sim().Clock;
+		Clock.SetTotalMinutes(Clock.Day() * 1440.0 + Shot.ClockMinutes);
+	}
 	SetActorLocationAndRotation(Shot.At, Shot.Facing);
 	if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
 	{
@@ -272,6 +277,21 @@ void ADTGPhotoMode::PlanShots()
 					bBeach = true;
 					break;
 				}
+			}
+		}
+	}
+
+	// The same street and highway again at golden hour, the light the game is meant to be seen in.
+	{
+		const int32 Count = Shots.Num();
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			if (Shots[Index].Name == TEXT("street") || Shots[Index].Name == TEXT("highway-above"))
+			{
+				FDTGPhotoShot Golden = Shots[Index];
+				Golden.Name = TEXT("golden-") + Golden.Name;
+				Golden.ClockMinutes = 19.0 * 60.0 + 5.0;
+				Shots.Add(Golden);
 			}
 		}
 	}

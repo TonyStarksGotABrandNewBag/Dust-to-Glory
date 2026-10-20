@@ -84,6 +84,14 @@ Still missing:
   `Tools/fetch_dlss.py` installs it, and the plugins are optional.
 - **Street furniture:** CC0 models placed by `Sim/StreetFurniture` (poles, lamps, hydrants, deck barriers).
 
+- **Facades with depth:** windows and doors sit in real reveals cut through the wall, not on it; the
+  glass carries an interior-mapped room (lit or dark, fading with depth) under ray-traced reflections.
+- **Walls:** a second rotated texture copy blended by world noise kills the tiling, and vertex alpha
+  carries height above ground for grime and damp at the foot of every wall.
+- **Street trees** on every lawned block (palms near the coast, live oaks inland), placed and tested
+  in `Sim/StreetFurniture`.
+- **Golden hour** in photo mode: the same street and highway at 19:05, the light the game is meant for.
+
 Still box geometry: cars and people. No power lines between the poles, and no grass blades.
 Not checked: the frame rate with all of it on.
 
