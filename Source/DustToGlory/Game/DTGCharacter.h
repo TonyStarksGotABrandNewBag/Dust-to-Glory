@@ -77,6 +77,7 @@ public:
 	bool EnterBuilding(int32 BuildingId);
 	bool LeaveBuilding();
 	bool IsIndoors() const { return InsideBuildingId >= 0; }
+	UDTGBody* GetBody() const { return Body; }
 	int32 IndoorBuildingId() const { return InsideBuildingId; }
 
 	/**

@@ -33,6 +33,8 @@ public:
 
 	/** Plays a swing of the arm, for a punch. */
 	void Swing();
+	/** What the figure is doing, for a log line: which clip, at what rate, for what ground speed. */
+	FString Describe() const;
 
 	/** How fast a stride is at walking pace, in centimetres per second. */
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Body")

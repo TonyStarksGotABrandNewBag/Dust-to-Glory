@@ -145,11 +145,26 @@ Still missing:
   heads (six a sex) with their scanned hair as grooms bound to the face, a synthesized body, and a top,
   bottom and shoes from the pack's wardrobe, chosen by the person's seed and the same every time; an
   unseen base mesh plays the pack's idle, walk and brisk-walk clips and every visible piece follows its
-  pose (`UDTGBody::BuildCrowd`). The mannequins are the fallback, the box figure after that. Not right
-  yet: the shoes load but do not show (the crowd's clothing material takes its colours from per-instance
-  data this project does not set; the top and trousers happen to come out plain), the skin tone is the
-  pack's default rather than per person, and nobody has been seen walking in a photo-mode shot yet, so
-  the clip speeds (140 and 230 cm/s) are guesses.
+  pose (`UDTGBody::BuildCrowd`). The mannequins are the fallback, the box figure after that. Each person
+  is coloured by seed: the synthesized skin takes a melanin and a redness seed (the face the same two as
+  the arms), and each garment its colour from a street palette through the pack's clothing master
+  (`A_CrowdColor_main`); the shoes, which did not show until they were given a colour, show. The clips'
+  paces are measured from their root motion at load rather than guessed (walk 140 cm/s for both sexes,
+  brisk 207 for the women's clip and 244 for the men's), so the feet hold the ground at any speed.
+  Verified in three photo-mode shots the same day: three people with different tops, trousers, shoes
+  and skin, two of them walking the pavement at 160 cm/s on the walk clip at rate 1.14, feet planted.
+
+- **Pedestrians walk** (20 October). They never had: the traffic director set
+  `bRunPhysicsWithNoController` after spawning, and a character picks its walking movement mode at spawn
+  only when that flag is already set, so with no controller all forty stood at 0 cm/s for ever (photo
+  mode's listing of every character showed it). `SetDefaultMovementMode()` after the flag fixes it. They
+  spawn on the pavement ring round their block, not at its centre, and stroll along it, round at most one
+  corner, rather than across the lawn or the houses; an errand still goes in a straight line to the door,
+  through whatever is in the way, because there is no routing. Photo mode's `person` and `walker` shots
+  are framed when they come up, ahead of where the nearest person on the street will be when the shot is
+  taken, with the eye kept off the lots (from inside a shell the one-sided walls are not there); `walker`
+  waits up to 30 s for someone walking, and both now see the plain-character pedestrians, which they
+  never did before: both searches iterated the project's own character class, which only the player is.
 
 **Memory, measured** (20 October, `-DTGMemReport` at the car shot, RTX 5070 Laptop, 8 GB): 5.7 GB of
 video memory in use at the shot, 7.7 GB at the peak during loading. It is not the car textures: the

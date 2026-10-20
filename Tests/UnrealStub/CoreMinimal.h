@@ -569,6 +569,7 @@ struct FVector2D
 	double SizeSquared() const { return X * X + Y * Y; }
 	FVector2D GetSafeNormal() const;
 	static double DistSquared(const FVector2D& A, const FVector2D& B);
+	static double DotProduct(const FVector2D& A, const FVector2D& B) { return A.X * B.X + A.Y * B.Y; }
 	static const FVector2D ZeroVector;
 };
 

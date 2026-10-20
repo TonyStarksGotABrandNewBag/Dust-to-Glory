@@ -42,6 +42,12 @@ struct FDTGWalker
 	FString MindId;
 	FVector Target = FVector::ZeroVector;
 	double NextThink = 0.0;
+	/** The block this person lives around, in simulation metres: they stroll its pavement between errands. */
+	FVector2D BlockMin = FVector2D::ZeroVector;
+	FVector2D BlockMax = FVector2D::ZeroVector;
+	/** The corner to round on the way to Target, when a stroll turns onto the next side of the block. */
+	FVector Via = FVector::ZeroVector;
+	bool bVia = false;
 };
 
 UCLASS()

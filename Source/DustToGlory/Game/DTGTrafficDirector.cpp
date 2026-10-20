@@ -11,8 +11,51 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
+#include "Sim/StreetFurniture.h"
 
 using namespace dtg::sim;
+
+namespace detail_trafficdirector
+{
+	/**
+	 * The pavement ring round a block, in simulation metres: its four corners, half the sidewalk in from
+	 * the kerb, anticlockwise from the south-west; side N runs from corner N to corner N + 1.
+	 */
+	void RingCorners(const FVector2D& Min, const FVector2D& Max, FVector2D (&Corners)[4])
+	{
+		const double In = 0.5 * FurnitureRules().SidewalkM;
+		Corners[0] = FVector2D(Min.X + In, Min.Y + In);
+		Corners[1] = FVector2D(Max.X - In, Min.Y + In);
+		Corners[2] = FVector2D(Max.X - In, Max.Y - In);
+		Corners[3] = FVector2D(Min.X + In, Max.Y - In);
+	}
+
+	/** The side of the ring a spot is nearest. */
+	int32 NearestSide(const FVector2D (&Corners)[4], const FVector2D& Spot)
+	{
+		int32 Best = 0;
+		double Nearest = 1e300;
+		for (int32 Side = 0; Side < 4; ++Side)
+		{
+			const FVector2D A = Corners[Side];
+			const FVector2D Run = Corners[(Side + 1) % 4] - A;
+			const double Along = FMath::Clamp(FVector2D::DotProduct(Spot - A, Run) / FMath::Max(1e-6, Run.SizeSquared()), 0.0, 1.0);
+			const double Distance = FVector2D::DistSquared(Spot, A + Run * Along);
+			if (Distance < Nearest)
+			{
+				Nearest = Distance;
+				Best = Side;
+			}
+		}
+		return Best;
+	}
+
+	/** A random spot along one side of the ring. */
+	FVector2D AlongSide(const FVector2D (&Corners)[4], int32 Side)
+	{
+		return FMath::Lerp(Corners[Side], Corners[(Side + 1) % 4], static_cast<double>(FMath::FRand()));
+	}
+}
 
 ADTGTrafficDirector::ADTGTrafficDirector()
 {
@@ -334,6 +377,7 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			{
 				Destination = Game->Sim().City.FirstWithRole(WantedRole);
 			}
+			Walker.bVia = false;
 			if (Destination)
 			{
 				const double Z = Game->Sim().Map.HeightAt(Destination->DoorX, Destination->DoorY);
@@ -341,13 +385,37 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			}
 			else
 			{
-				Walker.Target = Around + FVector(FMath::FRandRange(-4000.0f, 4000.0f), FMath::FRandRange(-4000.0f, 4000.0f), 0.0f);
+				// Nothing to do: a stroll along the home block's pavement, on this side of the block or round
+				// one corner onto the next, never across the block: the lawn, or the houses, are in the middle.
+				FVector2D Corners[4];
+				detail_trafficdirector::RingCorners(Walker.BlockMin, Walker.BlockMax, Corners);
+				const int32 Side = detail_trafficdirector::NearestSide(Corners, Game->ToSim(Walker.Actor->GetActorLocation()));
+				const int32 Turn = FMath::RandHelper(3) - 1;
+				const FVector2D Spot = detail_trafficdirector::AlongSide(Corners, (Side + Turn + 4) % 4);
+				Walker.Target = Game->ToUnreal(Spot.X, Spot.Y, Game->Sim().Map.HeightAt(Spot.X, Spot.Y));
+				if (Turn != 0)
+				{
+					const FVector2D Corner = Corners[Turn > 0 ? (Side + 1) % 4 : Side];
+					Walker.Via = Game->ToUnreal(Corner.X, Corner.Y, Game->Sim().Map.HeightAt(Corner.X, Corner.Y));
+					Walker.bVia = true;
+				}
 			}
 		}
 		// Walk there. Pedestrians use Unreal's own movement: they are people, not vehicles.
 		if (ACharacter* Person = Cast<ACharacter>(Walker.Actor))
 		{
-			const FVector Direction = (Walker.Target - Person->GetActorLocation()).GetSafeNormal2D();
+			if (Walker.bVia && FVector::Dist2D(Walker.Via, Person->GetActorLocation()) < 100.0)
+			{
+				// Round the corner.
+				Walker.bVia = false;
+			}
+			const FVector ToGo = (Walker.bVia ? Walker.Via : Walker.Target) - Person->GetActorLocation();
+			if (ToGo.Size2D() < 100.0)
+			{
+				// There: stands until the next think, rather than shuffling on the spot.
+				continue;
+			}
+			const FVector Direction = ToGo.GetSafeNormal2D();
 			// Forced, because a pawn with no local controller ignores movement input outright. Letting the
 		// movement component run (bRunPhysicsWithNoController, where they are spawned) only gets them
 		// gravity; without this they stand on the pavement for ever, turning to face where they meant
@@ -382,11 +450,17 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 		{
 			continue;
 		}
-		const double Z = Game->Sim().Map.HeightAt(Block.CenterX(), Block.CenterY());
+		// On the pavement round the block, not at its centre, which is a back yard or a roof.
+		const FVector2D BlockMin(Block.MinX, Block.MinY);
+		const FVector2D BlockMax(Block.MaxX, Block.MaxY);
+		FVector2D Corners[4];
+		detail_trafficdirector::RingCorners(BlockMin, BlockMax, Corners);
+		const FVector2D Spot = detail_trafficdirector::AlongSide(Corners, FMath::RandHelper(4));
+		const double Z = Game->Sim().Map.HeightAt(Spot.X, Spot.Y);
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 		ACharacter* Person = GetWorld()->SpawnActor<ACharacter>(ACharacter::StaticClass(),
-			FTransform(FRotator::ZeroRotator, Game->ToUnreal(Block.CenterX(), Block.CenterY(), Z + 1.0)), Params);
+			FTransform(FRotator::ZeroRotator, Game->ToUnreal(Spot.X, Spot.Y, Z + 1.0)), Params);
 		if (!Person)
 		{
 			return;
@@ -399,10 +473,16 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 			Legs->bRunPhysicsWithNoController = true;
 			Legs->MaxWalkSpeed = 160.0f;
 			Legs->bOrientRotationToMovement = false;
+			// Spawning left the movement mode at none: a character picks its walking mode at spawn only when
+			// this flag is already set, and with no controller nothing sets it afterwards. Without this call
+			// every pedestrian stood at 0 cm/s for ever (photo mode's walker listing showed forty of them).
+			Legs->SetDefaultMovementMode();
 		}
 		// Dressed after the mind id is known, so the same passer-by looks the same every time.
 		FDTGWalker Walker;
 		Walker.Actor = Person;
+		Walker.BlockMin = BlockMin;
+		Walker.BlockMax = BlockMax;
 		// Keyed to the block they live around, so the same passer-by remembers the player between visits.
 		Walker.MindId = FString::Printf(TEXT("ped-%d-%d"), FMath::RoundToInt32(Block.CenterX()), FMath::RoundToInt32(Block.CenterY()));
 		// Tagged so anything that needs to know whose mind this is (power witnesses, conversations) can ask.

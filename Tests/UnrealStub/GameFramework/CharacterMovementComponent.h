@@ -6,6 +6,7 @@ class UCharacterMovementComponent : public UActorComponent
 {
 public:
 	void SetMovementMode(EMovementMode Mode, uint8 CustomMode = 0) { (void)Mode; (void)CustomMode; }
+	void SetDefaultMovementMode() {}
 	EMovementMode MovementMode = MOVE_Walking;
 	bool IsFalling() const { return false; }
 	bool IsMovingOnGround() const { return true; }

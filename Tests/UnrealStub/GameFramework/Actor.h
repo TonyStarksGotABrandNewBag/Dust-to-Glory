@@ -190,6 +190,8 @@ public:
 	void AddLocalRotation(const FRotator& Delta) { (void)Delta; }
 
 	FVector GetRelativeLocation() const { return RelativeLocation; }
+	/** Checked against UE 5.8.3: the world-space bounds, public on USceneComponent. */
+	FBoxSphereBounds Bounds;
 	FRotator GetRelativeRotation() const { return RelativeRotation; }
 	FVector GetComponentLocation() const { return WorldLocation; }
 	FRotator GetComponentRotation() const { return WorldRotation; }

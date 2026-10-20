@@ -2,6 +2,9 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimationAsset.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "GroomAsset.h"
@@ -53,6 +56,35 @@ namespace detail_body
 	UAnimSequence* LoadClip(const TCHAR* Path)
 	{
 		return Cast<UAnimSequence>(StaticLoadObject(UAnimSequence::StaticClass(), nullptr, Path));
+	}
+
+	/**
+	 * How fast a clip's character travels over the ground, in cm/s, from the root motion it carries; 0 when
+	 * it carries none. Played in place, the clip then has to run at ground speed over this rate for the
+	 * feet to hold the ground.
+	 */
+	float NaturalSpeed(const UAnimSequence* Clip)
+	{
+		if (!Clip || Clip->GetPlayLength() <= 0.0f)
+		{
+			return 0.0f;
+		}
+		FAnimExtractContext Context;
+		Context.bExtractRootMotion = true;
+		const FTransform Travel = Clip->ExtractRootMotionFromRange(0.0, Clip->GetPlayLength(), Context);
+		return static_cast<float>(Travel.GetTranslation().Size2D()) / Clip->GetPlayLength();
+	}
+
+	/** The measured pace, or the guess when the clip carries no root motion; says which in the log. */
+	float ClipSpeed(const UAnimSequence* Clip, float Guess)
+	{
+		const float Measured = NaturalSpeed(Clip);
+		if (Measured > 10.0f)
+		{
+			return Measured;
+		}
+		UE_LOG(LogDTG, Log, TEXT("Clip %s carries no root motion; its pace is taken as %.0f cm/s."), Clip ? *Clip->GetName() : TEXT("-"), Guess);
+		return Guess;
 	}
 
 	USkeletalMesh* LoadSkeletal(const FString& Path)
@@ -132,6 +164,8 @@ void UDTGBody::Build(int32 Seed)
 				// The walk and jog clips carry root motion; played as clips it would walk the figure off its capsule.
 				Anim->RootMotionMode = ERootMotionMode::IgnoreRootMotion;
 			}
+			WalkClipSpeed = detail_body::ClipSpeed(WalkAnim, 160.0f);
+			JogClipSpeed = detail_body::ClipSpeed(JogAnim, 400.0f);
 			Playing = 0;
 			LastLocation = GetComponentLocation();
 			return;
@@ -264,8 +298,24 @@ bool UDTGBody::BuildCrowd(int32 Seed)
 		Anim->RootMotionMode = ERootMotionMode::IgnoreRootMotion;
 	}
 
+	// Skin: the pack's synthesized body and head take a melanin and a redness seed; the same two for both
+	// so the face matches the arms. Clothes: the pack's clothing master colours a garment by
+	// A_CrowdColor_main (and B_ for its second material), which the crowd system sets per instance and
+	// this sets per garment from a palette a Carolina street wears.
+	const float Melanin = (Mix(Seed, 6) % 1000u) / 999.0f;
+	const float Redness = 0.2f + 0.4f * ((Mix(Seed, 7) % 1000u) / 999.0f);
+	static const FLinearColor TopColours[] = {
+		FLinearColor(0.80f, 0.80f, 0.78f), FLinearColor(0.35f, 0.50f, 0.70f), FLinearColor(0.05f, 0.08f, 0.20f), FLinearColor(0.30f, 0.30f, 0.31f),
+		FLinearColor(0.25f, 0.30f, 0.14f), FLinearColor(0.32f, 0.05f, 0.08f), FLinearColor(0.03f, 0.03f, 0.03f), FLinearColor(0.65f, 0.48f, 0.10f),
+		FLinearColor(0.70f, 0.35f, 0.30f), FLinearColor(0.12f, 0.35f, 0.32f)};
+	static const FLinearColor BottomColours[] = {
+		FLinearColor(0.12f, 0.18f, 0.32f), FLinearColor(0.05f, 0.07f, 0.14f), FLinearColor(0.03f, 0.03f, 0.03f), FLinearColor(0.45f, 0.38f, 0.24f),
+		FLinearColor(0.28f, 0.28f, 0.29f), FLinearColor(0.60f, 0.58f, 0.52f)};
+	static const FLinearColor ShoeColours[] = {
+		FLinearColor(0.10f, 0.05f, 0.02f), FLinearColor(0.02f, 0.02f, 0.02f), FLinearColor(0.75f, 0.75f, 0.72f), FLinearColor(0.30f, 0.12f, 0.06f)};
 	TArray<FString> Missing;
-	auto Follow = [this, &Missing](USkeletalMesh* Mesh, const TCHAR* Name) -> USkeletalMeshComponent*
+	TArray<FString> Pieces;
+	auto Follow = [this, &Missing, &Pieces, Melanin, Redness](USkeletalMesh* Mesh, const TCHAR* Name, const FLinearColor* Garment) -> USkeletalMeshComponent*
 	{
 		if (!Mesh)
 		{
@@ -278,23 +328,47 @@ bool UDTGBody::BuildCrowd(int32 Seed)
 		Piece->RegisterComponent();
 		Piece->SetSkeletalMesh(Mesh);
 		Piece->SetLeaderPoseComponent(Figure);
+		for (int32 Slot = 0; Slot < Piece->GetNumMaterials(); ++Slot)
+		{
+			UMaterialInterface* const Parent = Piece->GetMaterial(Slot);
+			if (!Parent)
+			{
+				continue;
+			}
+			UMaterialInstanceDynamic* const Dynamic = UMaterialInstanceDynamic::Create(Parent, this);
+			if (!Dynamic)
+			{
+				continue;
+			}
+			if (Garment)
+			{
+				Dynamic->SetVectorParameterValue(TEXT("A_CrowdColor_main"), *Garment);
+				Dynamic->SetVectorParameterValue(TEXT("B_CrowdColor_main"), FLinearColor(Garment->R * 0.7f, Garment->G * 0.7f, Garment->B * 0.7f));
+			}
+			Dynamic->SetScalarParameterValue(TEXT("MelaninRandomSeed"), Melanin);
+			Dynamic->SetScalarParameterValue(TEXT("RednessRandomSeed"), Redness);
+			Piece->SetMaterial(Slot, Dynamic);
+		}
+		const FBoxSphereBounds Bounds = Piece->Bounds;
+		Pieces.Add(FString::Printf(TEXT("%s=%s[%d mats, %.0fx%.0fx%.0f cm at z %.0f]"), Name, *Mesh->GetName(), Piece->GetNumMaterials(),
+			2.0 * Bounds.BoxExtent.X, 2.0 * Bounds.BoxExtent.Y, 2.0 * Bounds.BoxExtent.Z, Bounds.Origin.Z - GetComponentLocation().Z));
 		Followers.Add(Piece);
 		return Piece;
 	};
-	Follow(LoadSkeletal(Meshes + Prefix + TEXT("body")), TEXT("Skin"));
+	Follow(LoadSkeletal(Meshes + Prefix + TEXT("body")), TEXT("Skin"), nullptr);
 	const TCHAR* const* Tops = bMale ? MaleTops : FemaleTops;
 	const TCHAR* const* Bottoms = bMale ? MaleBottoms : FemaleBottoms;
 	const TCHAR* const* Shoes = bMale ? MaleShoes : FemaleShoes;
 	const uint32 TopCount = bMale ? UE_ARRAY_COUNT(MaleTops) : UE_ARRAY_COUNT(FemaleTops);
 	const uint32 BottomCount = bMale ? UE_ARRAY_COUNT(MaleBottoms) : UE_ARRAY_COUNT(FemaleBottoms);
 	const uint32 ShoeCount = bMale ? UE_ARRAY_COUNT(MaleShoes) : UE_ARRAY_COUNT(FemaleShoes);
-	Follow(LoadSkeletal(Meshes + Prefix + Tops[Mix(Seed, 2) % TopCount]), TEXT("Top"));
-	Follow(LoadSkeletal(Meshes + Prefix + Bottoms[Mix(Seed, 3) % BottomCount]), TEXT("Bottom"));
-	Follow(LoadSkeletal(Meshes + Prefix + Shoes[Mix(Seed, 4) % ShoeCount]), TEXT("Shoes"));
+	Follow(LoadSkeletal(Meshes + Prefix + Tops[Mix(Seed, 2) % TopCount]), TEXT("Top"), &TopColours[Mix(Seed, 8) % UE_ARRAY_COUNT(TopColours)]);
+	Follow(LoadSkeletal(Meshes + Prefix + Bottoms[Mix(Seed, 3) % BottomCount]), TEXT("Bottom"), &BottomColours[Mix(Seed, 9) % UE_ARRAY_COUNT(BottomColours)]);
+	Follow(LoadSkeletal(Meshes + Prefix + Shoes[Mix(Seed, 4) % ShoeCount]), TEXT("Shoes"), &ShoeColours[Mix(Seed, 10) % UE_ARRAY_COUNT(ShoeColours)]);
 
 	const FHead& Chosen = (bMale ? MaleHeads : FemaleHeads)[Mix(Seed, 5) % 6u];
 	const FString FaceName = FString::Printf(TEXT("%s_nrw_FaceMesh"), Chosen.Id);
-	USkeletalMeshComponent* const Face = Follow(LoadSkeletal(FString::Printf(TEXT("%s/%s/%s/Face/%s"), CrowdRoot, *Sex, Chosen.Id, *FaceName)), TEXT("Face"));
+	USkeletalMeshComponent* const Face = Follow(LoadSkeletal(FString::Printf(TEXT("%s/%s/%s/Face/%s"), CrowdRoot, *Sex, Chosen.Id, *FaceName)), TEXT("Face"), nullptr);
 	if (Face && Chosen.Hair)
 	{
 		const FString GroomPath = FString::Printf(TEXT("%s/%s/%s/Hair/Hair/%s.%s"), CrowdRoot, *Sex, Chosen.Id, Chosen.Hair, Chosen.Hair);
@@ -318,13 +392,27 @@ bool UDTGBody::BuildCrowd(int32 Seed)
 	{
 		UE_LOG(LogDTG, Warning, TEXT("Crowd person %d (%s, %s): missing %s"), Seed, *Sex, Chosen.Id, *FString::Join(Missing, TEXT(", ")));
 	}
-
-	// The pack's clips were captured at an easy walk and a brisk one.
-	WalkClipSpeed = 140.0f;
-	JogClipSpeed = 230.0f;
+	// The pack's clips carry their root motion, so their pace is measured rather than guessed.
+	WalkClipSpeed = ClipSpeed(WalkAnim, 140.0f);
+	JogClipSpeed = ClipSpeed(JogAnim, 230.0f);
+	UE_LOG(LogDTG, Log, TEXT("Crowd person %d (%s, %s, melanin %.2f; clips walk %.0f, brisk %.0f cm/s): %s"), Seed, *Sex, Chosen.Id, Melanin,
+		WalkClipSpeed, JogClipSpeed, *FString::Join(Pieces, TEXT("; ")));
 	Playing = 0;
 	LastLocation = GetComponentLocation();
 	return true;
+}
+
+FString UDTGBody::Describe() const
+{
+	if (!Figure)
+	{
+		return TEXT("box figure");
+	}
+	static const TCHAR* const Names[] = {TEXT("idle"), TEXT("walk"), TEXT("jog"), TEXT("swing")};
+	const UAnimSequence* const Clip = Playing == 1 ? WalkAnim : (Playing == 2 ? JogAnim : (Playing == 3 ? SwingAnim : IdleAnim));
+	return FString::Printf(TEXT("%s (%s) at rate %.2f for %.0f cm/s; clips walk %.0f, jog %.0f cm/s"),
+		Playing >= 0 && Playing < 4 ? Names[Playing] : TEXT("?"), Clip ? *Clip->GetName() : TEXT("-"),
+		Playing == 0 ? 1.0f : FMath::Clamp(Speed / (Playing == 1 ? WalkClipSpeed : JogClipSpeed), 0.6f, 1.6f), Speed, WalkClipSpeed, JogClipSpeed);
 }
 
 void UDTGBody::Swing()

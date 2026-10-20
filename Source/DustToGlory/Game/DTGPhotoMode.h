@@ -24,6 +24,10 @@ struct FDTGPhotoShot
 	double ClockMinutes = -1.0;
 	/** Show the player, hidden for every other shot, because this one is of them. */
 	bool bShowPlayer = false;
+	/** Aimed at the nearest person out on the street when the shot comes up (the player, when nobody is), not where the tour was planned. */
+	bool bPerson = false;
+	/** As bPerson, but someone walking, and the shot waits for one. */
+	bool bWalker = false;
 };
 
 UCLASS()
@@ -50,6 +54,9 @@ private:
 	int32 Current = INDEX_NONE;
 	double NextAt = 0.0;
 	bool bCaptured = false;
+	/** For a walker shot: whether someone walking was found, and how many seconds have been spent looking. */
+	bool bWalkerFound = false;
+	int32 WalkerTries = 0;
 
 	UPROPERTY()
 	TObjectPtr<UDTGGameSubsystem> Game;

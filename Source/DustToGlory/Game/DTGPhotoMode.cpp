@@ -4,6 +4,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -21,6 +22,7 @@
 
 #include "EngineUtils.h"
 
+#include "Game/DTGBody.h"
 #include "Game/DTGCharacter.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGVehicle.h"
@@ -36,6 +38,8 @@ namespace detail_photo
 {
 	/** Long enough for the chunks under a new viewpoint to stream in and the lighting to settle. */
 	constexpr double SettleSeconds = 5.0;
+	/** A walker is framed where they will be after this long, so it is short: the further ahead, the more they turn or stop. */
+	constexpr double WalkerSettleSeconds = 2.0;
 	/** The first shot also waits out shader compilation on a fresh machine. */
 	constexpr double FirstSettleSeconds = 12.0;
 
@@ -108,6 +112,14 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	if (!bCaptured && Shots[Current].bWalker && !bWalkerFound && WalkerTries < 30)
+	{
+		// Nobody walking yet: look again in a second, for up to half a minute, before settling for the view.
+		++WalkerTries;
+		Frame(Shots[Current]);
+		NextAt = Now + (bWalkerFound ? detail_photo::WalkerSettleSeconds : 1.0);
+		return;
+	}
 	if (!bCaptured)
 	{
 		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Photos"), Shots[Current].Name + TEXT(".png"));
@@ -156,10 +168,44 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 		return;
 	}
 	bCaptured = false;
+	bWalkerFound = false;
+	WalkerTries = 0;
 	Frame(Shots[Current]);
 	// A shot that moves the clock gets twice as long: the camera has to re-adapt, the lit windows' shaders
 	// have to compile, and the frame rate logged with it should be the settled one.
-	NextAt = Now + (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0) * detail_photo::SettleSeconds;
+	NextAt = Now + (Shots[Current].bWalker && bWalkerFound ? detail_photo::WalkerSettleSeconds
+		: (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0) * detail_photo::SettleSeconds);
+}
+
+namespace detail_photo
+{
+	/**
+	 * Whether a spot (Unreal centimetres) is on a building's lot or within a stride of it: a doorway, or
+	 * crossing the lot. From inside a shell the one-sided walls are not there, and a shot from there came
+	 * out as a row of window frames in a field, so neither the subject nor the eye goes there. Street
+	 * pedestrians are plain characters dressed by the traffic director, so OnTheStreet takes any
+	 * character, and asks the project's own kind whether it is indoors.
+	 */
+	bool OnALot(const FVector& Where, const CityPlan& City)
+	{
+		const double X = Where.X / DTGMetresToUnreal;
+		const double Y = Where.Y / DTGMetresToUnreal;
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			const dtg::sim::Rect& Lot = Building.Footprint;
+			if (X > Lot.MinX - 1.5 && X < Lot.MaxX + 1.5 && Y > Lot.MinY - 1.5 && Y < Lot.MaxY + 1.5)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool OnTheStreet(const ACharacter& Person, const CityPlan& City)
+	{
+		const ADTGCharacter* const Ours = Cast<ADTGCharacter>(&Person);
+		return !(Ours && Ours->IsIndoors()) && !OnALot(Person.GetActorLocation(), City);
+	}
 }
 
 void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
@@ -169,11 +215,78 @@ void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
 		auto& Clock = Game->Sim().Clock;
 		Clock.SetTotalMinutes(Clock.Day() * 1440.0 + Shot.ClockMinutes);
 	}
-	SetActorLocationAndRotation(Shot.At, Shot.Facing);
+	FVector At = Shot.At;
+	FRotator Facing = Shot.Facing;
+	bool bShowPlayer = Shot.bShowPlayer;
+	if ((Shot.bPerson || Shot.bWalker) && Game)
+	{
+		// The nearest person out on the street (walking, for the walker shot), from the front and a little
+		// to the side, framed where they will be when the shot is taken, so the stride can be judged against
+		// the ground; what the body says it is doing goes in the log. The eye keeps off the lots too.
+		const CityPlan& City = Game->Sim().City;
+		const ACharacter* Subject = nullptr;
+		double Nearness = 1e18;
+		for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+		{
+			if (*It == PlayerPawn || (Shot.bWalker && It->GetVelocity().Size2D() < 60.0) || !detail_photo::OnTheStreet(**It, City))
+			{
+				continue;
+			}
+			const double Distance = FVector::DistSquared(It->GetActorLocation(), Shot.At);
+			if (Distance < Nearness)
+			{
+				Nearness = Distance;
+				Subject = *It;
+			}
+		}
+		bWalkerFound = Subject != nullptr;
+		if (!Subject && Shot.bPerson)
+		{
+			// Nobody about yet: the player, shown for this one shot.
+			Subject = Cast<ACharacter>(PlayerPawn.Get());
+			bShowPlayer = Subject != nullptr;
+		}
+		if (Subject)
+		{
+			const double Settle = Shot.bWalker ? detail_photo::WalkerSettleSeconds : detail_photo::SettleSeconds;
+			const FVector Velocity = Subject->GetVelocity();
+			const bool bMoving = Velocity.Size2D() >= 60.0;
+			const FVector Centre = Subject->GetActorLocation() + (bMoving ? FVector(Velocity.X, Velocity.Y, 0.0) * Settle : FVector::ZeroVector);
+			const FVector Ahead = bMoving ? Velocity.GetSafeNormal2D() : Subject->GetActorForwardVector().GetSafeNormal2D();
+			const FVector Side = FVector::CrossProduct(FVector::UpVector, Ahead);
+			const FVector Rise(0.0, 0.0, 110.0);
+			const FVector Options[] = {Ahead * 450.0 + Side * 200.0, Ahead * 450.0 - Side * 200.0, Side * 480.0, -Side * 480.0, Ahead * 480.0};
+			At = Centre + Options[0] + Rise;
+			for (const FVector& Option : Options)
+			{
+				if (!detail_photo::OnALot(Centre + Option, City))
+				{
+					At = Centre + Option + Rise;
+					break;
+				}
+			}
+			Facing = detail_photo::Looking(At, Centre + FVector(0.0, 0.0, 90.0));
+			const UDTGBody* const Body = Subject->FindComponentByClass<UDTGBody>();
+			UE_LOG(LogDTG, Log, TEXT("Photo mode: %s %s moving at %.0f cm/s: %s"), *Shot.Name, *Subject->GetName(), Velocity.Size2D(),
+				Body ? *Body->Describe() : TEXT("no body"));
+		}
+		else if (Shot.bWalker && WalkerTries >= 30)
+		{
+			UE_LOG(LogDTG, Warning, TEXT("Photo mode: no pedestrian walking outdoors for the walker shot in %d seconds."), WalkerTries);
+			for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+			{
+				const UDTGBody* const Body = It->FindComponentByClass<UDTGBody>();
+				UE_LOG(LogDTG, Log, TEXT("Photo mode:   %s%s at %.0f cm/s, %s: %s"), *It->GetName(), *It == PlayerPawn ? TEXT(" (player)") : TEXT(""),
+					It->GetVelocity().Size2D(), detail_photo::OnTheStreet(**It, City) ? TEXT("on the street") : TEXT("indoors or on a lot"),
+					Body ? *Body->Describe() : TEXT("no body"));
+			}
+		}
+	}
+	SetActorLocationAndRotation(At, Facing);
 	if (PlayerPawn)
 	{
 		// Unpossessed in BeginPlay, so still standing where it started.
-		PlayerPawn->SetActorHiddenInGame(!Shot.bShowPlayer);
+		PlayerPawn->SetActorHiddenInGame(!bShowPlayer);
 	}
 	if (ADTGWorldBuilder* Builder = Cast<ADTGWorldBuilder>(UGameplayStatics::GetActorOfClass(GetWorld(), ADTGWorldBuilder::StaticClass())))
 	{
@@ -368,58 +481,16 @@ void ADTGPhotoMode::PlanShots()
 		}
 	}
 
-	// A person: the nearest character that is not the player, from the front, close enough to judge.
+	// A person: the nearest out on the street when the shot comes up (framed then, in Frame), or the player
+	// when nobody is about yet.
 	{
-		const APawn* Player = GetWorld()->GetFirstPlayerController() ? GetWorld()->GetFirstPlayerController()->GetPawn() : nullptr;
-		const AActor* Nearest = nullptr;
-		double BestPerson = 1e18;
-		for (TActorIterator<ADTGCharacter> It(GetWorld()); It; ++It)
-		{
-			if (*It == Player)
-			{
-				continue;
-			}
-			// Not someone indoors, nor standing in a doorway or crossing a lot: from inside a shell the
-			// one-sided walls are not there, and the shot came out as a row of window frames in a field.
-			if (It->IsIndoors())
-			{
-				continue;
-			}
-			const FVector Where = It->GetActorLocation();
-			bool bOnALot = false;
-			for (const BuildingPlan& Building : City.Buildings)
-			{
-				const dtg::sim::Rect& Lot = Building.Footprint;
-				const double X = Where.X / DTGMetresToUnreal;
-				const double Y = Where.Y / DTGMetresToUnreal;
-				if (X > Lot.MinX - 1.5 && X < Lot.MaxX + 1.5 && Y > Lot.MinY - 1.5 && Y < Lot.MaxY + 1.5)
-				{
-					bOnALot = true;
-					break;
-				}
-			}
-			if (bOnALot)
-			{
-				continue;
-			}
-			const double Distance = FVector::DistSquared(Where, At(SpawnX, SpawnY, 0.0));
-			if (Distance < BestPerson)
-			{
-				BestPerson = Distance;
-				Nearest = *It;
-			}
-		}
-		// Nobody else is about yet when the tour is planned (walkers spawn as the game runs), so it is usually
-		// the player, shown for this one shot.
-		const AActor* Subject = Nearest ? Nearest : Player;
-		if (Subject)
-		{
-			const FVector Centre = Subject->GetActorLocation();
-			const FVector Eye = Centre + Subject->GetActorForwardVector() * 320.0 + Subject->GetActorRightVector() * 120.0 + FVector(0.0, 0.0, 40.0);
-			FDTGPhotoShot Shot{TEXT("person"), Eye, detail_photo::Looking(Eye, Centre)};
-			Shot.bShowPlayer = Subject == Player;
-			Shots.Add(Shot);
-		}
+		FDTGPhotoShot Person{TEXT("person"), At(SpawnX, SpawnY, Ground(SpawnX, SpawnY) + 1.6), FRotator::ZeroRotator};
+		Person.bPerson = true;
+		Shots.Add(Person);
+		// And someone walking, found when the shot comes up: nobody is yet when the tour is planned.
+		FDTGPhotoShot Walker{TEXT("walker"), At(SpawnX, SpawnY, Ground(SpawnX, SpawnY) + 1.6), FRotator::ZeroRotator};
+		Walker.bWalker = true;
+		Shots.Add(Walker);
 	}
 
 	// The same street and highway again at golden hour, the light the game is meant to be seen in.

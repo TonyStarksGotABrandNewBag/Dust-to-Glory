@@ -163,8 +163,12 @@ cloning.
   makes the paint instances the game colours; without them every car is the pack's silver. After the
   Megascans plants are in, run `Tools/Art/fix_megascans_foliage.py` the same way: it gives them the
   project's masked material (the Fab foliage master drew them near-black here; see docs/REALISM.md).
-  `Content/CitySampleCrowd` needs nothing further: `UDTGBody::BuildCrowd` assembles people from it, and
-  the HairStrands plugin (enabled in the .uproject) draws their hair.
+  `Content/CitySampleCrowd` needs nothing further: `UDTGBody::BuildCrowd` assembles people from it,
+  colours each by seed and measures the clips' paces from their root motion, and the HairStrands plugin
+  (enabled in the .uproject) draws their hair.
+- **`check_engine.py` is skipped on a machine with only MSVC** (this one): it drives g++ or clang++. There
+  the real Unreal build is the compile check, so run `Build.bat DustToGloryEditor Win64 Development`
+  before claiming the engine layer compiles.
 - **Still true:** the default map is engine-provided, and the input actions are created at runtime.
 
 ## Suggested order from here
