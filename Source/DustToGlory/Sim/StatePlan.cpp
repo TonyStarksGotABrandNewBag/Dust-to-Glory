@@ -86,6 +86,20 @@ namespace dtg::sim
 		return std::max(2, Grid) * (BlockSize + RoadWidth) + RoadWidth;
 	}
 
+	double RoadWidthFor(CityStyle Style)
+	{
+		switch (Style)
+		{
+		case CityStyle::Rural: return 10.0;
+		case CityStyle::Town: return 12.0;
+		case CityStyle::City:
+		case CityStyle::Beach: return 14.0;
+		case CityStyle::Hub:
+		case CityStyle::Count: break;
+		}
+		return 18.0;
+	}
+
 	Point2 StatePlan::ToWorld(double Lon, double Lat) const
 	{
 		const double MetresPerLon = 111320.0 * std::cos(OriginLat * detail_stateplan::Pi / 180.0);
@@ -225,9 +239,29 @@ namespace dtg::sim
 		return Errors.empty();
 	}
 
+	int StatePlan::CoastSideOf(const StateCity& City) const
+	{
+		// The side of the town nearest the sea, if the sea is close enough to be its front: within a
+		// block or two of the edge, which at the state's scale is the resort strip and nothing inland.
+		const Rect Area = CityRect(City, 0.0);
+		const Point2 Sides[4] = {{City.X, Area.MinY}, {Area.MaxX, City.Y}, {City.X, Area.MaxY}, {Area.MinX, City.Y}};
+		int Best = -1;
+		double Nearest = 400.0;
+		for (int Side = 0; Side < 4; ++Side)
+		{
+			const double Distance = CoastDistance(Sides[Side][0], Sides[Side][1]);
+			if (Distance < Nearest)
+			{
+				Nearest = Distance;
+				Best = Side;
+			}
+		}
+		return Best;
+	}
+
 	Rect StatePlan::CityRect(const StateCity& City, double Margin) const
 	{
-		const double Half = 0.5 * CitySpan(City.Grid) + Margin;
+		const double Half = 0.5 * CitySpan(City.Grid, detail_stateplan::BlockSize, RoadWidthFor(City.Style)) + Margin;
 		return Rect{City.X - Half, City.Y - Half, City.X + Half, City.Y + Half};
 	}
 
@@ -1161,8 +1195,8 @@ namespace dtg::sim
 				{
 					StateCity& First = Cities[A];
 					StateCity& Second = Cities[B];
-					const double FirstSpan = CitySpan(First.Grid);
-					const double SecondSpan = CitySpan(Second.Grid);
+					const double FirstSpan = CitySpan(First.Grid, BlockSize, RoadWidthFor(First.Style));
+					const double SecondSpan = CitySpan(Second.Grid, BlockSize, RoadWidthFor(Second.Style));
 					const double Need = 0.5 * (FirstSpan + SecondSpan) + CityMargin;
 					const double Dx = Second.X - First.X;
 					const double Dy = Second.Y - First.Y;
@@ -1220,20 +1254,21 @@ namespace dtg::sim
 		std::vector<std::string>& Errors)
 	{
 		using namespace detail_stateplan;
-		const double Pitch = BlockSize + RoadWidth;
 		// The middle road on the side of a city facing a point: exactly one of the city's own intersections.
 		auto Gate = [&](const StateCity& City, const Point2& Toward)
 		{
+			const double Width = RoadWidthFor(City.Style);
+			const double Pitch = BlockSize + Width;
 			const Rect Area = CityRect(City);
 			const double Dx = Toward[0] - City.X;
 			const double Dy = Toward[1] - City.Y;
-			const double MidX = Area.MinX + (City.Grid / 2) * Pitch + 0.5 * RoadWidth;
-			const double MidY = Area.MinY + (City.Grid / 2) * Pitch + 0.5 * RoadWidth;
+			const double MidX = Area.MinX + (City.Grid / 2) * Pitch + 0.5 * Width;
+			const double MidY = Area.MinY + (City.Grid / 2) * Pitch + 0.5 * Width;
 			if (std::fabs(Dx) > std::fabs(Dy))
 			{
-				return Point2{Dx > 0.0 ? Area.MaxX - 0.5 * RoadWidth : Area.MinX + 0.5 * RoadWidth, MidY};
+				return Point2{Dx > 0.0 ? Area.MaxX - 0.5 * Width : Area.MinX + 0.5 * Width, MidY};
 			}
-			return Point2{MidX, Dy > 0.0 ? Area.MaxY - 0.5 * RoadWidth : Area.MinY + 0.5 * RoadWidth};
+			return Point2{MidX, Dy > 0.0 ? Area.MaxY - 0.5 * Width : Area.MinY + 0.5 * Width};
 		};
 
 		for (std::size_t RouteIndex = 0; RouteIndex < Routes.size(); ++RouteIndex)
@@ -1563,6 +1598,8 @@ namespace dtg::sim
 			Config.OriginX = City.X;
 			Config.OriginY = City.Y;
 			Config.Style = City.Style;
+			Config.RoadWidth = RoadWidthFor(City.Style);
+			Config.CoastSide = CoastSideOf(City);
 			Config.bHub = City.Style == CityStyle::Hub;
 			Config.bVenues = false;
 			Config.GridSize = City.Grid;

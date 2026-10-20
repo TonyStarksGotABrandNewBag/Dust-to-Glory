@@ -193,6 +193,13 @@ void ADTGWorldBuilder::BuildTownStreets()
 	{
 		const double Base = Map.HeightAt(Block.CenterX(), Block.CenterY());
 		const double Top = Base + KerbM;
+		// A crossroads community has no sidewalk and no kerb: lawn and sand run to the road's edge.
+		const CityInfo* const Town = City.CityAt(Block.CenterX(), Block.CenterY());
+		if (Town != nullptr && Town->Style == CityStyle::Rural)
+		{
+			AddSlab(Meshes[EDTGSurface::Grass], Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Base + 0.05, Grass);
+			continue;
+		}
 		bool bPaved = Block.Width() < 4.0 * WalkM || Block.Depth() < 4.0 * WalkM;
 		for (const BuildingPlan& Building : City.Buildings)
 		{
@@ -533,6 +540,12 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 		int32 Variant = 0;
 		for (const dtg::sim::Rect& Block : Game->Sim().City.Blocks)
 		{
+			// No kerb stones round a crossroads community's blocks: it has no kerbs.
+			const CityInfo* const Town = Game->Sim().City.CityAt(Block.CenterX(), Block.CenterY());
+			if (Town != nullptr && Town->Style == CityStyle::Rural)
+			{
+				continue;
+			}
 			if (!Block.Overlaps(Area))
 			{
 				continue;

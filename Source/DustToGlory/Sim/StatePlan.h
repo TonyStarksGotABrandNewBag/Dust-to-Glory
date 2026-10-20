@@ -97,6 +97,8 @@ namespace dtg::sim
 		bool InsideState(double X, double Y) const;
 		/** Distance to the coastline (metres, world). */
 		double CoastDistance(double X, double Y) const;
+		/** The side of a town that faces the sea (0 south, 1 east, 2 north, 3 west), or -1 when the sea is not at its edge. */
+		int CoastSideOf(const StateCity& City) const;
 		bool IsOcean(double X, double Y) const;
 
 		/**
@@ -198,4 +200,9 @@ namespace dtg::sim
 
 	/** Block pitch used for every city (block + road), so city footprints can be computed before generation. */
 	double CitySpan(int Grid, double BlockSize = 110.0, double RoadWidth = 18.0);
+	/**
+	 * How wide a town's streets are, kerb to kerb, by its style: a crossroads community has two lanes
+	 * and shoulders (10 m), a town twelve, a city or resort strip fourteen, the hub its five lanes (18).
+	 */
+	double RoadWidthFor(CityStyle Style);
 }

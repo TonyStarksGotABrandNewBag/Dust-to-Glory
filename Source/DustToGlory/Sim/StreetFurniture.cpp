@@ -335,6 +335,13 @@ namespace dtg::sim
 				{
 					continue;
 				}
+				// A crossroads community has its trees in its yards and woods (Vegetation plants them),
+				// not a tree every eleven metres along the kerb like a boulevard.
+				const CityInfo* const Town = World.CityAt(Block.CenterX(), Block.CenterY());
+				if (Town != nullptr && Town->Style == CityStyle::Rural)
+				{
+					continue;
+				}
 				// Along each edge on a world grid, inset onto the lawn, clear of the corners.
 				auto Plant = [&](double X, double Y)
 				{

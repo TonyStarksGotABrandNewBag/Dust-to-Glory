@@ -49,7 +49,7 @@ struct FDTGMesh
 		const FLinearColor& Colour, float AlphaAB, float AlphaCD);
 	/** A flat panel with UVs running 0..RepeatU along A-B and 0..RepeatV up B-C: one unit per room, for window glass. */
 	void AddPanel(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
-		const FLinearColor& Colour, double RepeatU, double RepeatV);
+		const FLinearColor& Colour, double RepeatU, double RepeatV, double OffsetU = 0.0, double OffsetV = 0.0);
 	/** One triangle, wound to match the normal given. For fans and gables, where a quad would be half empty. */
 	void AddTri(const FVector& A, const FVector& B, const FVector& C, const FVector& Normal, const FLinearColor& Colour);
 	/** An axis-aligned box between two corners. */

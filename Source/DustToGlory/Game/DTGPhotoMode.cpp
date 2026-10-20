@@ -120,6 +120,14 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 		return;
 	}
 	const double Now = GetWorld()->GetTimeSeconds();
+	// Every frame, not once per shot: something else in the game (an event with a camera of its own, or
+	// the controller settling on its pawn) took the view back at noon and the shot was the player's.
+	if (APlayerController* Controller = GetWorld()->GetFirstPlayerController(); Controller && Controller->GetViewTarget() != this)
+	{
+		UE_LOG(LogDTG, Log, TEXT("Photo mode: the view target had become %s; taking it back."),
+			Controller->GetViewTarget() ? *Controller->GetViewTarget()->GetName() : TEXT("nothing"));
+		Controller->SetViewTarget(this);
+	}
 	if (Now < NextAt)
 	{
 		return;
@@ -134,6 +142,9 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 	}
 	if (!bCaptured)
 	{
+		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s shot from (%.1f, %.1f, %.1f) m facing yaw %.0f; planned (%.1f, %.1f, %.1f) yaw %.0f"), *Shots[Current].Name,
+			GetActorLocation().X / DTGMetresToUnreal, GetActorLocation().Y / DTGMetresToUnreal, GetActorLocation().Z / DTGMetresToUnreal, GetActorRotation().Yaw,
+			Shots[Current].At.X / DTGMetresToUnreal, Shots[Current].At.Y / DTGMetresToUnreal, Shots[Current].At.Z / DTGMetresToUnreal, Shots[Current].Facing.Yaw);
 		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Photos"), Shots[Current].Name + TEXT(".png"));
 		FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI*/ false, /*bAddFilenameSuffix*/ false);
 		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s (%.0f fps)"), *Path, GAverageFPS);
@@ -192,8 +203,9 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 	Frame(Shots[Current]);
 	// A shot that moves the clock gets twice as long: the camera has to re-adapt, the lit windows' shaders
 	// have to compile, and the frame rate logged with it should be the settled one.
+	// A forced weather takes longest: the sky, the fog and the rain all ease towards it.
 	NextAt = Now + (Shots[Current].bWalker && bWalkerFound ? detail_photo::WalkerSettleSeconds
-		: (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0) * detail_photo::Settle());
+		: (Shots[Current].ForceWeather >= 0 ? 3.0 : (Shots[Current].ClockMinutes >= 0.0 ? 2.0 : 1.0)) * detail_photo::Settle());
 }
 
 namespace detail_photo
@@ -233,6 +245,11 @@ void ADTGPhotoMode::Frame(const FDTGPhotoShot& Shot)
 	{
 		auto& Clock = Game->Sim().Clock;
 		Clock.SetTotalMinutes(Clock.Day() * 1440.0 + Shot.ClockMinutes);
+	}
+	if (Shot.ForceWeather >= 0 && Game && Game->IsContentLoaded())
+	{
+		// Held for half an hour of game time: long enough for the shot, gone before the next clock jump.
+		Game->Sim().Weather.Force(static_cast<Weather>(Shot.ForceWeather), Game->Sim().Clock.TotalMinutes(), 30);
 	}
 	FVector At = Shot.At;
 	FRotator Facing = Shot.Facing;
@@ -497,6 +514,32 @@ void ADTGPhotoMode::PlanShots()
 				Shots.Add({TEXT("country-road"), At(X, Y, Map.RoadHeightAt(X, Y) + 1.6), FRotator(2.0, FMath::RadiansToDegrees(Pole.Yaw), 0.0)});
 				bFound = true;
 			}
+		}
+	}
+
+	// The start town itself, from the middle of its main road looking through the crossroads, at noon,
+	// at golden hour, at night and in heavy rain: the vertical slice the look is judged on.
+	for (const CityInfo& Town : City.Cities)
+	{
+		if (!Town.bStart)
+		{
+			continue;
+		}
+		// From the road's shoulder, not its middle, where a car queues on the camera.
+		const double X = Town.Bounds.CenterX() + 4.2;
+		const double Y = Town.Bounds.CenterY() - 70.0;
+		const FVector Eye = At(X, Y, Map.RoadHeightAt(X, Y) + 1.6);
+		const FRotator Look(-2.0, 94.0, 0.0);
+		struct FCondition { const TCHAR* Name; double Minutes; Weather Sky; };
+		const FCondition Conditions[] = {
+			{TEXT("longs-noon"), 12.5 * 60.0, Weather::Clear}, {TEXT("longs-golden"), 18.6 * 60.0, Weather::Clear},
+			{TEXT("longs-night"), 23.0 * 60.0, Weather::Clear}, {TEXT("longs-rain"), 14.0 * 60.0, Weather::Rain}};
+		for (const FCondition& Condition : Conditions)
+		{
+			FDTGPhotoShot Shot{Condition.Name, Eye, Look};
+			Shot.ClockMinutes = Condition.Minutes;
+			Shot.ForceWeather = static_cast<int>(Condition.Sky);
+			Shots.Add(Shot);
 		}
 	}
 

@@ -177,6 +177,8 @@ namespace dtg::sim
 		int GridSize = 8;
 		double BlockSize = 110.0;
 		double RoadWidth = 18.0;
+		/** The side of the town that faces the sea (0 south, 1 east, 2 north, 3 west), or -1 for none. A Beach town stands its towers on that row and nothing taller than a motel behind them. */
+		int CoastSide = -1;
 		double SidewalkWidth = 4.0;
 		std::uint64_t Seed = 1977;
 		std::vector<std::pair<std::string, std::string>> Brands; // id, display name

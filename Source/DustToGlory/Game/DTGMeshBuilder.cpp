@@ -101,14 +101,14 @@ void FDTGMesh::AddQuadAlpha(const FVector& A, const FVector& B, const FVector& C
 }
 
 void FDTGMesh::AddPanel(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal,
-	const FLinearColor& Colour, double RepeatU, double RepeatV)
+	const FLinearColor& Colour, double RepeatU, double RepeatV, double OffsetU, double OffsetV)
 {
 	const int32 Base = Verts.Num();
 	AddQuad(A, B, C, D, Normal, Colour);
-	Uvs[Base] = FVector2D(0.0, 0.0);
-	Uvs[Base + 1] = FVector2D(RepeatU, 0.0);
-	Uvs[Base + 2] = FVector2D(RepeatU, RepeatV);
-	Uvs[Base + 3] = FVector2D(0.0, RepeatV);
+	Uvs[Base] = FVector2D(OffsetU, OffsetV);
+	Uvs[Base + 1] = FVector2D(OffsetU + RepeatU, OffsetV);
+	Uvs[Base + 2] = FVector2D(OffsetU + RepeatU, OffsetV + RepeatV);
+	Uvs[Base + 3] = FVector2D(OffsetU, OffsetV + RepeatV);
 }
 
 void FDTGMesh::AddBox(const FVector& Min, const FVector& Max, const FLinearColor& Colour, bool bSkipBottom)
@@ -405,12 +405,19 @@ namespace DTGMeshBuilder
 				Face.Out, Colour);
 		}
 
-		/** Window glass, with UVs of one unit per room so the material can put a room behind it. */
+		/**
+		 * Window glass, with UVs of one unit per room so the material can put a room behind it. The UVs start
+		 * at a cell of this window's own (its place on the facade), so the material's per-room lottery of lit
+		 * and dark rooms falls differently for every window: with every window at cell (0,0), every window
+		 * in town was lit, or every window dark, at the same moment.
+		 */
 		void FacadeGlass(FDTGMesh& Mesh, const FFacade& Face, double U0, double U1, double Z0, double Z1, double D, const FLinearColor& Colour,
 			double RepeatU, double RepeatV)
 		{
+			const double CellU = FMath::FloorToDouble(U0 / 0.5) + 3.0 * FMath::FloorToDouble(Face.Width / 0.5);
+			const double CellV = FMath::FloorToDouble(Z0 / 0.5);
 			Mesh.AddPanel(OnFacade(Face, U0, Z0, D), OnFacade(Face, U1, Z0, D), OnFacade(Face, U1, Z1, D), OnFacade(Face, U0, Z1, D),
-				Face.Out, Colour, RepeatU, RepeatV);
+				Face.Out, Colour, RepeatU, RepeatV, CellU, CellV);
 		}
 
 		/**

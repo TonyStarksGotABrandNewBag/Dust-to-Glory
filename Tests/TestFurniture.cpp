@@ -235,9 +235,23 @@ DTG_TEST(StreetTreesLineTheLawns)
 	using namespace detail_furniture_test;
 	const GameState& State = dtg_test::LoadedState();
 	const FurnitureRules Rules;
-	const std::vector<Prop> Trees = OfKind(FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 900.0)),
+	// In the hub: the start town is a crossroads community, which has no street trees at all.
+	const CityInfo* Hub = nullptr;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		if (Town.Style == CityStyle::Hub)
+		{
+			Hub = &Town;
+		}
+	}
+	EXPECT_MSG(Hub != nullptr, "no hub city");
+	if (!Hub)
+	{
+		return;
+	}
+	const std::vector<Prop> Trees = OfKind(FurnitureIn(State.Map, State.City, Around(Hub->Bounds.CenterX(), Hub->Bounds.CenterY(), 400.0)),
 		PropKind::StreetTree);
-	EXPECT_MSG(Trees.size() > 20, std::to_string(Trees.size()) + " street trees in the start town");
+	EXPECT_MSG(Trees.size() > 20, std::to_string(Trees.size()) + " street trees in the hub");
 	int AlongX = 0; // trees on a block's north or south edge
 	int AlongY = 0; // on its east or west edge
 	for (const Prop& Tree : Trees)
@@ -417,4 +431,23 @@ DTG_TEST(BarriersOnlyWhereTheDeckIsRaised)
 	}
 	// And the start town, which is on level ground, has none.
 	EXPECT(OfKind(FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 400.0), Rules), PropKind::Barrier).empty());
+}
+
+// A crossroads community has no boulevard: its trees are in its yards, and Vegetation plants those.
+DTG_TEST(CrossroadsTownsHaveNoStreetTrees)
+{
+	using namespace detail_furniture_test;
+	const GameState& State = dtg_test::LoadedState();
+	int Checked = 0;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		if (Town.Style != CityStyle::Rural)
+		{
+			continue;
+		}
+		++Checked;
+		const std::vector<Prop> Trees = OfKind(FurnitureIn(State.Map, State.City, Town.Bounds), PropKind::StreetTree);
+		EXPECT_MSG(Trees.empty(), std::to_string(Trees.size()) + " street trees in " + Town.Name);
+	}
+	EXPECT_MSG(Checked > 0, "no crossroads community to check");
 }

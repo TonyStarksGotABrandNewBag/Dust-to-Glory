@@ -53,6 +53,47 @@ namespace dtg::sim
 		return "plant";
 	}
 
+	/**
+	 * Whether a spot inside a town is a yard that grows: in a crossroads community (Rural style) the
+	 * blocks are wooded lots with a house in a clearing, so anything off the street, in from the pavement
+	 * and a stride from the buildings grows. Every other style keeps its lots clear.
+	 */
+	bool YardAt(const CityPlan& World, const CityInfo& Town, double X, double Y)
+	{
+		if (Town.Style != CityStyle::Rural)
+		{
+			return false;
+		}
+		constexpr double Pavement = 3.0;   // the sidewalk ring, and a little
+		constexpr double Clearing = 3.0;   // round each building
+		bool bInABlock = false;
+		for (const Rect& Block : World.Blocks)
+		{
+			if (X > Block.MinX + Pavement && X < Block.MaxX - Pavement && Y > Block.MinY + Pavement && Y < Block.MaxY - Pavement)
+			{
+				bInABlock = true;
+				break;
+			}
+		}
+		if (!bInABlock)
+		{
+			return false;
+		}
+		for (const BuildingPlan& Building : World.Buildings)
+		{
+			if (Building.Id < Town.FirstBuildingId || Building.Id > Town.LastBuildingId)
+			{
+				continue;
+			}
+			const Rect& Lot = Building.Footprint;
+			if (X > Lot.MinX - Clearing && X < Lot.MaxX + Clearing && Y > Lot.MinY - Clearing && Y < Lot.MaxY + Clearing)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool CanPlantAt(const StatePlan& Map, const CityPlan& World, double X, double Y,
 		const PlantingRules& Rules, SurfaceInfo* OutSurface)
 	{
@@ -99,7 +140,7 @@ namespace dtg::sim
 						break;
 					}
 				}
-				if (!bPark)
+				if (!bPark && !YardAt(World, *Town, X, Y))
 				{
 					return false;
 				}
@@ -155,6 +196,13 @@ namespace dtg::sim
 				if (!CanPlantAt(Map, World, X, Y, Rules, &Info))
 				{
 					continue;
+				}
+				// A yard in a crossroads community is a wooded lot whatever the fields outside are doing: the
+				// stand noise that leaves farmland open would leave the lots bare, and a house in Longs stands
+				// in pines. Half the cells, which at this spacing is woods with room to walk through.
+				if (const CityInfo* Town = World.CityAt(X, Y); Town != nullptr && Town->Style == CityStyle::Rural)
+				{
+					Density = std::max(Density, 0.5);
 				}
 				// Thin out as the ground steepens, and stop at the tree line.
 				const double Slope = std::fabs(Map.SurfaceAt(X + 4.0, Y).GroundM - Info.GroundM) / 4.0 +

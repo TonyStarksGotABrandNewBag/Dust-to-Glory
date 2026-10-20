@@ -11,6 +11,7 @@
 #include "Engine/GameInstance.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -145,7 +146,10 @@ void ADTGSky::BeginPlay()
 	if (UMaterialInterface* CloudMaterial = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr,
 			TEXT("/Engine/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.m_SimpleVolumetricCloud_Inst"))))
 	{
-		Clouds->SetMaterial(CloudMaterial);
+		// Instanced, so the weather can shut the sky: the engine's cloud material has a global coverage
+		// (-0.2 is scattered fair-weather cloud, 0.6 an overcast) and a storm look.
+		CloudLook = UMaterialInstanceDynamic::Create(CloudMaterial, this);
+		Clouds->SetMaterial(CloudLook ? static_cast<UMaterialInterface*>(CloudLook) : CloudMaterial);
 	}
 	else
 	{
@@ -271,6 +275,8 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 	// its aerial perspective, and the 0.015 this used to be washed every long view out to grey.
 	float TargetDensity = 0.004f;
 	float TargetBrightness = 1.0f;
+	float TargetCover = -0.2f;
+	float TargetStorm = 0.0f;
 	double TargetVisibility = 6000.0;
 	FLinearColor FogColour(0.45f, 0.52f, 0.6f);
 	switch (Value)
@@ -279,29 +285,36 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 		break;
 	case Weather::PartlyCloudy:
 		TargetBrightness = 0.85f;
+		TargetCover = 0.05f;
 		TargetVisibility = 5000.0;
 		break;
 	case Weather::Overcast:
 		TargetDensity = 0.012f;
 		TargetBrightness = 0.2f;
+		TargetCover = 0.5f;
 		TargetVisibility = 3000.0;
 		FogColour = FLinearColor(0.42f, 0.44f, 0.47f);
 		break;
 	case Weather::Rain:
 		TargetDensity = 0.025f;
 		TargetBrightness = 0.12f;
+		TargetCover = 0.55f;
+		TargetStorm = 0.4f;
 		TargetVisibility = 1400.0;
 		FogColour = FLinearColor(0.36f, 0.39f, 0.43f);
 		break;
 	case Weather::Storm:
 		TargetDensity = 0.045f;
 		TargetBrightness = 0.06f;
+		TargetCover = 0.65f;
+		TargetStorm = 1.0f;
 		TargetVisibility = 700.0;
 		FogColour = FLinearColor(0.25f, 0.27f, 0.31f);
 		break;
 	case Weather::Fog:
 		TargetDensity = 0.16f;
 		TargetBrightness = 0.35f;
+		TargetCover = 0.35f;
 		TargetVisibility = 220.0;
 		FogColour = FLinearColor(0.62f, 0.64f, 0.66f);
 		break;
@@ -314,4 +327,12 @@ void ADTGSky::ApplyWeather(Weather Value, float DeltaSeconds)
 	Visibility = FMath::FInterpTo(Visibility, TargetVisibility, static_cast<double>(DeltaSeconds), 0.35);
 	Fog->SetFogDensity(FogDensity);
 	Fog->SetFogInscatteringColor(FogColour * FogLuminance);
+	// The sky shuts over as slowly as the fog arrives, and the rain falls out of cloud, not out of blue.
+	CloudCover = FMath::FInterpTo(CloudCover, TargetCover, DeltaSeconds, 0.35f);
+	StormCloud = FMath::FInterpTo(StormCloud, TargetStorm, DeltaSeconds, 0.35f);
+	if (CloudLook)
+	{
+		CloudLook->SetScalarParameterValue(TEXT("Cloud_GlobalCoverage"), CloudCover);
+		CloudLook->SetScalarParameterValue(TEXT("StormClouds"), StormCloud);
+	}
 }

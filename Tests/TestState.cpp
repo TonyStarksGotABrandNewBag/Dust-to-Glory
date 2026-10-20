@@ -660,3 +660,116 @@ DTG_TEST(StateLoadsFastEnoughToStartPlaying)
 			" ms to become playable");
 	}
 }
+
+// A crossroads community's streets are two lanes with shoulders; the hub's are five lanes wide.
+DTG_TEST(RoadWidthFollowsTheTownsStyle)
+{
+	const GameState& State = dtg_test::LoadedState();
+	auto WidthIn = [&](const std::string& Name) -> double
+	{
+		for (const CityInfo& Town : State.City.Cities)
+		{
+			if (Town.Name != Name)
+			{
+				continue;
+			}
+			for (const RoadPlan& Road : State.City.Roads)
+			{
+				if (Town.Bounds.Contains(Road.Area.CenterX(), Road.Area.CenterY()))
+				{
+					return Road.bHorizontal ? Road.Area.Depth() : Road.Area.Width();
+				}
+			}
+		}
+		return -1.0;
+	};
+	EXPECT_MSG(std::fabs(WidthIn("Longs") - 10.0) < 0.01, "Longs' streets are " + std::to_string(WidthIn("Longs")) + " m wide, not 10");
+	EXPECT_MSG(std::fabs(WidthIn("Myrtle Beach") - 18.0) < 0.01, "Myrtle Beach's streets are " + std::to_string(WidthIn("Myrtle Beach")) + " m wide, not 18");
+}
+
+// A resort strip stands its towers on the oceanfront row and nothing tall behind them, and a
+// crossroads community has nothing above two floors: what Longs sees of North Myrtle Beach.
+DTG_TEST(BeachTowersStandOnTheOceanfrontOnly)
+{
+	const GameState& State = dtg_test::LoadedState();
+	int Towers = 0;
+	int OffTheFront = 0;
+	int TallInTheCountry = 0;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		const StateCity* Place = nullptr;
+		for (const StateCity& Candidate : State.Map.Cities)
+		{
+			if (Candidate.Name == Town.Name)
+			{
+				Place = &Candidate;
+			}
+		}
+		const int Side = Place ? State.Map.CoastSideOf(*Place) : -1;
+		for (const BuildingPlan& Building : State.City.Buildings)
+		{
+			if (Building.Id < Town.FirstBuildingId || Building.Id > Town.LastBuildingId)
+			{
+				continue;
+			}
+			if (Town.Style == CityStyle::Rural && Building.Floors > 2)
+			{
+				++TallInTheCountry;
+			}
+			if (Town.Style != CityStyle::Beach || Building.Floors <= 4)
+			{
+				continue;
+			}
+			++Towers;
+			// One row of blocks in from the town's edge, outer road included.
+			constexpr double Front = 140.0;
+			const Rect& Lot = Building.Footprint;
+			const bool bOnFront = (Side == 0 && Lot.MinY < Town.Bounds.MinY + Front) || (Side == 2 && Lot.MaxY > Town.Bounds.MaxY - Front)
+				|| (Side == 1 && Lot.MaxX > Town.Bounds.MaxX - Front) || (Side == 3 && Lot.MinX < Town.Bounds.MinX + Front);
+			if (!bOnFront)
+			{
+				++OffTheFront;
+			}
+		}
+	}
+	EXPECT_MSG(Towers > 0, "no beach towers at all");
+	EXPECT_MSG(OffTheFront == 0, std::to_string(OffTheFront) + " of " + std::to_string(Towers) + " beach towers stand away from the sea");
+	EXPECT_MSG(TallInTheCountry == 0, std::to_string(TallInTheCountry) + " buildings in crossroads communities are above two floors");
+}
+
+// A crossroads community's buildings are buildings on lots, single-storey bar the church, and never
+// the lot-sized boxes the hub's downtown fills its lots with.
+DTG_TEST(CrossroadsBuildingsAreSmall)
+{
+	const GameState& State = dtg_test::LoadedState();
+	int Checked = 0;
+	int TooBig = 0;
+	int TooTall = 0;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		if (Town.Style != CityStyle::Rural)
+		{
+			continue;
+		}
+		for (const BuildingPlan& Building : State.City.Buildings)
+		{
+			if (Building.Id < Town.FirstBuildingId || Building.Id > Town.LastBuildingId)
+			{
+				continue;
+			}
+			++Checked;
+			const Rect& Lot = Building.Footprint;
+			if (std::max(Lot.Width(), Lot.Depth()) > 26.01)
+			{
+				++TooBig;
+			}
+			if (Building.Floors > (Building.Role == LotRole::Church ? 2 : 1))
+			{
+				++TooTall;
+			}
+		}
+	}
+	EXPECT_MSG(Checked > 0, "no crossroads buildings to check");
+	EXPECT_MSG(TooBig == 0, std::to_string(TooBig) + " of " + std::to_string(Checked) + " crossroads buildings are over 26 m long");
+	EXPECT_MSG(TooTall == 0, std::to_string(TooTall) + " crossroads buildings are taller than a storey");
+}

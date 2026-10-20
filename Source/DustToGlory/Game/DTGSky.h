@@ -21,6 +21,7 @@ class UPostProcessComponent;
 class USkyAtmosphereComponent;
 class USkyLightComponent;
 class UVolumetricCloudComponent;
+class UMaterialInstanceDynamic;
 
 UCLASS()
 class DUSTTOGLORY_API ADTGSky : public AActor
@@ -71,6 +72,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<UVolumetricCloudComponent> Clouds;
 
+	/** The cloud material, instanced so the weather can close the sky over: coverage and storm. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> CloudLook;
+
 	/** The look: colour grade, lens, motion blur and Lumen quality, applied everywhere. */
 	UPROPERTY()
 	TObjectPtr<UPostProcessComponent> Grade;
@@ -94,6 +99,8 @@ private:
 	bool bSunSettled = false;      // false until the first frame has set it from the clock
 	float Brightness = 1.0f;       // the weather's fraction of a clear sky's sun
 	float FogDensity = 0.004f;
+	float CloudCover = -0.2f;      // the cloud material's global coverage: -0.2 is a fair-weather sky, 0.6 shut
+	float StormCloud = 0.0f;       // its storm look, 0 to 1
 	float FogLuminance = 3000.3f;  // what the fog scatters: the sky's brightness, nits
 	FRotator SunStep = FRotator(9999.0, 0.0, 0.0);   // where the sun was last turned to; pitch 9999 = never
 	FRotator MoonStep = FRotator(9999.0, 0.0, 0.0);

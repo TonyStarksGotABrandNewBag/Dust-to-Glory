@@ -659,7 +659,7 @@ namespace dtg::sim
 		// Parks: a few blocks of open green space away from downtown and the motor mile.
 		const double Center = 0.5 * (Grid - 1);
 		const CityStyle Style = Config.Style;
-		auto ZoneOf = [Center, Style](int I, int J)
+		auto ZoneOf = [Center, Style, Grid, CoastSide = Config.CoastSide](int I, int J)
 		{
 			const double Distance = std::max(std::fabs(I - Center), std::fabs(J - Center));
 			switch (Style)
@@ -667,6 +667,14 @@ namespace dtg::sim
 			case CityStyle::Rural: return Zone::Outer;
 			case CityStyle::Town: return Distance <= 0.7 ? Zone::Mid : Zone::Outer;
 			case CityStyle::City: return Distance <= 0.5 ? Zone::Downtown : (Distance <= 1.5 ? Zone::Mid : Zone::Outer);
+			case CityStyle::Beach:
+			{
+				// A resort strip: condominium towers on the oceanfront row, motels on the row behind, and
+				// one- and two-storey shops and houses everywhere else. A beach town with no sea beside it
+				// (the data says where the coast is) gets no towers at all.
+				const int Row = CoastSide == 0 ? J : (CoastSide == 2 ? Grid - 1 - J : (CoastSide == 1 ? Grid - 1 - I : (CoastSide == 3 ? I : -1)));
+				return Row == 0 ? Zone::Downtown : (Row == 1 ? Zone::Mid : Zone::Outer);
+			}
 			default: break;
 			}
 			if (Distance <= 1.0) return Zone::Downtown;
@@ -781,19 +789,39 @@ namespace dtg::sim
 					Area.MinY = Area.MaxY - Depth;
 				}
 			}
+			else if (Config.Style == CityStyle::Rural)
+			{
+				// A crossroads community's store, church or diner is a building on a lot, not a lot-sized
+				// building: up to 26 by 18 metres, set toward the street, with the rest of the lot its yard.
+				const double Width = std::min(Area.Width(), Random.Range(16.0, 26.0));
+				const double Depth = std::min(Area.Depth(), Random.Range(12.0, 18.0));
+				const double Cx = Area.CenterX();
+				Area.MinX = Cx - 0.5 * Width;
+				Area.MaxX = Cx + 0.5 * Width;
+				if (Where.SubB == 0)
+				{
+					Area.MaxY = Area.MinY + Depth;
+				}
+				else
+				{
+					Area.MinY = Area.MaxY - Depth;
+				}
+			}
 			Building.Footprint = Area;
 
 			int Floors = 1;
 			switch (Where.Where)
 			{
-			case Zone::Downtown: Floors = Random.RangeInt(6, 22); break;
-			case Zone::Mid: Floors = Random.RangeInt(2, 6); break;
+			case Zone::Downtown: Floors = Config.Style == CityStyle::Beach ? Random.RangeInt(6, 14) : Random.RangeInt(6, 22); break;
+			case Zone::Mid: Floors = Config.Style == CityStyle::Beach ? Random.RangeInt(2, 4) : Random.RangeInt(2, 6); break;
 			case Zone::Outer: Floors = Random.RangeInt(1, 2); break;
 			}
 			if (Role == LotRole::Home) Floors = Random.RangeInt(1, 2);
 			if (Role == LotRole::Dealership || Role == LotRole::ModShop || Role == LotRole::GardenCenter || Role == LotRole::FurnitureStore) Floors = 1;
 			if (Role == LotRole::Stadium || Role == LotRole::TrackField || Role == LotRole::PowerPlant) Floors = 3;
 			if (Role == LotRole::Church) Floors = 2;
+			// Single-storey in a crossroads community, bar the church with its roof.
+			if (Config.Style == CityStyle::Rural && Role != LotRole::Church) Floors = 1;
 			Building.Floors = Floors;
 			Building.HeightM = Floors * 3.6 + 1.0;
 

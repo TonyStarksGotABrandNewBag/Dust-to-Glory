@@ -20,6 +20,7 @@
 #include "Game/DTGCharacter.h"
 #include "Game/DTGInterior.h"
 #include "Game/DTGMeshBuilder.h"
+#include "Game/DTGSurface.h"
 #include "Game/DTGSky.h"
 #include "Game/DTGWeatherAudio.h"
 
@@ -138,11 +139,13 @@ void ADTGWeatherFx::BuildLayer(int32 Index, double Scale, const FLinearColor& Co
 	FRandomStream Stream(7717 + Index * 31);
 	const double WidthUu = CellWidthM * DTGMetresToUnreal;
 	const double HeightUu = CellHeightM * DTGMetresToUnreal;
-	const double LengthUu = (0.9 + 0.5 * Scale) * DTGMetresToUnreal * Scale;
-	const double ThickUu = 1.1 * DTGMetresToUnreal * 0.012 * Scale;
+	// A streak is a drop's fall over a frame: half a metre or so and under a centimetre across. They were
+	// a metre and a half and over a centimetre, which read as rods rather than rain.
+	const double LengthUu = (0.35 + 0.25 * Scale) * DTGMetresToUnreal * Scale;
+	const double ThickUu = 0.8 * DTGMetresToUnreal * 0.0075 * Scale;
 
 	FDTGMesh Mesh;
-	const int32 Count = FMath::Max(1, FMath::RoundToInt32(static_cast<float>(StreaksPerLayer) * static_cast<float>(Scale)));
+	const int32 Count = FMath::Max(1, FMath::RoundToInt32(1.6f * static_cast<float>(StreaksPerLayer) * static_cast<float>(Scale)));
 	for (int32 Streak = 0; Streak < Count; ++Streak)
 	{
 		// Uniform through the cell: the wrap below is only invisible because the distribution is.
@@ -159,7 +162,10 @@ void ADTGWeatherFx::BuildLayer(int32 Index, double Scale, const FLinearColor& Co
 	}
 	StreakLayers[Index]->CreateMeshSection_LinearColor(0, Mesh.Verts, Mesh.Tris, Mesh.Normals, Mesh.Uvs, Mesh.Colors,
 		Mesh.Tangents, /*bCreateCollision*/ false);
-	if (UMaterialInterface* Material = DTGMeshBuilder::VertexColorMaterial())
+	// Lit, not unlit: an unlit streak is a fixed brightness whatever the camera is metering, which is
+	// black at noon and blazing white at night now that the exposure is physical. Lit, rain is pale by
+	// day and shows at night only where the lamps catch it, which is what rain does.
+	if (UMaterialInterface* Material = DTGSurface::Material(EDTGSurface::Matte))
 	{
 		StreakLayers[Index]->SetMaterial(0, Material);
 	}

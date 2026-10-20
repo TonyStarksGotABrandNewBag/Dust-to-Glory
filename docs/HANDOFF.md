@@ -179,7 +179,9 @@ cloning.
   street's population, so a profile can say what the crowd costs by running without one;
   `-ExecCmds="r.NGX.DLSS.Enable 0,r.ScreenPercentage 100"` shoots at native resolution;
   `-DTGSettle=15` holds each view longer first, so a profile is of the view and not of the chunks still
-  streaming in after the camera jumped.
+  streaming in after the camera jumped. The acceptance views of the start town are `longs-noon`,
+  `longs-golden`, `longs-night` and `longs-rain` (same eye, the clock and the weather forced per shot:
+  `FDTGPhotoShot::ForceWeather`); `-DTGPhotoShots=longs-noon,longs-golden,longs-night,longs-rain`.
   `Tools/Art/inventory_assets.py` (headless) writes `Saved/inventory.txt`: every mesh with its Nanite
   flag and triangle count, every material with its master, every texture with its size. The 20 October
   audit in docs/REALISM.md was built from these.

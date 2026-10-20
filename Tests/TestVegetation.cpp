@@ -161,6 +161,16 @@ DTG_TEST(VegetationKeepsOffTheRoadAndOutOfTown)
 				{
 					continue;
 				}
+				if (Town->Style == CityStyle::Rural)
+				{
+					// A crossroads community's yards are wooded (CrossroadsLotsAreWooded holds them to the
+					// lots); here only its streets count.
+					if (State.Map.SurfaceAt(Value.X, Value.Y).RoadNearness > 0.0)
+					{
+						++OnRoad;
+					}
+					continue;
+				}
 				bool bPark = false;
 				for (const Rect& Park : State.City.Parks)
 				{
@@ -258,4 +268,71 @@ DTG_TEST(VegetationForAChunkIsAffordable)
 		Around(State.City.SpawnX, State.City.SpawnY, 4000.0), Tight);
 	EXPECT_MSG(Capped.size() <= 50, "the planting limit was ignored: " +
 		std::to_string(Capped.size()) + " plants");
+}
+
+// A crossroads community is houses in the woods: its lots grow trees, off the street and clear of
+// the buildings, while a proper town keeps its lots clear.
+DTG_TEST(CrossroadsLotsAreWooded)
+{
+	const GameState& State = dtg_test::LoadedState();
+	int Rural = 0;
+	int InYards = 0;
+	int OnRoads = 0;
+	int InBuildings = 0;
+	int InTownLots = 0;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		Rural += Town.Style == CityStyle::Rural ? 1 : 0;
+		int InThisTown = 0;
+		for (const Plant& Value : PlantsIn(State.Map, State.City, Town.Bounds))
+		{
+			const CityInfo* Where = State.City.CityAt(Value.X, Value.Y);
+			if (Where == nullptr || Where->Name != Town.Name)
+			{
+				continue;
+			}
+			bool bPark = false;
+			for (const Rect& Park : State.City.Parks)
+			{
+				bPark = bPark || Park.Contains(Value.X, Value.Y);
+			}
+			if (bPark)
+			{
+				continue;
+			}
+			if (Town.Style != CityStyle::Rural)
+			{
+				++InTownLots;
+				continue;
+			}
+			++InYards;
+			++InThisTown;
+			if (State.Map.SurfaceAt(Value.X, Value.Y).RoadNearness > 0.0)
+			{
+				++OnRoads;
+			}
+			for (const BuildingPlan& Building : State.City.Buildings)
+			{
+				if (Building.Id < Town.FirstBuildingId || Building.Id > Town.LastBuildingId)
+				{
+					continue;
+				}
+				const Rect& Lot = Building.Footprint;
+				if (Value.X > Lot.MinX - 2.9 && Value.X < Lot.MaxX + 2.9 && Value.Y > Lot.MinY - 2.9 && Value.Y < Lot.MaxY + 2.9)
+				{
+					++InBuildings;
+				}
+			}
+		}
+		// Wooded, not a tree or two: without the density floor Longs had 53 trees in its yards, with it 205.
+		if (Town.Style == CityStyle::Rural)
+		{
+			EXPECT_MSG(InThisTown >= 150, std::to_string(InThisTown) + " trees in the yards of " + Town.Name + ": not wooded");
+		}
+	}
+	EXPECT_MSG(Rural > 0, "no crossroads community to check");
+	EXPECT_MSG(InYards > 8, std::to_string(InYards) + " trees in crossroads yards: the lots are bare");
+	EXPECT_MSG(OnRoads == 0, std::to_string(OnRoads) + " yard trees stand on a street");
+	EXPECT_MSG(InBuildings == 0, std::to_string(InBuildings) + " yard trees stand in or against a building");
+	EXPECT_MSG(InTownLots == 0, std::to_string(InTownLots) + " trees on the lots of towns that keep them clear");
 }

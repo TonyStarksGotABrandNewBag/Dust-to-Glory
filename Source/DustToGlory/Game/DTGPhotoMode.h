@@ -22,6 +22,8 @@ struct FDTGPhotoShot
 	FRotator Facing = FRotator::ZeroRotator;
 	/** Minutes past midnight to set the game clock to first, or -1 to leave it. */
 	double ClockMinutes = -1.0;
+	/** A dtg::sim::Weather to force for the shot, or -1 to take what comes. */
+	int ForceWeather = -1;
 	/** Show the player, hidden for every other shot, because this one is of them. */
 	bool bShowPlayer = false;
 	/** Aimed at the nearest person out on the street when the shot comes up (the player, when nobody is), not where the tour was planned. */

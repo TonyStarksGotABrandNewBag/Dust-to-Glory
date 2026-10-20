@@ -193,6 +193,97 @@ Still missing:
   in the chassis simulation is the likely answer. Not verified: what happens to a pedestrian a moving car
   drives into now that the body blocks them (the character's own depenetration decides).
 
+## World-generation audit: why Longs did not look like Longs, 20 October
+
+Kenny's second brief: the environment looked generated and not like South Carolina; audit the generator
+before touching anything, name the files and rules, then the smallest set of changes. Every cause below
+is in the code, not in the assets.
+
+**Towers in a rural community.** Longs is defined right: `Content/Data/state.json` makes it `Rural`, grid
+2, and `CityLayout.cpp`'s `ZoneOf` gives Rural every block as `Outer`, one or two floors. The towers in
+its views belong to North Myrtle Beach and Myrtle Beach: the state is real geography compressed 25:1
+(`"scale": 25`), which puts North Myrtle Beach 560 m from Longs and Myrtle Beach 1.2 km, inside the
+900 m chunk radius and on every horizon, and the `Beach` style's zone rule made every inner block of a
+resort town `Downtown`, which is 6 to 22 floors. Photo mode's `downtown` view then aimed at the nearest
+tower, which was never in Longs. Fixed in the rule: a Beach town stands towers (6 to 14 floors, condominiums)
+on its oceanfront row only, motels (2 to 4) on the row behind, one and two storeys everywhere else; the
+state plan tells each town which side the sea is on (`StatePlan::CoastSideOf`, `CityConfig::CoastSide`).
+`BeachTowersStandOnTheOceanfrontOnly` holds it, and fails when the rule is widened to every row.
+
+**Buildings repeat.** `BuildingPlan` carries a role, a footprint, floors and one colour; `DTGMeshBuilder`
+has one facade generator with one window module laid out in regular rows (`AddWindowRow`), a wall
+colour from a small palette per role (`WallColourFor`) and a few dressings. Nothing in the plan says
+era, builder or type, so two houses differ only in colour and size. Not changed here: it is the facades
+brief (conway-facades), which also needs the Beach towers to read as condominiums rather than offices.
+
+**Flat, featureless ground.** The coastal plain is flat (Longs is 10 m above the sea), and the state's
+`verticalScale` of 3 cannot make it otherwise; the featurelessness is the terrain chunk's one lawn
+material (`M_DTG_Terrain`) with no ground-cover change, ditches or shoulders along the roads. Not
+changed here: the roads-ground brief.
+
+**Roads five lanes wide.** One `RoadWidth` of 18 m served every town (`StatePlan.cpp`, `CityConfig`),
+with 4 m sidewalks, so a crossroads community's street was the hub's. Now `RoadWidthFor(CityStyle)`: a
+crossroads community 10 m (two lanes and shoulders), a town 12, a city or resort strip 14, the hub 18;
+the town's span, its highway gates and its layout all take it. `RoadWidthFollowsTheTownsStyle` holds
+it. No markings are drawn anywhere yet (the marking plan exists; roads-ground brief).
+
+**Trees oversized, repetitive, in the way.** The plant heights are right (pines 13 to 27 m, live oaks 8
+to 16, `Vegetation.cpp`) but the models are not those sizes: `DTGPlantModels::TransformFor` scales a
+model to the plant's height, and the Poly Haven pine scan is 8.6 m tall, so it is drawn at two to three
+times its size with bark and needles to match; the Jacaranda and SmallTree scans stand in for live oak
+with low wide crowns that, at 8 to 16 m, reach over the road; the Megascans Alexandra palm shrub stands
+in for the 6 to 13 m cabbage palm at three times its size. And every town had a boulevard: a street
+tree every 11 m along every block with a lawn (`StreetFurniture.cpp`, `TreeSpacingM`), 3.3 m in from the
+kerb, with crowns over the carriageway and in front of the facades, while `Vegetation` kept out of
+every town except its parks (`bAvoidTowns`), so no yard had a tree and no lot was wooded. Changed: a
+crossroads community has no street trees (`CrossroadsTownsHaveNoStreetTrees`) and its lots are wooded
+instead, at a third of the forest's density, off the pavement and three metres clear of every building
+(`YardAt`, `CrossroadsLotsAreWooded`); both mutation-tested. Not changed: the model sizes, which need
+pine, live oak and palm models of their true height (the sc-setting brief).
+
+**No property boundaries.** Lots are implicit (a footprint and a setback); there are no driveways,
+fences, mailboxes or a lawn-to-woods edge, and the sidewalk ring goes round every block of every style.
+Not changed here (roads-ground and sc-setting briefs).
+
+**Beyond the chunk radius there is nothing**: 900 m out, the ground is the lawn-coloured sea slab and no
+tree stands, which is why every long view ends in a bare horizon. Not changed here (the static-chunks
+brief is where a far ring belongs).
+
+**What was changed, the smallest set that moves Longs:** towers only on a resort town's oceanfront;
+streets by style (10 m in Longs); no street trees and wooded yards in crossroads communities (Longs went
+from 53 yard trees to 205 with the density floor); crossroads buildings single-storey and at most 26 m
+long; crossroads blocks lawn to the road's edge, no sidewalk ring, no kerb stones; every window its own
+lit lottery (the material always had one, but every window sat in the same cell, so a whole town lit or
+went dark together); rain as lit streaks half a metre long (unlit, they were black at noon and white at
+night under the physical exposure); the engine cloud material's coverage and storm look driven by the
+weather, so rain falls out of an overcast and not out of blue; four acceptance views of the start town
+from one eye on the road's shoulder (`longs-noon`, `longs-golden`, `longs-night`, `longs-rain`, the
+clock and weather forced per shot), and photo mode holds its view target every frame, because at noon
+something in the game took it back and the shot was the player's. Seven rules, seven mutations, each
+failing exactly its test (`BeachTowersStandOnTheOceanfrontOnly`, `RoadWidthFollowsTheTownsStyle`,
+`CrossroadsTownsHaveNoStreetTrees`, `CrossroadsLotsAreWooded` twice, `CrossroadsBuildingsAreSmall`).
+
+**Measured** (same eye, 1600x900, DLSS quality): longs-noon 22-24 ms GPU (28-43 fps as the yard
+trees came in), longs-golden 23, longs-night 24-26, longs-rain 24; the street view 20-24 ms. The yard
+trees cost about 2 ms on the Longs views. The noon view was wrong twice over before it was right: at the planned eye and yaw, the frame was the player's own
+camera at the spawn house, because the player controller had taken the view target back (`the view
+target had become DTGPlayerController_0` in the log); photo mode now re-asserts it every frame.
+
+**What the four pictures say, against a Longs photograph:** the road is two lanes with grass to its
+edge and nothing but pines and live oaks over the yards; the buildings are single-storey on their
+lots; the towers on the horizon are North Myrtle Beach's oceanfront, 560 m off at this scale; golden
+hour has long shadows across the road; night has one lamp at the crossroads, a few lit windows per
+house and a moonlit sky; rain falls out of a grey sky onto a wet road. What still says generated: the
+houses are the same house (one facade module, shutters or not, one roof), the road has no centre line,
+no shoulder and no ditch, the trees are scans scaled to size, the lawn is one green, there are no
+driveways, fences, mailboxes or power lines on the lots, and the horizon beyond 900 m is bare.
+
+**Not done from the brief:** real road layouts, land cover and elevation for Longs (OpenStreetMap,
+NLCD and 3DEP are the licensed sources; nothing fetched yet); the architecture, road and terrain
+work above; a 500 m slice measured at native resolution (the four views were shot with DLSS; the
+earlier audit's native numbers stand for the street). No new assets, purchases or licences.
+
+
 ## Visual fidelity audit, 20 October
 
 Kenny's brief: investigate before guessing, then the smallest high-impact set, validated on identical
