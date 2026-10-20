@@ -162,6 +162,48 @@ void ADTGPhotoMode::PlanShots()
 		Shots.Add({TEXT("street"), Eye, FRotator(-2.0, Street->bHorizontal ? 0.0 : 90.0, 0.0)});
 	}
 
+	// A house and a downtown tower, each from in front of its door: the nearest of each to the start.
+	auto Frontage = [&](const BuildingPlan& Building, double AwayM, double SideM, double EyeM, double LookAtM, const TCHAR* Name)
+	{
+		static const double OutX[] = {0.0, 1.0, 0.0, -1.0};
+		static const double OutY[] = {-1.0, 0.0, 1.0, 0.0};
+		const int32 Side = FMath::Clamp(Building.DoorSide, 0, 3);
+		const double Cx = Building.Footprint.CenterX();
+		const double Cy = Building.Footprint.CenterY();
+		const double Ex = Building.DoorX + OutX[Side] * AwayM - OutY[Side] * SideM;
+		const double Ey = Building.DoorY + OutY[Side] * AwayM + OutX[Side] * SideM;
+		const FVector Eye = At(Ex, Ey, Ground(Ex, Ey) + EyeM);
+		Shots.Add({Name, Eye, detail_photo::Looking(Eye, At(Cx, Cy, Ground(Cx, Cy) + LookAtM))});
+	};
+	const BuildingPlan* House = nullptr;
+	const BuildingPlan* Tower = nullptr;
+	double HouseBest = 1e18;
+	double TowerBest = 1e18;
+	for (const BuildingPlan& Building : City.Buildings)
+	{
+		const double Dx = Building.Footprint.CenterX() - SpawnX;
+		const double Dy = Building.Footprint.CenterY() - SpawnY;
+		const double Distance = Dx * Dx + Dy * Dy;
+		if (Building.Role == LotRole::Home && Distance < HouseBest)
+		{
+			HouseBest = Distance;
+			House = &Building;
+		}
+		if (Building.bDowntown && Building.Floors >= 5 && Distance < TowerBest)
+		{
+			TowerBest = Distance;
+			Tower = &Building;
+		}
+	}
+	if (House)
+	{
+		Frontage(*House, 13.0, 5.0, 1.7, 2.5, TEXT("house"));
+	}
+	if (Tower)
+	{
+		Frontage(*Tower, 45.0, 12.0, 1.8, 18.0, TEXT("downtown"));
+	}
+
 	// The town from above, looking across it.
 	{
 		const FVector Target = At(SpawnX, SpawnY, Ground(SpawnX, SpawnY));

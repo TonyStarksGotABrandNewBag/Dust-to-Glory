@@ -57,8 +57,11 @@ struct FDTGMesh
 	 */
 	void AddWheel(const FVector& Centre, double RadiusUu, double WidthUu, const FLinearColor& Tyre, const FLinearColor& Rim, int32 Sides = 14,
 		FDTGMesh* RimOut = nullptr);
-	/** A simple pitched roof over a rectangle. */
-	void AddRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour);
+	/**
+	 * A simple pitched roof over a rectangle, ridge along the long axis. Without its gable ends when the
+	 * caller builds those itself, in the wall, where a real house has them.
+	 */
+	void AddRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour, bool bGableEnds = true);
 };
 
 /** Geometry sorted by what it is made of: one mesh per surface kind, each drawn with its own material. */
