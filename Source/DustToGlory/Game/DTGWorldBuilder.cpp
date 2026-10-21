@@ -1,5 +1,6 @@
 #include "Game/DTGWorldBuilder.h"
 
+#include "Sim/LandCover.h"
 #include "Sim/Lots.h"
 #include "Sim/RoadMarkings.h"
 #include "Sim/StreetFurniture.h"
@@ -75,10 +76,31 @@ namespace detail_worldbuilder
 			{
 				Asphalt.AddQuad(Point(Along, PrevLo, Z), Point(Along, PrevHi, Z), Point(Next, NextHi, Z), Point(Next, NextLo, Z), FVector::UpVector, AsphaltColour);
 			}
-			// The shoulder is the ground itself, coloured sand by the chunk (BuildChunk), not a strip laid on it:
-			// a strip in any one surface read as a painted band from above.
-			(void)Shoulder;
-			(void)SandColour;
+			// The shoulder: a stride of sand and gravel out from the asphalt's edge, its outer edge wandering
+			// with the ground's noise, laid just under the asphalt's lip so the asphalt stands proud of it as
+			// it does. A band of sand-coloured terrain vertices did this before, and from above it stepped
+			// along the metre grid.
+			auto Outer = [&](double A, double Side)
+			{
+				const double Wave = 0.5 + 0.5 * Map.Noise(Road.bHorizontal ? A : Side, Road.bHorizontal ? Side : A, 4.0);
+				const double Wide = 0.5 + 0.7 * Wave;
+				return Side < 0.5 * (Lo + Hi) ? Lo - Wide : Hi + Wide;
+			};
+			const double Lip = Z - 0.02;
+			for (double At = Along; At < Next - 1e-6; At += 1.0)
+			{
+				const double Stop = FMath::Min(Next, At + 1.0);
+				if (Road.bHorizontal)
+				{
+					Shoulder.AddQuad(Point(At, Outer(At, Lo), Lip), Point(Stop, Outer(Stop, Lo), Lip), Point(Stop, Edge(Stop, Lo), Lip), Point(At, Edge(At, Lo), Lip), FVector::UpVector, SandColour);
+					Shoulder.AddQuad(Point(At, Edge(At, Hi), Lip), Point(Stop, Edge(Stop, Hi), Lip), Point(Stop, Outer(Stop, Hi), Lip), Point(At, Outer(At, Hi), Lip), FVector::UpVector, SandColour);
+				}
+				else
+				{
+					Shoulder.AddQuad(Point(At, Outer(At, Lo), Lip), Point(At, Edge(At, Lo), Lip), Point(Stop, Edge(Stop, Lo), Lip), Point(Stop, Outer(Stop, Lo), Lip), FVector::UpVector, SandColour);
+					Shoulder.AddQuad(Point(At, Edge(At, Hi), Lip), Point(At, Outer(At, Hi), Lip), Point(Stop, Outer(Stop, Hi), Lip), Point(Stop, Edge(Stop, Hi), Lip), FVector::UpVector, SandColour);
+				}
+			}
 			(void)ShoulderM;
 			PrevLo = NextLo;
 			PrevHi = NextHi;
@@ -231,9 +253,9 @@ void ADTGWorldBuilder::BuildTownStreets()
 		if (Town != nullptr && Town->Style == CityStyle::Rural)
 		{
 			// A county road: the asphalt's edge wanders a hand's width either way where it has crumbled, and
-			// a sand shoulder runs beside it out to where the ditch begins, under the asphalt's edge so no
-			// seam shows. The edge is a strip of quads every two metres along the road.
-			detail_worldbuilder::AddRaggedRoad(Mesh, Meshes[EDTGSurface::Dirt], Map, Road, Z, Asphalt, Sand);
+			// a stride of sand shoulder runs beside it under the asphalt's lip. The edge is a strip of quads
+			// every two metres along the road, the shoulder every metre.
+			detail_worldbuilder::AddRaggedRoad(Mesh, Meshes[EDTGSurface::Sand], Map, Road, Z, Asphalt, Sand);
 			continue;
 		}
 		AddSlab(Mesh, Road.Area.MinX, Road.Area.MinY, Road.Area.MaxX, Road.Area.MaxY, Z, Asphalt);
@@ -1208,6 +1230,32 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	dtg::sim::PlantingRules PlantRules;
 	const std::vector<dtg::sim::Plant> Grown = bPlantVegetation ? dtg::sim::PlantsIn(Map, Game->Sim().City, Area, PlantRules) : std::vector<dtg::sim::Plant>();
 	const std::vector<dtg::sim::LotFeatures> Lots = dtg::sim::LotsIn(Map, Game->Sim().City, Area);
+	// What the ground is for (Sim/LandCover), on a coarse grid the vertices blend between: a field is sandy
+	// soil with thin grass over it, and everything else is lawn, with the woods' floor under the trees.
+	const dtg::sim::LandCoverMap Cover(Map, Game->Sim().City, Area);
+	const double CoverPitch = 12.0;
+	const int32 CoverCells = FMath::CeilToInt(ChunkSizeM / CoverPitch) + 1;
+	TArray<float> FieldGrid;
+	FieldGrid.SetNum(CoverCells * CoverCells);
+	for (int32 J = 0; J < CoverCells; ++J)
+	{
+		for (int32 I = 0; I < CoverCells; ++I)
+		{
+			FieldGrid[J * CoverCells + I] = Cover.At(OriginX + I * CoverPitch, OriginY + J * CoverPitch) == dtg::sim::LandCover::Field ? 1.0f : 0.0f;
+		}
+	}
+	auto FieldAt = [&](double X, double Y)
+	{
+		const double Fx = FMath::Clamp((X - OriginX) / CoverPitch, 0.0, CoverCells - 1.001);
+		const double Fy = FMath::Clamp((Y - OriginY) / CoverPitch, 0.0, CoverCells - 1.001);
+		const int32 I = FMath::FloorToInt(Fx);
+		const int32 J = FMath::FloorToInt(Fy);
+		const float Tx = static_cast<float>(Fx - I);
+		const float Ty = static_cast<float>(Fy - J);
+		const float Low = FMath::Lerp(FieldGrid[J * CoverCells + I], FieldGrid[J * CoverCells + I + 1], Tx);
+		const float High = FMath::Lerp(FieldGrid[(J + 1) * CoverCells + I], FieldGrid[(J + 1) * CoverCells + I + 1], Tx);
+		return FMath::Lerp(Low, High, Ty);
+	};
 	// Pine straw: the ground under a pine or an oak is needles and leaf litter, not lawn. A coarse grid
 	// of the trees so each vertex asks only its neighbours; the trees just over the chunk's edge count
 	// too, or the litter would stop dead at the seam.
@@ -1266,36 +1314,36 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 			const SurfaceInfo Info = Map.SurfaceAt(X, Y);
 			Verts.Add(FVector(X * S, Y * S, Info.GroundM * S));
 			Uvs.Add(FVector2D(X / 8.0, Y / 8.0));
-			// Sand near the water line, grass inland, rock on the steep upstate slopes, lake and river beds dark.
-			FLinearColor Colour(0.17f, 0.3f, 0.12f);
+			// The vertex colour is the ground's make-up as the terrain material reads it (Tools/Art/build_materials.py):
+			// R grass, G sand, B clay, A the forest floor of needles and leaf litter. Weights, so a triangle
+			// between a grass vertex and a sand vertex blends grass to sand; classifying a colour, as the
+			// first version did, drew a red seam of clay along every shoulder and field edge.
+			FLinearColor Colour(1.0f, 0.0f, 0.0f, 0.0f);
 			if (!Info.bWater)
 			{
-				// Needles and leaf litter under the trees: the terrain material reads this colour as its dirt.
+				// Needles and leaf litter under the trees, and a field's sandy soil with thin grass over it, its edge
+				// wandering with the ground's noise.
 				const double Vx = OriginX + I * Spacing;
 				const double Vy = OriginY + J * Spacing;
 				const float Straw = static_cast<float>(Litter(Vx, Vy));
-				Colour = FLinearColor(FMath::Lerp(0.17f, 0.25f, Straw), FMath::Lerp(0.3f, 0.22f, Straw), FMath::Lerp(0.12f, 0.16f, Straw));
-				// A sand shoulder beside a crossroads community's street, the first stride off the asphalt and then grass down into the ditch; the
-				// terrain material reads the beach colour as its sand.
-				// Sand or grass, never a colour between (the material reads the midway colours as clay),
-				// with the edge wandering a little with the ground's noise.
-				const double OffStreet = Map.StreetEdgeDistance(Vx, Vy);
-				if (OffStreet < 0.8 + 0.5 * Map.Noise(Vx, Vy, 3.0))
-				{
-					Colour = FLinearColor(0.62f, 0.56f, 0.42f);
-				}
+				const float Field = FMath::Clamp(1.4f * FieldAt(Vx, Vy) + 0.25f * static_cast<float>(Map.Noise(Vx, Vy, 7.0)) - 0.2f, 0.0f, 1.0f);
+				const float Sand = 0.75f * Field;
+				// Litter over grass, not bare needles: the floor photograph is orange, and at full weight the
+				// patches under the trees glowed from the air.
+				const float Floor = 0.6f * Straw * (1.0f - Field);
+				Colour = FLinearColor(1.0f - Sand - Floor, Sand, 0.0f, Floor);
 			}
 			if (Info.bWater)
 			{
-				Colour = Info.bOcean ? FLinearColor(0.5f, 0.45f, 0.34f) : FLinearColor(0.22f, 0.2f, 0.16f);
+				Colour = Info.bOcean ? FLinearColor(0.0f, 1.0f, 0.0f, 0.0f) : FLinearColor(0.0f, 0.0f, 1.0f, 0.0f);
 			}
 			else if (Info.GroundM < 1.2 && Map.CoastDistance(X, Y) < 90.0)
 			{
-				Colour = FLinearColor(0.62f, 0.56f, 0.42f);
+				Colour = FLinearColor(0.0f, 1.0f, 0.0f, 0.0f);
 			}
 			else if (Info.GroundM > 55.0)
 			{
-				Colour = FLinearColor(0.3f, 0.29f, 0.27f);
+				Colour = FLinearColor(0.0f, 0.0f, 1.0f, 0.0f);
 			}
 			Colors.Add(Colour);
 		}

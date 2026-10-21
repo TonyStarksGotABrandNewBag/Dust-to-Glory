@@ -1,5 +1,7 @@
 #include "Sim/Vegetation.h"
 
+#include "Sim/LandCover.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -94,24 +96,6 @@ namespace dtg::sim
 		return true;
 	}
 
-	/** Whether a spot lies within Reach of a crossroads community's edge, outside it. */
-	bool NearCrossroads(const CityPlan& World, double X, double Y, double Reach)
-	{
-		for (const CityInfo& Town : World.Cities)
-		{
-			if (Town.Style != CityStyle::Rural)
-			{
-				continue;
-			}
-			const Rect& B = Town.Bounds;
-			if (X > B.MinX - Reach && X < B.MaxX + Reach && Y > B.MinY - Reach && Y < B.MaxY + Reach)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
 	bool CanPlantAt(const StatePlan& Map, const CityPlan& World, double X, double Y,
 		const PlantingRules& Rules, SurfaceInfo* OutSurface)
 	{
@@ -173,7 +157,8 @@ namespace dtg::sim
 		 * Shrubs and ferns under the trees: wax myrtle, yaupon and fern in the pine woods, on a grid finer than
 		 * the canopy's and only where the canopy is dense, so the woods have a floor and the fields do not.
 		 */
-		void Understory(const StatePlan& Map, const CityPlan& World, const Rect& Area, const PlantingRules& Rules, std::vector<Plant>& Out)
+		void Understory(const StatePlan& Map, const CityPlan& World, const Rect& Area, const PlantingRules& Rules, const LandCoverMap& Cover,
+			std::vector<Plant>& Out)
 		{
 			if (Rules.UnderstorySpacingM <= 0.0)
 			{
@@ -198,18 +183,20 @@ namespace dtg::sim
 					{
 						continue;
 					}
-					const double Stand = 0.5 + 0.5 * Map.Noise(X, Y, 520.0);
-					double Canopy = Stand * Stand;
-					if (const CityInfo* Town = World.CityAt(X, Y); Town != nullptr && Town->Style == CityStyle::Rural)
+					// The floor grows where the canopy is: thick in the woods, a shrub or two behind a house, and
+					// nothing in a field, a kept front yard, a store's lot or along the road.
+					double Canopy = 0.0;
+					switch (Cover.At(X, Y))
 					{
-						Canopy = std::max(Canopy, 0.5);
+					case LandCover::Woodland: Canopy = 0.6; break;
+					case LandCover::Yard: Canopy = Map.StreetEdgeDistance(X, Y) < Rules.YardKeptM ? 0.0 : 0.3; break;
+					default: break;
 					}
-					else if (NearCrossroads(World, X, Y, Rules.CrossroadsWoodsM))
+					if (Canopy <= 0.0 || CellValue(Cx, Cy, 9) > Canopy * 0.55)
 					{
-						Canopy = std::max(Canopy, 0.45);
+						continue;
 					}
-					// Thin under a thin canopy, and the odd shrub in a yard, which is how yards are.
-					if (CellValue(Cx, Cy, 9) > Canopy * 0.55)
+					if (const LotFeatures* Lot = Cover.LotAt(X, Y); Lot != nullptr && LandCoverMap::OnLotWorks(*Lot, X, Y, 0.6))
 					{
 						continue;
 					}
@@ -252,6 +239,9 @@ namespace dtg::sim
 		const std::size_t Cells = static_cast<std::size_t>(ToX - FromX + 1) *
 			static_cast<std::size_t>(ToY - FromY + 1);
 		Out.reserve(std::min(Rules.Limit, Cells / 3 + 1));
+		LandCoverRules CoverRules;
+		CoverRules.CrossroadsWoodsM = Rules.CrossroadsWoodsM;
+		const LandCoverMap Cover(Map, World, Area, CoverRules);
 
 		for (std::int64_t Cy = FromY; Cy <= ToY; ++Cy)
 		{
@@ -269,30 +259,39 @@ namespace dtg::sim
 					continue;
 				}
 
-				// Woods come in stands with fields between them, which is most of what makes a
-				// landscape read as cultivated country rather than as uniform scatter. Two
-				// wavelengths: where the woods are, and thinner patches inside them.
-				const double Stand = 0.5 + 0.5 * Map.Noise(X, Y, 520.0);
-				const double Patch = 0.5 + 0.5 * Map.Noise(X, Y, 95.0);
-				double Density = Stand * Stand * (0.45 + 0.55 * Patch);
-
 				SurfaceInfo Info;
 				if (!CanPlantAt(Map, World, X, Y, Rules, &Info))
 				{
 					continue;
 				}
-				// A yard in a crossroads community is a wooded lot whatever the fields outside are doing: the
-				// stand noise that leaves farmland open would leave the lots bare, and a house in Longs stands
-				// in pines. Half the cells, which at this spacing is woods with room to walk through.
-				if (const CityInfo* Town = World.CityAt(X, Y); Town != nullptr && Town->Style == CityStyle::Rural)
+				// What the ground is for decides what grows (Sim/LandCover): the woods are thick, with thinner
+				// patches inside them; a yard is kept in front of the house and wooded behind, and nothing
+				// stands on its drive, pad, walk or shed; a store's lot is clear; a verge has the odd tree; a
+				// field has none; a town plants only its parks, which CanPlantAt has already picked out.
+				const LandCover Where = Cover.At(X, Y);
+				const double Stand = 0.5 + 0.5 * Map.Noise(X, Y, 520.0);
+				const double Patch = 0.5 + 0.5 * Map.Noise(X, Y, 95.0);
+				double Density = 0.0;
+				switch (Where)
 				{
-					Density = std::max(Density, 0.5);
+				case LandCover::Woodland: Density = Rules.WoodlandDensity * (0.7 + 0.3 * Patch); break;
+				case LandCover::Yard: Density = Map.StreetEdgeDistance(X, Y) < Rules.YardKeptM ? Rules.YardFrontDensity : Rules.YardBackDensity; break;
+				case LandCover::Commercial: Density = Rules.CommercialDensity; break;
+				case LandCover::Roadside: Density = Rules.RoadsideDensity; break;
+				case LandCover::Town: Density = Stand * Stand * (0.45 + 0.55 * Patch); break;
+				case LandCover::Field:
+				case LandCover::Water:
+				case LandCover::Road:
+				case LandCover::Street:
+				case LandCover::Count: break;
 				}
-				// And the country round it is pine woods: a Horry County crossroads stands in the trees, not
-				// in a field, and from its streets the woods are the horizon.
-				else if (NearCrossroads(World, X, Y, Rules.CrossroadsWoodsM))
+				if (Density <= 0.0)
 				{
-					Density = std::max(Density, 0.45);
+					continue;
+				}
+				if (const LotFeatures* Lot = Cover.LotAt(X, Y); Lot != nullptr && LandCoverMap::OnLotWorks(*Lot, X, Y, 1.0))
+				{
+					continue;
 				}
 				// Thin out as the ground steepens, and stop at the tree line.
 				const double Slope = std::fabs(Map.SurfaceAt(X + 4.0, Y).GroundM - Info.GroundM) / 4.0 +
@@ -339,6 +338,15 @@ namespace dtg::sim
 				{
 					// Up in the mountains: hardwood and scrub, no pine plantations and no palms.
 					Kind = Pick < 0.58 ? PlantKind::Oak : PlantKind::Scrub;
+				}
+				else if (Where == LandCover::Yard)
+				{
+					// Shade trees by a house: live oak, and the odd pine left standing when the lot was cleared.
+					Kind = Pick < 0.55 ? PlantKind::Oak : PlantKind::Pine;
+				}
+				else if (Where == LandCover::Roadside)
+				{
+					Kind = Pick < 0.5 ? PlantKind::Pine : PlantKind::Oak;
 				}
 				else
 				{
@@ -388,7 +396,7 @@ namespace dtg::sim
 				Out.push_back(Grown);
 			}
 		}
-		Understory(Map, World, Area, Rules, Out);
+		Understory(Map, World, Area, Rules, Cover, Out);
 		return Out;
 	}
 

@@ -18,7 +18,8 @@ if ($Build) {
 while (Get-Process -Name UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue) { Start-Sleep -Seconds (10 + (Get-Random -Maximum 10)) }
 $arguments = @("$root\DustToGlory.uproject", "-game", "-windowed", "-ResX=1600", "-ResY=900", "-log", "-nosplash", "-DTGPhoto")
 if ($Shots) { $arguments += "-DTGPhotoShots=$Shots" }
-if ($Extra) { $arguments += $Extra }
+# Several flags in one -Extra string are passed one by one: as one argument they reached the engine as -DTGSettle="10 -DTGSeed=7".
+if ($Extra) { $arguments += ($Extra -split " ") }
 & "$engine\Binaries\Win64\UnrealEditor.exe" @arguments
 Select-String -Path "$root\Saved\Logs\DustToGlory.log" -Pattern "Photo mode: |LogDTG: Warning|LogDTG: Error|Fatal" |
     ForEach-Object { $line = $_.Line -replace "^.*LogDTG: ", "" -replace "Photo mode: .*/Saved/Photos/", "Photo mode: "; $line.Substring(0, [Math]::Min(220, $line.Length)) }

@@ -5,6 +5,8 @@
 // them, a pine would hop two metres sideways every time you drove past it.
 #include "Sim/Vegetation.h"
 
+#include "Sim/LandCover.h"
+
 #include "TestFramework.h"
 #include "TestSupport.h"
 
@@ -259,8 +261,9 @@ DTG_TEST(VegetationForAChunkIsAffordable)
 	// One chunk is 192 m square.
 	const Rect Chunk = Around(State.City.SpawnX + 900.0, State.City.SpawnY + 900.0, 96.0);
 	const std::vector<Plant> Grown = PlantsIn(State.Map, State.City, Chunk);
-	// Enough to look like country, few enough to draw: a chunk is 36,864 square metres.
-	EXPECT_MSG(Grown.size() < 1200, "a single chunk grew " + std::to_string(Grown.size()) +
+	// Enough to look like country, few enough to draw: a chunk is 36,864 square metres, and a chunk of
+	// woods at a pine stand's pitch with its floor is about 1,300 plants.
+	EXPECT_MSG(Grown.size() < 1800, "a single chunk grew " + std::to_string(Grown.size()) +
 		" plants, which will not fit in a frame");
 
 	// And the limit is honoured, however much ground is asked for at once.
@@ -337,6 +340,222 @@ DTG_TEST(CrossroadsLotsAreWooded)
 	EXPECT_MSG(OnRoads == 0, std::to_string(OnRoads) + " yard trees stand on a street");
 	EXPECT_MSG(InBuildings == 0, std::to_string(InBuildings) + " yard trees stand in or against a building");
 	EXPECT_MSG(InTownLots == 0, std::to_string(InTownLots) + " trees on the lots of towns that keep them clear");
+}
+
+namespace detail_vegetation_test
+{
+	const CityInfo* StartTown(const GameState& State)
+	{
+		for (const CityInfo& Town : State.City.Cities)
+		{
+			if (Town.bStart)
+			{
+				return &Town;
+			}
+		}
+		return nullptr;
+	}
+
+	/** A square of one land cover, 500 to 2,500 m from the start town, found by sampling. */
+	bool FindSquare(const GameState& State, LandCover Want, double Half, Rect& Out)
+	{
+		const CityInfo* Longs = StartTown(State);
+		if (!Longs)
+		{
+			return false;
+		}
+		for (double Reach = 500.0; Reach <= 2500.0; Reach += 150.0)
+		{
+			for (int Step = 0; Step < 16; ++Step)
+			{
+				const double Angle = Step * 0.39269908;
+				const double X = Longs->Bounds.CenterX() + Reach * std::cos(Angle);
+				const double Y = Longs->Bounds.CenterY() + Reach * std::sin(Angle);
+				const Rect Square = Around(X, Y, Half);
+				const LandCoverMap Cover(State.Map, State.City, Square);
+				bool bAll = true;
+				for (int J = 0; J <= 4 && bAll; ++J)
+				{
+					for (int I = 0; I <= 4 && bAll; ++I)
+					{
+						bAll = Cover.At(Square.MinX + Square.Width() * I / 4.0, Square.MinY + Square.Depth() * J / 4.0) == Want;
+					}
+				}
+				if (bAll)
+				{
+					Out = Square;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+}
+
+// The woods are thick, at a pine stand's pitch with a floor under them, and a field is open ground.
+DTG_TEST(WoodsStandThickAndFieldsLieOpen)
+{
+	using namespace detail_vegetation_test;
+	const GameState& State = dtg_test::LoadedState();
+	Rect Woods;
+	Rect Field;
+	EXPECT_MSG(FindSquare(State, LandCover::Woodland, 60.0, Woods), "no square of woods within 2.5 km of Longs");
+	EXPECT_MSG(FindSquare(State, LandCover::Field, 60.0, Field), "no square of field within 2.5 km of Longs");
+	int WoodTrees = 0;
+	int WoodShrubs = 0;
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Woods))
+	{
+		(Value.Kind == PlantKind::Scrub ? WoodShrubs : WoodTrees) += 1;
+	}
+	int FieldTrees = 0;
+	std::string FieldCovers;
+	const LandCoverMap FieldCover(State.Map, State.City, Field);
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Field))
+	{
+		if (Value.Kind != PlantKind::Scrub)
+		{
+			++FieldTrees;
+			FieldCovers += std::string(" ") + LandCoverName(FieldCover.At(Value.X, Value.Y));
+		}
+	}
+	const double Hectares = Woods.Width() * Woods.Depth() / 10000.0;
+	// A loblolly stand is a tree every five or six metres: 120 per hectare and up.
+	EXPECT_MSG(WoodTrees / Hectares > 100.0, std::to_string(WoodTrees) + " trees on " + std::to_string(Hectares) + " ha of woods: thin");
+	EXPECT_MSG(WoodShrubs / Hectares > 80.0, std::to_string(WoodShrubs) + " shrubs on " + std::to_string(Hectares) + " ha of woods: no floor");
+	EXPECT_MSG(FieldTrees / Hectares < 5.0, std::to_string(FieldTrees) + " trees on " + std::to_string(Hectares) + " ha of field: not a field; they stand on" + FieldCovers);
+}
+
+// A yard is kept in front of the house and wooded behind, and nothing grows on the drive, the pad, the
+// walk or the shed: the vegetation respects the parcel.
+DTG_TEST(YardsAreKeptInFrontAndWoodedBehind)
+{
+	using namespace detail_vegetation_test;
+	const GameState& State = dtg_test::LoadedState();
+	const CityInfo* Longs = StartTown(State);
+	EXPECT_MSG(Longs != nullptr, "no start town");
+	if (!Longs)
+	{
+		return;
+	}
+	const LandCoverMap Cover(State.Map, State.City, Longs->Bounds);
+	const PlantingRules Rules;
+	int Front = 0;
+	int Back = 0;
+	int OnWorks = 0;
+	int Yards = 0;
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Longs->Bounds, Rules))
+	{
+		if (Value.Kind == PlantKind::Scrub)
+		{
+			continue;
+		}
+		const LotFeatures* Lot = Cover.LotAt(Value.X, Value.Y);
+		if (!Lot || Cover.At(Value.X, Value.Y) != LandCover::Yard)
+		{
+			continue;
+		}
+		++Yards;
+		(State.Map.StreetEdgeDistance(Value.X, Value.Y) < Rules.YardKeptM ? Front : Back) += 1;
+		if (LandCoverMap::OnLotWorks(*Lot, Value.X, Value.Y, 0.3))
+		{
+			++OnWorks;
+		}
+	}
+	EXPECT_MSG(Yards > 60, std::to_string(Yards) + " trees in Longs' yards");
+	EXPECT_MSG(Front * 3 < Back, std::to_string(Front) + " trees in front of the houses against " + std::to_string(Back) + " behind: the front yards are not kept");
+	EXPECT_MSG(OnWorks == 0, std::to_string(OnWorks) + " trees stand on a drive, a pad, a walk or a shed");
+}
+
+// From a crossroads community's streets the woods are the horizon: a line of sight at eye level out
+// of town runs into tree crowns within 450 m in every direction but straight down a road.
+DTG_TEST(CrossroadsHorizonIsWooded)
+{
+	using namespace detail_vegetation_test;
+	const GameState& State = dtg_test::LoadedState();
+	const CityInfo* Longs = StartTown(State);
+	EXPECT_MSG(Longs != nullptr, "no start town");
+	if (!Longs)
+	{
+		return;
+	}
+	const double Cx = Longs->Bounds.CenterX();
+	const double Cy = Longs->Bounds.CenterY();
+	const double Reach = 450.0;
+	PlantingRules Rules;
+	Rules.Limit = 400000;
+	std::vector<Plant> Trees;
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Around(Cx, Cy, Reach + 20.0), Rules))
+	{
+		if (Value.Kind != PlantKind::Scrub && Value.HeightM > 3.0)
+		{
+			Trees.push_back(Value);
+		}
+	}
+	int Open = 0;
+	int Rays = 0;
+	int Explained = 0;
+	std::string OpenRays;
+	const LandCoverMap Cover(State.Map, State.City, Around(Cx, Cy, Reach + 20.0));
+	for (int Step = 0; Step < 36; ++Step)
+	{
+		const double Angle = Step * 0.1745329252;
+		// Straight down a street there is nothing to stop the eye, as there is not in Longs.
+		const double Axis = std::fmod(Angle, 1.5707963268);
+		if (Axis < 0.11 || Axis > 1.5707963268 - 0.11)
+		{
+			continue;
+		}
+		const double Dx = std::cos(Angle);
+		const double Dy = std::sin(Angle);
+		// Up to where the line of sight leaves open country. The next town's blocks, or water, are what the
+		// eye sees then; at the state's compression North Myrtle Beach's blocks begin within 300 m of
+		// Longs' centre, and that is the map's doing, not the woods'.
+		double Stop = Reach;
+		int OnRoads = 0;
+		for (double Along = 20.0; Along < Reach; Along += 10.0)
+		{
+			const LandCover Here = Cover.At(Cx + Along * Dx, Cy + Along * Dy);
+			if (Here == LandCover::Town || Here == LandCover::Water)
+			{
+				Stop = Along;
+				break;
+			}
+			OnRoads += Here == LandCover::Road ? 1 : 0;
+		}
+		// Down a highway leaving town there is nothing to stop the eye either.
+		if (Stop < 300.0 || OnRoads >= 6)
+		{
+			++Explained;
+			continue;
+		}
+		++Rays;
+		int Crowns = 0;
+		for (const Plant& Tree : Trees)
+		{
+			const double Along = (Tree.X - Cx) * Dx + (Tree.Y - Cy) * Dy;
+			if (Along < 0.0 || Along > Stop)
+			{
+				continue;
+			}
+			const double Across = std::fabs(-(Tree.X - Cx) * Dy + (Tree.Y - Cy) * Dx);
+			Crowns += Across < Tree.RadiusM ? 1 : 0;
+		}
+		if (Crowns < 3)
+		{
+			++Open;
+			// What the line of sight runs over, for the message.
+			OpenRays += " " + std::to_string(Step * 10) + " deg (" + std::to_string(Crowns) + " crowns):";
+			for (double Along = 60.0; Along <= Reach; Along += 60.0)
+			{
+				OpenRays += std::string(" ") + LandCoverName(Cover.At(Cx + Along * Dx, Cy + Along * Dy));
+			}
+			OpenRays += ";";
+		}
+	}
+	// At the state's compression most lines of sight out of Longs meet the next town, water or a highway
+	// within 300 m (21 of 32 when this was written); the rest must meet the woods.
+	EXPECT_MSG(Rays >= 8, std::to_string(Rays) + " rays checked, " + std::to_string(Explained) + " run into the next town, water or down a highway");
+	EXPECT_MSG(Open == 0, std::to_string(Open) + " of " + std::to_string(Rays) + " lines of sight out of Longs cross fewer than three tree crowns:" + OpenRays);
 }
 
 // The country round a crossroads community is woods, and the woods have a floor: shrubs under the

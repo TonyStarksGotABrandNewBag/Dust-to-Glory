@@ -380,6 +380,11 @@ namespace DTGMeshBuilder
 		{
 			return EDTGSurface::Concrete;
 		}
+		// Half of a crossroads community's stores and diners are ribbed metal: the country-store look.
+		if (Building.bRural && (Building.Role == LotRole::Shop || Building.Role == LotRole::Diner) && Pick % 2u == 0u)
+		{
+			return EDTGSurface::MetalRoof;
+		}
 		switch (Building.Role)
 		{
 		case LotRole::Home:
@@ -989,6 +994,68 @@ namespace DTGMeshBuilder
 				const double Hx = 0.2 * (MaxX - MinX);
 				const double Hy = 0.2 * (MaxY - MinY);
 				Concrete.AddBox(FVector(Cx - Hx, Cy - Hy, Top), FVector(Cx + Hx, Cy + Hy, Top + 3.5 * S), Stone);
+			}
+		}
+
+		// A crossroads community's stores, diners and churches are not one box each (every store in Longs was
+		// the same metal-gabled box in the Milestone 2 captures): a church has its steeple at the front end of
+		// the ridge; a store has a porch canopy on posts over its door, a sign band over its windows, or a
+		// gas canopy out front with two pumps under it; a diner has the canopy and the sign.
+		if (Building.bRural && !bHome && !bTower)
+		{
+			const bool bRidgeAlongX = MaxX - MinX >= MaxY - MinY;
+			const FVector DoorAt = OnFacade(Front, Front.DoorU, 0.0, 0.0);
+			if (bChurch)
+			{
+				const double Half = 1.2 * S;
+				const double Cx = bRidgeAlongX ? (DoorAt.X < 0.5 * (MinX + MaxX) ? MinX + 1.8 * S : MaxX - 1.8 * S) : 0.5 * (MinX + MaxX);
+				const double Cy = bRidgeAlongX ? 0.5 * (MinY + MaxY) : (DoorAt.Y < 0.5 * (MinY + MaxY) ? MinY + 1.8 * S : MaxY - 1.8 * S);
+				const double RidgeTop = Top + FMath::Min(FMath::Min(MaxX - MinX, MaxY - MinY) * 0.35, 4.5 * S);
+				const double Belfry = RidgeTop + 3.0 * S;
+				Trim.AddBox(FVector(Cx - Half, Cy - Half, Top - 0.3 * S), FVector(Cx + Half, Cy + Half, Belfry), White);
+				Meshes[EDTGSurface::ShingleRoof].AddHipRoof(FVector(Cx - Half - 0.15 * S, Cy - Half - 0.15 * S, Belfry),
+					FVector(Cx + Half + 0.15 * S, Cy + Half + 0.15 * S, Belfry), 3.2 * S, Palette.Roof);
+			}
+			else
+			{
+				const uint32 Kind = Building.Role == LotRole::Diner ? 0u : VarietyOf(Building, 5) % 3u;
+				static const FLinearColor SignPaint[] = {FLinearColor(0.45f, 0.06f, 0.05f), FLinearColor(0.05f, 0.12f, 0.3f),
+					FLinearColor(0.08f, 0.25f, 0.1f), FLinearColor(0.55f, 0.35f, 0.05f)};
+				const FLinearColor Sign = SignPaint[VarietyOf(Building, 6) % 4u];
+				const double Uc = Front.DoorU;
+				if (Kind == 0u)
+				{
+					// A porch canopy on posts over the door, the width of a country store's front, with the sign on its face.
+					const double U0 = FMath::Max(0.3 * S, Uc - 3.5 * S);
+					const double U1 = FMath::Min(Front.Width - 0.3 * S, Uc + 3.5 * S);
+					const double Under = Footing + 2.9 * S;
+					FacadeBox(Trim, Front, U0, U1, Under, Under + 0.25 * S, 0.0, 2.6 * S, White);
+					FacadeBox(Trim, Front, U0 + 0.05 * S, U0 + 0.25 * S, Footing, Under, 2.3 * S, 2.5 * S, White);
+					FacadeBox(Trim, Front, U1 - 0.25 * S, U1 - 0.05 * S, Footing, Under, 2.3 * S, 2.5 * S, White);
+					FacadeBox(Trim, Front, U0, U1, Under + 0.25 * S, Under + 0.85 * S, 0.0, 0.12 * S, Sign);
+				}
+				else if (Kind == 1u)
+				{
+					// A sign band across the front above the windows.
+					FacadeBox(Trim, Front, 0.2 * S, Front.Width - 0.2 * S, Height - 0.95 * S, Height - 0.25 * S, 0.0, 0.14 * S, Sign);
+				}
+				else
+				{
+					// A gas canopy out front on two posts, two pumps on their island under it, and the sign band on the store.
+					const double U0 = FMath::Max(0.2 * S, Uc - 4.0 * S);
+					const double U1 = FMath::Min(Front.Width - 0.2 * S, Uc + 4.0 * S);
+					const double Under = Footing + 4.3 * S;
+					FacadeBox(Trim, Front, U0, U1, Under, Under + 0.5 * S, 2.5 * S, 8.5 * S, White);
+					FacadeBox(Trim, Front, U0 + 0.6 * S, U0 + 0.9 * S, Footing, Under, 7.6 * S, 7.9 * S, Stone);
+					FacadeBox(Trim, Front, U1 - 0.9 * S, U1 - 0.6 * S, Footing, Under, 7.6 * S, 7.9 * S, Stone);
+					FacadeBox(Trim, Front, U0, U1, Under + 0.5 * S, Under + 0.9 * S, 2.5 * S, 8.5 * S, Sign);
+					for (const double Du : {Uc - 1.8 * S, Uc + 1.3 * S})
+					{
+						FacadeBox(Concrete, Front, Du - 0.3 * S, Du + 0.8 * S, Footing, Footing + 0.15 * S, 4.6 * S, 6.4 * S, Stone);
+						FacadeBox(Trim, Front, Du, Du + 0.5 * S, Footing + 0.15 * S, Footing + 1.7 * S, 5.0 * S, 6.0 * S, Sign);
+					}
+					FacadeBox(Trim, Front, 0.2 * S, Front.Width - 0.2 * S, Height - 0.95 * S, Height - 0.25 * S, 0.0, 0.14 * S, Sign);
+				}
 			}
 		}
 

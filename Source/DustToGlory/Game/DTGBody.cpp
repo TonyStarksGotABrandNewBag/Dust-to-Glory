@@ -452,6 +452,12 @@ void UDTGBody::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompone
 		{
 			Figure->PlayAnimation(Wanted == 0 ? IdleAnim : (Wanted == 1 ? WalkAnim : JogAnim), true);
 			Playing = Wanted;
+			// From somewhere in the stride, not its start: three men who set off two frames apart walked in
+			// step for ever in the Milestone 2 night capture.
+			if (Wanted != 0)
+			{
+				Figure->SetPosition(FMath::FRand() * 0.8f, false);
+			}
 		}
 		// Matched to the pace each clip was captured at, so the feet do not slide.
 		Figure->SetPlayRate(Wanted == 0 ? 1.0f : FMath::Clamp(Speed / (Wanted == 1 ? WalkClipSpeed : JogClipSpeed), 0.6f, 1.6f));

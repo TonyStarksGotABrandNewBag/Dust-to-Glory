@@ -94,6 +94,15 @@ FVector ADTGTrafficDirector::NodeLocation(int32 NodeId) const
 	return Game->ToUnreal(Node->X, Node->Y, Z);
 }
 
+bool ADTGTrafficDirector::GroundUnder(const FVector& At) const
+{
+	// The chunks stream in over the first seconds; a car or a person spawned on the first frame stood on
+	// nothing, fell, and stayed where it landed -- the first traffic car of every Milestone 3 capture.
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DTGGround), false);
+	return GetWorld()->LineTraceSingleByChannel(Hit, At + FVector(0.0f, 0.0f, 300.0f), At - FVector(0.0f, 0.0f, 300.0f), ECC_Visibility, Params);
+}
+
 bool ADTGTrafficDirector::IsOccupied(const FVector& At) const
 {
 	// Spawns land on junction centres. Without this, a second car picked for the same junction a quarter
@@ -165,6 +174,10 @@ ADTGVehicle* ADTGTrafficDirector::SpawnCar(const FVector& At, double YawDegrees,
 	{
 		Pick = &Models.front();
 	}
+	if (!GroundUnder(At))
+	{
+		return nullptr;
+	}
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	ADTGVehicle* Car = GetWorld()->SpawnActor<ADTGVehicle>(ADTGVehicle::StaticClass(), FTransform::Identity, Params);
@@ -201,6 +214,23 @@ void ADTGTrafficDirector::Tick(float DeltaSeconds)
 void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSeconds)
 {
 	const double Despawn = DespawnRadiusM * DTGMetresToUnreal;
+	// The node ahead, offset to the right-hand lane of the road from the node behind, a quarter of the
+	// road's width out: aimed at the junction's centre, every car drove the double yellow line, and two of
+	// them met nose to nose at the crossroads in the Milestone 3 night capture.
+	auto LaneTarget = [&](int32 FromNode, int32 ToNode)
+	{
+		const FVector From = NodeLocation(FromNode);
+		const FVector To = NodeLocation(ToNode);
+		const FVector Dir = (To - From).GetSafeNormal2D();
+		if (Dir.IsNearlyZero())
+		{
+			return To;
+		}
+		const FVector2D There = Game->ToSim(To);
+		const CityInfo* Town = Game->Sim().City.CityAt(There.X, There.Y);
+		const double WidthM = Town != nullptr ? RoadWidthFor(Town->Style) : 8.0;
+		return To + FVector(-Dir.Y, Dir.X, 0.0) * (0.25 * WidthM * DTGMetresToUnreal);
+	};
 	for (int32 Index = Drivers.Num() - 1; Index >= 0; --Index)
 	{
 		FDTGDriver& Driver = Drivers[Index];
@@ -229,7 +259,7 @@ void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSecond
 				Driver.ToNode = Node->Links[FMath::RandHelper(static_cast<int32>(Node->Links.size()))];
 			}
 		}
-		DriveToward(Driver, NodeLocation(Driver.ToNode), DeltaSeconds);
+		DriveToward(Driver, LaneTarget(Driver.FromNode, Driver.ToNode), DeltaSeconds);
 	}
 
 	// Keep the roads as busy as the simulation says they should be: an outbreak thins them out.
@@ -404,11 +434,26 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 				// The nearest one: the first in the plan is usually in another town, which no pavement reaches.
 				for (const BuildingPlan* Candidate : City.BuildingsNear(Here.X, Here.Y, DespawnRadiusM))
 				{
-					if (Candidate->Role == WantedRole)
+					if (Candidate->Role != WantedRole)
 					{
-						Destination = Candidate;
-						break;
+						continue;
 					}
+					// In a crossroads community "home" is a house on their own block, not the nearest stranger's:
+					// the errand that ended at a stranger's door crossed that stranger's lawn to get there, in
+					// a line of people, in the Milestone 2 captures.
+					if (WantedRole == LotRole::Home)
+					{
+						const double Hx = Candidate->Footprint.CenterX();
+						const double Hy = Candidate->Footprint.CenterY();
+						const CityInfo* Town = City.CityAt(Hx, Hy);
+						const bool bOwnBlock = Hx > Walker.BlockMin.X && Hx < Walker.BlockMax.X && Hy > Walker.BlockMin.Y && Hy < Walker.BlockMax.Y;
+						if (Town != nullptr && Town->Style == CityStyle::Rural && !bOwnBlock)
+						{
+							continue;
+						}
+					}
+					Destination = Candidate;
+					break;
 				}
 			}
 			// Round the blocks and over the roads at the corners, rather than straight through the houses and
@@ -482,7 +527,16 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 	}
 
 	const double Life = Game->Sim().Outbreak.StreetLife();
-	const int32 Want = FMath::RoundToInt32(Pedestrians * Life);
+	int32 Want = FMath::RoundToInt32(Pedestrians * Life);
+	// A crossroads community has a few people about, not a town's forty: Longs had nine in one front yard.
+	{
+		const FVector2D Where = Game->ToSim(Around);
+		const CityInfo* Town = Game->Sim().City.CityAt(Where.X, Where.Y);
+		if (Town != nullptr && Town->Style == CityStyle::Rural)
+		{
+			Want = FMath::Max(2, Want / 8);
+		}
+	}
 	if (Walkers.Num() >= Want)
 	{
 		return;
@@ -510,6 +564,10 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 		detail_trafficdirector::RingCorners(BlockMin, BlockMax, Corners);
 		const FVector2D Spot = detail_trafficdirector::AlongSide(Corners, FMath::RandHelper(4));
 		const double Z = Game->Sim().Map.HeightAt(Spot.X, Spot.Y);
+		if (!GroundUnder(Game->ToUnreal(Spot.X, Spot.Y, Z)))
+		{
+			return;
+		}
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 		ACharacter* Person = GetWorld()->SpawnActor<ACharacter>(ACharacter::StaticClass(),
@@ -524,7 +582,8 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 		if (UCharacterMovementComponent* Legs = Person->GetCharacterMovement())
 		{
 			Legs->bRunPhysicsWithNoController = true;
-			Legs->MaxWalkSpeed = 160.0f;
+			// Their own pace: everybody at one speed walked in step for ever once they fell in together.
+			Legs->MaxWalkSpeed = FMath::FRandRange(135.0f, 180.0f);
 			Legs->bOrientRotationToMovement = false;
 			// Spawning left the movement mode at none: a character picks its walking mode at spawn only when
 			// this flag is already set, and with no controller nothing sets it afterwards. Without this call
@@ -543,8 +602,28 @@ void ADTGTrafficDirector::UpdatePedestrians(const FVector& Around)
 		Walker.Actor = Person;
 		Walker.BlockMin = BlockMin;
 		Walker.BlockMax = BlockMax;
-		// Keyed to the block they live around, so the same passer-by remembers the player between visits.
-		Walker.MindId = FString::Printf(TEXT("ped-%d-%d"), FMath::RoundToInt32(Block.CenterX()), FMath::RoundToInt32(Block.CenterY()));
+		// Keyed to the block they live around, so the same passer-by remembers the player between visits --
+		// and to a slot on it: the id was the block's alone once, so every passer-by on a block was the same
+		// seed, the same body, clothes and mind, ten at a time (the Milestone 2 captures). The lowest slot
+		// nobody alive holds, so a person who walked off and is spawned again comes back as themselves; slot
+		// zero keeps the old id, so what those minds remember is not lost.
+		int32 Slot = 0;
+		for (bool bTaken = true; bTaken;)
+		{
+			bTaken = false;
+			for (const FDTGWalker& Other : Walkers)
+			{
+				if (Other.Actor && Other.Slot == Slot && Other.BlockMin.Equals(BlockMin, 0.01) && Other.BlockMax.Equals(BlockMax, 0.01))
+				{
+					bTaken = true;
+					++Slot;
+					break;
+				}
+			}
+		}
+		Walker.Slot = Slot;
+		Walker.MindId = Slot == 0 ? FString::Printf(TEXT("ped-%d-%d"), FMath::RoundToInt32(Block.CenterX()), FMath::RoundToInt32(Block.CenterY()))
+								  : FString::Printf(TEXT("ped-%d-%d-%d"), FMath::RoundToInt32(Block.CenterX()), FMath::RoundToInt32(Block.CenterY()), Slot);
 		// Tagged so anything that needs to know whose mind this is (power witnesses, conversations) can ask.
 		Person->Tags.Add(FName(*FString::Printf(TEXT("mind:%s"), *Walker.MindId)));
 		// Seeded from the id, and kept clear of 1 and 2, which dress a hero and a villain.
@@ -631,7 +710,8 @@ void ADTGTrafficDirector::UpdateParkedCars(const FVector& Around)
 	for (const BuildingPlan* Found : Game->Sim().City.BuildingsNear(Here.X, Here.Y, SpawnRadiusM))
 	{
 		const BuildingPlan& Building = *Found;
-		if (Building.Role != LotRole::Home)
+		// The start house's car is the player's own (ADTGGameMode puts it on the pad): no second one.
+		if (Building.Role != LotRole::Home || Building.Id == Game->Sim().City.StarterHomeId)
 		{
 			continue;
 		}

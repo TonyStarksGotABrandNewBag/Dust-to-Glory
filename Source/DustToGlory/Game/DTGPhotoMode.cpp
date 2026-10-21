@@ -50,6 +50,17 @@ namespace detail_photo
 		}
 		return Seconds;
 	}
+	/** -DTGSeed=N fixes the engine's random streams for a capture, so traffic and people fall the same way twice. */
+	void SeedFromCommandLine()
+	{
+		int32 Seed = 0;
+		if (FParse::Value(FCommandLine::Get(), TEXT("DTGSeed="), Seed))
+		{
+			FMath::RandInit(Seed);
+			FMath::SRandInit(Seed);
+			UE_LOG(LogDTG, Log, TEXT("Photo mode: random streams seeded with %d."), Seed);
+		}
+	}
 	/** A walker is framed where they will be after this long, so it is short: the further ahead, the more they turn or stop. */
 	constexpr double WalkerSettleSeconds = 2.0;
 	/** The first shot also waits out shader compilation on a fresh machine. */
@@ -77,6 +88,7 @@ bool ADTGPhotoMode::IsRequested()
 void ADTGPhotoMode::BeginPlay()
 {
 	Super::BeginPlay();
+	detail_photo::SeedFromCommandLine();
 	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
 	if (!Game || !Game->IsContentLoaded())
 	{
@@ -145,6 +157,20 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s shot from (%.1f, %.1f, %.1f) m facing yaw %.0f; planned (%.1f, %.1f, %.1f) yaw %.0f"), *Shots[Current].Name,
 			GetActorLocation().X / DTGMetresToUnreal, GetActorLocation().Y / DTGMetresToUnreal, GetActorLocation().Z / DTGMetresToUnreal, GetActorRotation().Yaw,
 			Shots[Current].At.X / DTGMetresToUnreal, Shots[Current].At.Y / DTGMetresToUnreal, Shots[Current].At.Z / DTGMetresToUnreal, Shots[Current].Facing.Yaw);
+		// Every car in the frame's reach, with how far off the street it stands: the Milestone 3 captures showed
+		// cars standing on the lawns along a crossroads community's street, and a still cannot say why.
+		for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+		{
+			const FVector2D Where = Game->ToSim(It->GetActorLocation());
+			if (FVector2D::Distance(Where, FVector2D(GetActorLocation().X, GetActorLocation().Y) / DTGMetresToUnreal) > 120.0)
+			{
+				continue;
+			}
+			const SurfaceInfo Under = Game->Sim().Map.SurfaceAt(Where.X, Where.Y);
+			UE_LOG(LogDTG, Log, TEXT("Photo mode: car %s at (%.1f, %.1f) m, yaw %.0f, %.0f km/h, %.1f m off the street's edge, highway nearness %.2f, %s"),
+				*It->GetName(), Where.X, Where.Y, It->GetActorRotation().Yaw, It->SpeedKph(), Game->Sim().Map.StreetEdgeDistance(Where.X, Where.Y), Under.RoadNearness,
+				It->ParkedCarId().IsEmpty() ? TEXT("traffic") : TEXT("parked"));
+		}
 		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Photos"), Shots[Current].Name + TEXT(".png"));
 		FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI*/ false, /*bAddFilenameSuffix*/ false);
 		UE_LOG(LogDTG, Log, TEXT("Photo mode: %s (%.0f fps)"), *Path, GAverageFPS);
@@ -595,8 +621,12 @@ void ADTGPhotoMode::PlanShots()
 	}
 
 	// A car, from the front three-quarter: one parked for the purpose in the open street, because the
-	// starter car stands against a building and a camera put beside it ends up inside the wall.
-	if (Street)
+	// starter car stands against a building and a camera put beside it ends up inside the wall. Only
+	// when that shot is wanted: parked in a crossroads community's road for a tour that never framed it,
+	// it had the traffic queued behind it through every Milestone 3 capture.
+	FString ShotsAsked;
+	const bool bWantsCarShot = !FParse::Value(FCommandLine::Get(), TEXT("DTGPhotoShots="), ShotsAsked, /*bShouldStopOnSeparator*/ false) || ShotsAsked.IsEmpty() || ShotsAsked.Contains(TEXT("car"));
+	if (Street && bWantsCarShot)
 	{
 		const dtg::sim::Rect& Area = Street->Area;
 		const double X = Street->bHorizontal ? Area.MinX + 0.25 * Area.Width() : Area.CenterX() - 0.15 * Area.Width();

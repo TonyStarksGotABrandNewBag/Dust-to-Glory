@@ -55,16 +55,25 @@ namespace dtg::sim
 	/** How thickly things grow, and how far the scatter reaches. */
 	struct PlantingRules
 	{
-		/** Candidate grid spacing in metres: one plant at most per cell. */
-		double SpacingM = 9.0;
+		/** Candidate grid spacing in metres: one plant at most per cell. Six metres is a pine stand's pitch. */
+		double SpacingM = 6.0;
 		/** Clear of a highway carriageway and its verge by this much. */
 		double RoadClearM = 11.0;
 		/** Kept out of town pads, so streets and lots are not overgrown. Parks are planted anyway. */
 		bool bAvoidTowns = true;
-		/** The woods round a crossroads community reach this far out from its edge whatever the stand noise says. */
-		double CrossroadsWoodsM = 260.0;
+		/** The woods round a crossroads community reach this far out from its edge whatever the fields beyond do (LandCoverRules has the same figure). */
+		double CrossroadsWoodsM = 220.0;
 		/** Understory: shrubs and ferns on a finer grid under the canopy, this close together. Zero for none. */
 		double UnderstorySpacingM = 4.5;
+		/** How thickly the woods grow: the share of candidate cells in woodland (Sim/LandCover) that get a tree. */
+		double WoodlandDensity = 0.6;
+		/** A yard is kept in front of the house, this far in from the street's edge, and wooded behind. */
+		double YardKeptM = 24.0;
+		double YardFrontDensity = 0.05;
+		double YardBackDensity = 0.45;
+		/** The odd tree on a store's lot and along a road's verge. */
+		double CommercialDensity = 0.02;
+		double RoadsideDensity = 0.05;
 		/** Nothing above this height: the upstate balds and rock. */
 		double TreeLineM = 1500.0;
 		/** Slopes steeper than this grow scrub at most. */

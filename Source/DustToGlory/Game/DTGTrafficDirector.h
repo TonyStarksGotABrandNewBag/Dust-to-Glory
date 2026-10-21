@@ -40,6 +40,8 @@ struct FDTGWalker
 	TObjectPtr<AActor> Actor = nullptr;
 
 	FString MindId;
+	/** Which of the block's people this is: the id was the block's alone once, and every passer-by on it was the same person. */
+	int32 Slot = 0;
 	double NextThink = 0.0;
 	/** The block this person lives around, in simulation metres: they stroll its pavement between errands. */
 	FVector2D BlockMin = FVector2D::ZeroVector;
@@ -99,6 +101,8 @@ public:
 
 private:
 	void DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds);
+	/** Whether the streamed ground is built under a point yet: nothing is spawned on to nothing. */
+	bool GroundUnder(const FVector& At) const;
 	ADTGVehicle* SpawnCar(const FVector& At, double YawDegrees, bool bPolice);
 	/** A node on the road graph near a point, preferring one the player can't already see. */
 	int32 PickNode(const FVector& Around, bool bFar) const;

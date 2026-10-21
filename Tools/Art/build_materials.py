@@ -99,17 +99,14 @@ PLAIN = {
     "Water": (0.03, 0.0, 1.0),
 }
 
-# The terrain's vertex colours are class colours set in DTGWorldBuilder::BuildChunk. The terrain material
-# turns each back into a weight -- grass, sand (beach, sea bed), clay (lake bed, upland rock) -- so the
-# grid blends smoothly between them and still reads correctly with the plain vertex-colour fallback.
+# The terrain's vertex colour is the ground's make-up, set in DTGWorldBuilder::BuildChunk: R grass, G sand,
+# B clay (lake bed, upland rock), A forest floor (needles and leaf litter under the trees). Weights, not a
+# colour to classify: the first version classified a photographic colour by its nearest class, and the
+# colour a triangle interpolates between a grass vertex and a sand vertex passed nearest the clay class,
+# which drew a red seam along every shoulder and field edge.
 TERRAIN_WEIGHTS = """
+float4 Wt = float4(saturate(C), saturate(CA)) + 1e-4; Wt /= dot(Wt, float4(1.0, 1.0, 1.0, 1.0));
 float3 Grass = float3(0.17, 0.30, 0.12);
-float3 Beach = float3(0.62, 0.56, 0.42); float3 SeaBed = float3(0.50, 0.45, 0.34);
-float3 LakeBed = float3(0.22, 0.20, 0.16); float3 Rock = float3(0.30, 0.29, 0.27);
-float WG = exp(-80.0 * dot(C - Grass, C - Grass));
-float WS = exp(-80.0 * min(dot(C - Beach, C - Beach), dot(C - SeaBed, C - SeaBed)));
-float WD = exp(-80.0 * min(dot(C - LakeBed, C - LakeBed), dot(C - Rock, C - Rock)));
-float3 Wt = float3(WG, WS, WD) + 1e-4; Wt /= dot(Wt, float3(1.0, 1.0, 1.0));
 float2 Uv = P.xy;
 """
 
@@ -120,19 +117,22 @@ float GrassLum = dot(GrassPhoto, float3(0.3, 0.59, 0.11));
 float3 GrassC = lerp(GrassPhoto, saturate(GrassLum * 2.2 * Grass), 0.85);
 return GrassC * Wt.x
      + Texture2DSample(SandD, SandDSampler, Uv).rgb * Wt.y
-     + Texture2DSample(DirtD, DirtDSampler, Uv).rgb * Wt.z;
+     + Texture2DSample(DirtD, DirtDSampler, Uv).rgb * Wt.z
+     + Texture2DSample(FloorD, FloorDSampler, Uv).rgb * Wt.w;
 """
 
 TERRAIN_ORM = TERRAIN_WEIGHTS + """
 return Texture2DSample(GrassO, GrassOSampler, Uv).rgb * Wt.x
      + Texture2DSample(SandO, SandOSampler, Uv).rgb * Wt.y
-     + Texture2DSample(DirtO, DirtOSampler, Uv).rgb * Wt.z;
+     + Texture2DSample(DirtO, DirtOSampler, Uv).rgb * Wt.z
+     + Texture2DSample(FloorO, FloorOSampler, Uv).rgb * Wt.w;
 """
 
 TERRAIN_NORMAL = TERRAIN_WEIGHTS + """
 float2 T = (Texture2DSample(GrassN, GrassNSampler, Uv).rg * 2.0 - 1.0) * Wt.x
          + (Texture2DSample(SandN, SandNSampler, Uv).rg * 2.0 - 1.0) * Wt.y
-         + (Texture2DSample(DirtN, DirtNSampler, Uv).rg * 2.0 - 1.0) * Wt.z;
+         + (Texture2DSample(DirtN, DirtNSampler, Uv).rg * 2.0 - 1.0) * Wt.z
+         + (Texture2DSample(FloorN, FloorNSampler, Uv).rg * 2.0 - 1.0) * Wt.w;
 float3 N = normalize(Nrm);
 float3 TN = float3(T, sqrt(saturate(1.0 - dot(T, T))));
 return normalize(float3(TN.xy + N.xy, abs(TN.z) * N.z));
@@ -149,7 +149,11 @@ float3 S = float3(N.x < 0 ? -1.0 : 1.0, N.y < 0 ? -1.0 : 1.0, N.z < 0 ? -1.0 : 1
 float2 UvX = P.zy; float2 UvY = P.xz; float2 UvZ = P.xy;
 UvX.x *= S.x; UvY.x *= S.y; UvZ.x *= -S.z;
 float2 VX = float2(-UvX.y, UvX.x) * 0.71 + 0.37; float2 VY = float2(-UvY.y, UvY.x) * 0.71 + 0.37; float2 VZ = float2(-UvZ.y, UvZ.x) * 0.71 + 0.37;
-float Blend = smoothstep(0.35, 0.65, Mask);
+// The rotated copy is for walls. On anything facing up it turns the ribs of a metal roof and the courses
+// of a shingle roof sideways in rectangles the size of the noise's lattice (the blotches on every roof
+// in the Milestone 2 captures), so it fades out as the surface turns upward.
+float Upright = 1.0 - smoothstep(0.3, 0.7, abs(N.z));
+float Blend = smoothstep(0.35, 0.65, Mask) * Upright;
 """
 
 
@@ -177,7 +181,9 @@ float2 bp = float2(u * 0.8 + 11.7, P.z * 0.8 + 5.2);
 float Streak = %s;
 float Patch = smoothstep(0.4, 0.85, %s);
 float Blotch = %s;
-float Dirt = Weathering * Patch * Streak * Streak;
+// Streaks run down walls; on a roof P.z is constant and they would be bands, so the weathering fades out as
+// the surface turns upward.
+float Dirt = Weathering * Patch * Streak * Streak * Upright;
 """ % (value_noise("sp"), value_noise("pp"), value_noise("bp"))
 
 COLOUR_CODE = TRIPLANAR_SETUP + WEATHER_CODE + """
@@ -191,7 +197,7 @@ C *= lerp(0.62, 1.0, Grime) * lerp(0.92, 1.0, Mask);
 // Rain darkens whatever faces up.
 C *= lerp(1.0, 0.5, Wet * saturate(N.z));
 // Weathering: the streaks darken, the blotches go either way.
-C *= (1.0 - 0.3 * Dirt) * lerp(1.0, lerp(0.92, 1.06, Blotch), Weathering);
+C *= (1.0 - 0.3 * Dirt) * lerp(1.0, lerp(0.92, 1.06, Blotch), Weathering * Upright);
 return C;
 """
 
@@ -419,12 +425,14 @@ def build_terrain_master():
                                                            ("N", TERRAIN_NORMAL, normal_s, "Terrain normal"),
                                                            ("O", TERRAIN_ORM, mask_s, "Terrain ORM"))):
         file_suffix = {"D": "D", "N": "N", "O": "ORM"}[suffix]
-        names = ["Grass" + suffix, "Sand" + suffix, "Dirt" + suffix]
-        node = custom(material, code, float3, names + ["C", "P", "Nrm"], -600, -700 + row * 250, label)
-        for col, kind in enumerate(("Grass", "Sand", "Dirt")):
-            tex = texture("T_%s_%s" % (kind, file_suffix), -900 + row * 250 + col * 60, sampler)
+        kinds = (("Grass", "Grass"), ("Sand", "Sand"), ("Dirt", "Dirt"), ("Floor", "ForestFloor"))
+        names = [kind + suffix for kind, _ in kinds]
+        node = custom(material, code, float3, names + ["C", "CA", "P", "Nrm"], -600, -700 + row * 250, label)
+        for col, (kind, file_kind) in enumerate(kinds):
+            tex = texture("T_%s_%s" % (file_kind, file_suffix), -900 + row * 250 + col * 60, sampler)
             mel.connect_material_expressions(tex, "", node, names[col])
         mel.connect_material_expressions(vertex_colour, "", node, "C")
+        mel.connect_material_expressions(vertex_colour, "A", node, "CA")
         mel.connect_material_expressions(position, "", node, "P")
         mel.connect_material_expressions(normal_ws, "", node, "Nrm")
         outputs[suffix] = node

@@ -193,6 +193,157 @@ Still missing:
   in the chassis simulation is the likely answer. Not verified: what happens to a pedestrian a moving car
   drives into now that the body blocks them (the character's own depenetration decides).
 
+## Procedural world quality milestone 3: one answer for what the ground is for, 21 October
+
+Kenny's brief: audit the systems behind roads, terrain, parcels, architecture, roofs, vegetation,
+people and navigation; make roads, parcels, drives and terrain one coordinated thing; find the roof
+striping; distinct vegetation for yards, roadsides, woods, stores and farmland; people with variety
+and somewhere to go; the towers explained; identical before-and-after views. Before is
+`Saved/Photos/m2f`, after is `Saved/Photos/m3b`, same six cameras, same clock and weather per shot,
+`-DTGSeed=7` (new: `ADTGPhotoMode` seeds the engine's random streams) for the traffic and people.
+
+**The audit, in one table.** Roads: `StatePlan` (highways, the town grid, `StreetEdgeDistance` and the
+ditch), `RoadMarkings`, `ADTGWorldBuilder::BuildTownStreets` and `detail_worldbuilder::AddRaggedRoad`.
+Terrain: `StatePlan::SurfaceAt`, `ADTGWorldBuilder::BuildChunk` (vertices, vertex colour, lots,
+plants), `Tools/Art/build_materials.py` (`M_DTG_Terrain`). Parcels: `Sim/Lots`. Architecture and
+roofs: `DTGMeshBuilder.cpp` (`BuildBuilding`, `AddRoof`, `AddHipRoof`, `WallSurfaceFor`), the
+surfaces in `DTGSurface.cpp`, `M_DTG_Surface` from the same script. Vegetation: `Sim/Vegetation`,
+`Sim/StreetFurniture` (street trees, grass), `DTGPlantModels` (which model draws which kind). People:
+`ADTGTrafficDirector::UpdatePedestrians`, `DTGBody::BuildCrowd` (City Sample bodies and clothes,
+`A_CrowdColor_main`, `MelaninRandomSeed`), `Sim/Pavement` (routes). The investigations that found the
+roof and the people are in the two paragraphs they belong to.
+
+**Land cover (new: `Sim/LandCover`).** Every point of the state is one kind of ground -- water, a
+highway, a street, a home's yard, a store's lot, the roadside, woods, a field or a town's blocks --
+decided once from the plan and the terrain and the same whichever area asked
+(`LandCoverTellsYardsFromLotsFromRoads`, `FieldsLieAmongTheWoods`). The trees follow it: the woods are
+a loblolly stand's pitch (a 6 m grid, six cells in ten) with a floor of fern, palmetto and shrub; a
+yard is kept for 24 m in from the street and wooded behind, and nothing grows on its drive, pad, walk
+or shed; a store's lot is clear; a verge has the odd tree; a field has none
+(`WoodsStandThickAndFieldsLieOpen`, `YardsAreKeptInFrontAndWoodedBehind`). Fields lie among the woods
+beyond the belt round a crossroads community, half the open country, on a 480 m noise, none within
+250 m of the sea. The ground follows it too: a field's vertices are sandy soil with thin grass, the
+needle litter under the trees is the forest-floor photograph, and the woods belt round a crossroads
+community is 220 m in both the cover and the planting (the two had disagreed by 40 m, which planted
+trees in what the cover called a field, and the test caught it). Mutations M17 (no fields), M18 (thin
+woods), M19 (yards wooded in front), M20 (trees on the drives), M21 (fields planted like verges) and
+M22 (no roadside strip) each fail exactly their test.
+
+**The terrain material.** The vertex colour was a photographic colour the material classified by its
+nearest class with Gaussians; the colour a triangle interpolates between a grass vertex and a sand
+vertex passes nearest the clay class, which drew the red seam along every shoulder in the Milestone 2
+captures. It is now four weights -- R grass, G sand, B clay, A forest floor -- that the material blends
+directly, with the forest-floor texture (`T_ForestFloor`, in the project since the first materials and
+never used) as the fourth class. Rebuilt headless with the script; the seam is gone in every view.
+
+**The roof striping.** Not geometry, not UVs, not shadows: `M_DTG_Surface` blends a second,
+quarter-turn-rotated copy of every texture by a world-space noise so a wall's repeat never lines up,
+and on a roof that turns the corrugation ribs and the shingle courses sideways in rectangles the size
+of the noise lattice (3.3 m and 1.7 m), which is what the blotches were; its weathering streaks, which
+run down a wall, became bands on a roof for the same reason. Both now fade out as a surface turns
+upward (`Upright` in `TRIPLANAR_SETUP`). Walls are unchanged.
+
+**Roads and parcels.** The sand shoulder is a strip of its own along the asphalt's edge, a stride wide
+and wandering with the ground's noise, laid 2 cm under the asphalt's lip, so the edge is continuous
+where the band of sand-coloured vertices stepped along the metre grid from above. Drives, pads,
+walks, mailboxes, culverts and the ditch are as Milestone 2 left them, and now the planting keeps off
+them. Traffic spawns facing its first leg (Milestone 2) and the capture logs every car within 120 m
+with how far off the street it stands, because the Milestone 3 captures showed cars standing on the
+lawns along the main street and a still cannot say why -- see below.
+
+**Buildings.** A crossroads community's church has its steeple at the front end of the ridge; a store
+has a porch canopy on posts over its door with the sign on its face, a sign band over its windows, or
+a gas canopy out front on two posts with two pumps on their island; a diner has the canopy and the
+sign; half the stores and diners are ribbed metal. Decided per building from its id, so the same
+store is the same store every visit.
+
+**People.** The investigation: every pedestrian in Longs was one person. A walker's mind id was the
+block's alone, so every passer-by on a block took the same seed -- the same body, the same salmon top
+and tan slacks, the same melanin -- ten at a time, and the log's claim of distinct people was for
+other blocks. Each block now has slots, the lowest nobody alive holds, so people on a block are
+different people and a person who walked off comes back as themselves (slot zero keeps the old id, so
+what those minds remember survives). A crossroads community has one in eight of a town's forty. In a
+crossroads community "home" is a house on their own block, not the nearest stranger's, whose lawn the
+errand crossed. Everybody walked at exactly 160 cm/s and started the walk clip at frame zero, which
+put three men in step for ever; the pace is now their own (135 to 180) and the clip starts somewhere
+in the stride.
+
+**The towers, verified.** They are generated by the Beach rule for North Myrtle Beach's oceanfront row
+(6 to 14 floors) and drawn by the world builder, which draws every building of the state at any
+distance; there is no cached content and no HLOD. North Myrtle Beach's centre is 14.1 real km from
+Longs, 563 m at the state's 25:1; Little River's is 12.5 km, 499 m. The next town's blocks begin
+within 300 m of Longs' centre in 21 of 32 directions (`CrossroadsHorizonIsWooded` counts them). No
+rule of Longs puts them there and no rule of Longs can take them away: it is the compression. What
+Milestone 3 does is make every line of sight out of Longs that does not run down a road or into the
+next town meet the woods within 450 m; down the main road, the view is of what the road leads to.
+Moving North Myrtle Beach, or decompressing the coast, is a change to the state and to every highway
+and test on it, and is not in this milestone.
+
+**Traffic, from the car log.** The capture names every car within 120 m with how far off the street
+it stands, and three passes of it found three different things that a still could not: a car was
+aimed at the next junction's centre, so every car drove the double yellow line and two met nose to
+nose at the crossroads (it now aims a quarter of the road's width to the right); the player's own
+starting car was placed five metres from the door, which in a crossroads community is the road, and
+the traffic queued behind it from the first minute (it stands on the start house's pad now, and the
+household's second car does not); and the photo tour's own prop car, parked in the open street for a
+"car" shot nobody asked for, took the queue over when the first went (only spawned for that shot
+now). The first traffic car of every run was also spawned on the first frame before the ground under
+it existed, and stood where it fell; nothing spawns on to nothing now (`GroundUnder`).
+
+**What the captures show (before `Saved/Photos/m2f`, after `Saved/Photos/m3e`; the passes between,
+`m3` to `m3d`, are the fixes above arriving one at a time; same six cameras, `-DTGSeed=7`).**
+Inspected image by image, with crops where it mattered:
+
+- The roofs are clean: no rectangles on the double-wide's tin or the stores' gables from the lot or
+  from the air. The red clay seam along the shoulder is gone from every view; the shoulder is one
+  continuous strip from the air where it stepped before.
+- The lot: front yard kept and mown, trees behind the house, nothing on the drive or pad; the next lots'
+  sheds and chain-link; a field of sandy ground beyond the far road with woods at its margin; one
+  person on the roadside instead of nine across the lawn.
+- From the road: the church's steeple stands at its ridge; the stores along the main street are no
+  longer one box (a ribbed-metal front, a porch canopy, a sign band); the yards along the street are
+  lawns with the odd shade tree rather than a thin scatter of pines.
+- The towers are where they were, at the end of the road, for the reason above.
+- The litter under the trees read as orange patches from the air at full weight and was taken to 0.6.
+
+**Measured (1600×900, DLSS Quality, `-DTGGpuProfile` main view; before is the Milestone 2 pass).**
+
+| View          | Before GPU ms | After GPU ms | Before fps | After fps |
+|---------------|--------------:|-------------:|-----------:|----------:|
+| longs-noon    | 23.8          | 21.8         | 41         | 43        |
+| longs-golden  | 23.5          | 20.5         | 29         | 31        |
+| longs-night   | 25.5          | 22.9         | 28         | 29        |
+| longs-rain    | 22.3          | 21.2         | 29         | 31        |
+| longs-lot     | 23.0          | 19.7         | 29         | 32        |
+| longs-above   | 17.7          | 15.6         | 36         | 40        |
+
+Every view is cheaper despite the thicker woods (the four passes between agree within a millisecond): the yards nearest the camera carry fewer trees than
+the wooded lots did, the block lamps are gone, and the shoulder is a strip rather than a vertex band.
+The woods belt's cost is at the edge of these frames, not in them; a drive out of town is the measure
+that is still owed.
+
+**Still wrong, in the order it shows.**
+
+1. The pines read bare and thin at eye level. The woods are now at a stand's pitch, but the Poly Haven
+   `Pine` crown is sparse; a fuller loblolly model is an asset, not a rule.
+2. The next towns begin within 300 m of Longs' centre in two directions out of three, so most of the
+   horizon is North Myrtle Beach's and Little River's blocks, not country. That is the 25:1 state and is
+   not fixable inside Longs.
+3. People still cross their own block's lawn on the last leg to a door, and stroll the sand shoulder in
+   front of homes; routes along drives and walks are not built.
+4. Traffic has no lane discipline beyond the offset above: no stopping at junctions, no yielding.
+5. A traffic car that leaves the asphalt (the ditch, a parked car, a lamp) does not find its way back;
+   the car log is there to catch the next one.
+6. No utility drops to the houses, no bins, no mailbox posts on the far side, no vehicles in the yards
+   beyond the one car.
+7. `Fine_American_Road` and the `Yellow_Road_Line` decal are still unused: the road is the built slab,
+   and swapping it is a material and UV job for the editor.
+
+Not done, and not claimed: the milestone's own test is that the rendered area resembles Horry County
+photography. From the lot and from the air it now reads as a rural crossroads with kept yards, sandy
+drives, sheds and fields; from the road it reads as a county road through a crossroads community
+with a church and a store or two, with the next town's skyline at the end of it. It does not read as
+Longs until the pines stand like pines, and no capture here says otherwise.
 ## Environmental realism milestone 2: Longs as an inhabited place, 21 October
 
 Kenny's brief: coordinated property-level generation, roads and terrain that meet, buildings and

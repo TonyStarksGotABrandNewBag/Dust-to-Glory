@@ -19,6 +19,7 @@
 #include "Game/DTGWeatherFx.h"
 #include "Game/DTGVehicle.h"
 #include "Game/DTGWorldBuilder.h"
+#include "Sim/Lots.h"
 
 using namespace dtg::sim;
 
@@ -166,12 +167,32 @@ ADTGVehicle* ADTGGameMode::PlaceOwnedCar(const FString& Uid, const FVector& Near
 			break;
 		}
 	}
-	// At the kerb, a few metres from the door.
-	const FVector At = Near + FVector(500.0f, 0.0f, 0.0f);
+	// On the start house's pad where its lot has one (Sim/Lots), nose up the drive, as the household's car
+	// stands; else at the kerb, a few metres from the door. Five metres from the door of a crossroads
+	// community's house is the road, and the car stood there with the traffic queued behind it from the
+	// first minute of every Milestone 3 capture.
+	FVector At = Near + FVector(500.0f, 0.0f, 0.0f);
+	double Heading = 90.0;
+	if (const BuildingPlan* Home = Game->Sim().City.FindBuilding(Game->Sim().City.StarterHomeId))
+	{
+		const dtg::sim::Rect NearHome{Home->Footprint.MinX - 60.0, Home->Footprint.MinY - 60.0, Home->Footprint.MaxX + 60.0, Home->Footprint.MaxY + 60.0};
+		for (const dtg::sim::LotFeatures& Lot : dtg::sim::LotsIn(Game->Sim().Map, Game->Sim().City, NearHome))
+		{
+			if (Lot.BuildingId != Home->Id)
+			{
+				continue;
+			}
+			const double Px = Lot.Pad.CenterX();
+			const double Py = Lot.Pad.CenterY();
+			At = Game->ToUnreal(Px, Py, Game->Sim().Map.HeightAt(Px, Py));
+			Heading = FMath::RadiansToDegrees(FMath::Atan2(Py - Lot.Driveway.CenterY(), Px - Lot.Driveway.CenterX()));
+			break;
+		}
+	}
 	const double GroundZ = Builder ? Builder->GroundHeightAt(At) : At.Z;
 	if (Existing)
 	{
-		Existing->PlaceAt(FVector(At.X, At.Y, GroundZ), 90.0);
+		Existing->PlaceAt(FVector(At.X, At.Y, GroundZ), Heading);
 		return Existing;
 	}
 	FActorSpawnParameters Params;
@@ -182,7 +203,7 @@ ADTGVehicle* ADTGGameMode::PlaceOwnedCar(const FString& Uid, const FVector& Near
 		return nullptr;
 	}
 	Pawn->ConfigureFromOwned(*Car);
-	Pawn->PlaceAt(FVector(At.X, At.Y, GroundZ), 90.0);
+	Pawn->PlaceAt(FVector(At.X, At.Y, GroundZ), Heading);
 	return Pawn;
 }
 

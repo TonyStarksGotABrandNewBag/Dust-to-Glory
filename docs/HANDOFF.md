@@ -185,6 +185,12 @@ cloning.
   `longs-lot` (one double-wide from 16 m up, for the drive, pad, walk and mailbox);
   `-DTGPhotoShots=longs-noon,longs-golden,longs-night,longs-rain,longs-above,longs-lot`. Each chunk
   logs `Lots in chunk x,y: ...` with what its properties drew.
+- **Land cover is a Sim module** (`Sim/LandCover.h`): `LandCoverMap::At` says what any point of the
+  state is for (water, highway, street, yard, store lot, roadside, woods, field, town), and the trees
+  (`Vegetation`), the ground's make-up (`BuildChunk`'s vertex colour: R grass, G sand, B clay, A forest
+  floor, blended by `M_DTG_Terrain`) and the tests all follow it. Change the rules there, not in three
+  places. `-DTGSeed=N` on a photo run fixes the engine's random streams; `Tools/photo.ps1 -Extra` takes
+  several flags in one string.
 - **Properties are a Sim module** (`Sim/Lots.h`): `LotsIn` gives each crossroads building its drive,
   pad, walk, mailbox, shrubs, fence, shed and culvert from the plan; `ADTGWorldBuilder::BuildChunkLots`
   draws them as sections 3 to 5 of the chunk's component and fence panels as instances. The ditch
