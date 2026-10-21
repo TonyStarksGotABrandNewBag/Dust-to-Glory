@@ -44,4 +44,8 @@ namespace DTGPropModels
 	double CurbLengthM(int32 Mesh);
 
 	double BarrierLengthM();
+
+	/** The chain-link fence panel (Poly Haven), and its length in metres, laid end to end along a lot line. */
+	int32 FenceMesh();
+	double FenceLengthM();
 }

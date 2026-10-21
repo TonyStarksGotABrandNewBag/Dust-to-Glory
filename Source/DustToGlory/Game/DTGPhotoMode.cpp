@@ -541,6 +541,30 @@ void ADTGPhotoMode::PlanShots()
 			Shot.ForceWeather = static_cast<int>(Condition.Sky);
 			Shots.Add(Shot);
 		}
+		// One lot, close: from 16 m above the road's edge looking down the drive to the house.
+		for (const BuildingPlan& Building : City.Buildings)
+		{
+			if (!Town.Bounds.Contains(Building.Footprint.CenterX(), Building.Footprint.CenterY()) || Building.Role != LotRole::Home)
+			{
+				continue;
+			}
+			const double Hx = Building.Footprint.CenterX();
+			const double Hy = Building.Footprint.CenterY();
+			// Stand off on the door's side, 22 m out and 16 m up, looking at the house.
+			const double Ox = Building.DoorSide == 1 ? 22.0 : (Building.DoorSide == 3 ? -22.0 : 0.0);
+			const double Oy = Building.DoorSide == 2 ? 22.0 : (Building.DoorSide == 0 ? -22.0 : 0.0);
+			const FVector LotEye = At(Hx + Ox, Hy + Oy, Map.HeightAt(Hx + Ox, Hy + Oy) + 16.0);
+			FDTGPhotoShot LotShot{TEXT("longs-lot"), LotEye, detail_photo::Looking(LotEye, At(Hx, Hy, Map.HeightAt(Hx, Hy) + 2.0))};
+			LotShot.ClockMinutes = 12.5 * 60.0;
+			LotShot.ForceWeather = static_cast<int>(Weather::Clear);
+			Shots.Add(LotShot);
+			break;
+		}
+		// And the same crossroads from 45 m up, for the lots: drives, pads, fences and sheds.
+		FDTGPhotoShot Above{TEXT("longs-above"), At(X, Y - 30.0, Map.RoadHeightAt(X, Y) + 45.0), FRotator(-55.0, 90.0, 0.0)};
+		Above.ClockMinutes = 12.5 * 60.0;
+		Above.ForceWeather = static_cast<int>(Weather::Clear);
+		Shots.Add(Above);
 	}
 
 	// A person: the nearest out on the street when the shot comes up (framed then, in Frame), or the player

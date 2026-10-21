@@ -32,7 +32,9 @@ namespace detail_propmodels
 		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_002"),
 		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_003"),
 		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_004"),
-		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_005")};
+		TEXT("/Game/Fab/Megascans/3D/Modular_Curb_Kit_xbttdihdw/Raw/xbttdihdw_tier_0/StaticMeshes/xbttdihdw_LOD0_TIER0_005"),
+		// A chain-link fence panel (Poly Haven), for the lots in Sim/Lots.
+		TEXT("/Game/Art/Models/ChainlinkFence/SM_ChainlinkFence")};
 	constexpr int32 PathCount = static_cast<int32>(sizeof(Paths) / sizeof(Paths[0]));
 	constexpr int32 Preset1First = 0;
 	constexpr int32 Preset1Count = 12;
@@ -44,6 +46,7 @@ namespace detail_propmodels
 	constexpr int32 BinMesh = 21;
 	constexpr int32 CurbFirst = 22;
 	constexpr int32 CurbCount = 6;
+	constexpr int32 FencePanel = 28;
 
 	/** The kit builds its presets 6 m tall; Carolina distribution poles stand 10-12 m. */
 	constexpr double PoleScale = 1.75;
@@ -168,6 +171,17 @@ namespace DTGPropModels
 		}
 		const FVector At(Value.X * DTGMetresToUnreal, Value.Y * DTGMetresToUnreal, Value.Z * DTGMetresToUnreal);
 		return FTransform(FRotator(0.0, YawDegrees, 0.0), At);
+	}
+
+	int32 FenceMesh()
+	{
+		return detail_propmodels::FencePanel;
+	}
+
+	double FenceLengthM()
+	{
+		const UStaticMesh* Source = DTGPropModels::Mesh(detail_propmodels::FencePanel);
+		return Source ? FMath::Max(0.5, 2.0 * Source->GetBounds().BoxExtent.X / DTGMetresToUnreal) : 1.0;
 	}
 
 	int32 CurbMesh(int32 Variant)

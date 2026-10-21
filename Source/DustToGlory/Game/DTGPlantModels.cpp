@@ -78,7 +78,7 @@ namespace detail_plantmodels
 		case PlantKind::Palm: return {{4, 5, 6, 0}, 3};
 		case PlantKind::Palmetto: return {{15, 16, 17, 18}, 4}; // the Megascans palm shrubs; the fern stands in without them
 		case PlantKind::Cypress: return {{1, 0, 0, 0}, 1};  // a narrow conifer for the bald cypress
-		case PlantKind::Scrub: return {{8, 9, 10, 11}, 4};
+		case PlantKind::Scrub: return {{9, 7, 16, 11}, 4}; // a bush, a fern, a palmetto and a low shrub: the floor of the pine woods
 		case PlantKind::Count: break;
 		}
 		return {{8, 0, 0, 0}, 1};

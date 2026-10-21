@@ -275,6 +275,38 @@ namespace dtg::sim
 			const double Mid = Road.bHorizontal ? Road.Area.CenterY() : Road.Area.CenterX();
 			const double From = Road.bHorizontal ? Road.Area.MinX : Road.Area.MinY;
 			const double To = Road.bHorizontal ? Road.Area.MaxX : Road.Area.MaxY;
+			// A crossroads community's street is a county road: a solid double yellow centre line and a
+			// white line along each edge, the way SC-905 is painted through Longs.
+			const CityInfo* const Town = World.CityAt(Road.Area.CenterX(), Road.Area.CenterY());
+			if (Town != nullptr && Town->Style == CityStyle::Rural)
+			{
+				auto Solid = [&](double Across, MarkKind Kind, bool bYellow)
+				{
+					RoadMark Mark;
+					Mark.Ax = Road.bHorizontal ? From + 1.0 : Across;
+					Mark.Ay = Road.bHorizontal ? Across : From + 1.0;
+					Mark.Bx = Road.bHorizontal ? To - 1.0 : Across;
+					Mark.By = Road.bHorizontal ? Across : To - 1.0;
+					Mark.Az = HeightAt(Mark.Ax, Mark.Ay, User) + Rules.LiftM;
+					Mark.Bz = HeightAt(Mark.Bx, Mark.By, User) + Rules.LiftM;
+					Mark.WidthM = Rules.LineWidthM;
+					Mark.Kind = Kind;
+					if (bYellow)
+					{
+						SetYellow(Mark);
+					}
+					else
+					{
+						SetWhite(Mark);
+					}
+					Out.push_back(Mark);
+				};
+				Solid(Mid - Rules.LineWidthM, MarkKind::CentreDouble, true);
+				Solid(Mid + Rules.LineWidthM, MarkKind::CentreDouble, true);
+				Solid(Mid - 0.5 * Width + Rules.EdgeInsetM, MarkKind::EdgeWhite, false);
+				Solid(Mid + 0.5 * Width - Rules.EdgeInsetM, MarkKind::EdgeWhite, false);
+				continue;
+			}
 			// A broken yellow centre line: town streets are two-way and passing is academic at
 			// 25 mph, so the convention is a single broken line rather than a double.
 			const double Period = Rules.DashM + Rules.GapM;

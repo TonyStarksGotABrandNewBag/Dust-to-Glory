@@ -181,7 +181,17 @@ cloning.
   `-DTGSettle=15` holds each view longer first, so a profile is of the view and not of the chunks still
   streaming in after the camera jumped. The acceptance views of the start town are `longs-noon`,
   `longs-golden`, `longs-night` and `longs-rain` (same eye, the clock and the weather forced per shot:
-  `FDTGPhotoShot::ForceWeather`); `-DTGPhotoShots=longs-noon,longs-golden,longs-night,longs-rain`.
+  `FDTGPhotoShot::ForceWeather`), `longs-above` (the crossroads from 45 m, for the lots) and
+  `longs-lot` (one double-wide from 16 m up, for the drive, pad, walk and mailbox);
+  `-DTGPhotoShots=longs-noon,longs-golden,longs-night,longs-rain,longs-above,longs-lot`. Each chunk
+  logs `Lots in chunk x,y: ...` with what its properties drew.
+- **Properties are a Sim module** (`Sim/Lots.h`): `LotsIn` gives each crossroads building its drive,
+  pad, walk, mailbox, shrubs, fence, shed and culvert from the plan; `ADTGWorldBuilder::BuildChunkLots`
+  draws them as sections 3 to 5 of the chunk's component and fence panels as instances. The ditch
+  beside crossroads streets is in the ground (`StatePlan::DitchBesideStreets`), so collision, plants
+  and people all see it. Because of that ditch, traffic spawns facing its first leg rather than at a
+  random heading (a U-turn through the swale rolled a car), and a crossroads community's street lamps
+  stand only at its junctions.
   `Tools/Art/inventory_assets.py` (headless) writes `Saved/inventory.txt`: every mesh with its Nanite
   flag and triangle count, every material with its master, every texture with its size. The 20 October
   audit in docs/REALISM.md was built from these.

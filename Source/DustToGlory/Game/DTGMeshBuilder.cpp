@@ -281,6 +281,45 @@ void FDTGMesh::AddRoof(const FVector& Min, const FVector& Max, double RidgeHeigh
 	}
 }
 
+void FDTGMesh::AddHipRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour)
+{
+	// The ridge runs the long way, set in from each end by half the short span so all four slopes pitch alike.
+	const bool bAlongX = (Max.X - Min.X) >= (Max.Y - Min.Y);
+	const double Top = Min.Z + RidgeHeightUu;
+	const double Half = 0.5 * (bAlongX ? Max.Y - Min.Y : Max.X - Min.X);
+	const double Inset = FMath::Min(Half, 0.5 * (bAlongX ? Max.X - Min.X : Max.Y - Min.Y));
+	const FVector R0 = bAlongX ? FVector(Min.X + Inset, 0.5 * (Min.Y + Max.Y), Top) : FVector(0.5 * (Min.X + Max.X), Min.Y + Inset, Top);
+	const FVector R1 = bAlongX ? FVector(Max.X - Inset, 0.5 * (Min.Y + Max.Y), Top) : FVector(0.5 * (Min.X + Max.X), Max.Y - Inset, Top);
+	const FVector A(Min.X, Min.Y, Min.Z);
+	const FVector B(Max.X, Min.Y, Min.Z);
+	const FVector C(Max.X, Max.Y, Min.Z);
+	const FVector D(Min.X, Max.Y, Min.Z);
+	auto Face = [&](const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3)
+	{
+		const FVector Normal = FVector::CrossProduct(P1 - P0, P3 - P0).GetSafeNormal();
+		AddQuad(P0, P1, P2, P3, Normal.Z < 0.0 ? -Normal : Normal, Colour);
+	};
+	auto End = [&](const FVector& P0, const FVector& P1, const FVector& Apex)
+	{
+		const FVector Normal = FVector::CrossProduct(P1 - P0, Apex - P0).GetSafeNormal();
+		AddTri(P0, P1, Apex, Normal.Z < 0.0 ? -Normal : Normal, Colour);
+	};
+	if (bAlongX)
+	{
+		Face(A, B, R1, R0);
+		Face(C, D, R0, R1);
+		End(D, A, R0);
+		End(B, C, R1);
+	}
+	else
+	{
+		Face(B, C, R1, R0);
+		Face(D, A, R0, R1);
+		End(A, B, R0);
+		End(C, D, R1);
+	}
+}
+
 // ============================================================================================ Buildings
 
 namespace DTGMeshBuilder
@@ -344,8 +383,8 @@ namespace DTGMeshBuilder
 		switch (Building.Role)
 		{
 		case LotRole::Home:
-			// Carolina and Florida housing: mostly siding, then brick, then stucco.
-			return Pick < 55u ? EDTGSurface::WoodSiding : (Pick < 82u ? EDTGSurface::Brick : EDTGSurface::Stucco);
+			// By the home's kind: a brick ranch is brick; the siding ranch, the double-wide and the farmhouse are siding.
+			return Building.HomeStyle == 0 ? EDTGSurface::Brick : EDTGSurface::WoodSiding;
 		case LotRole::Church:
 			return EDTGSurface::Brick;
 		case LotRole::Jail:
@@ -790,7 +829,7 @@ namespace DTGMeshBuilder
 				FLinearColor(0.04f, 0.12f, 0.06f), FLinearColor(0.02f, 0.02f, 0.02f), FLinearColor(0.03f, 0.05f, 0.14f),
 				FLinearColor(0.28f, 0.04f, 0.04f), FLinearColor(0.12f, 0.12f, 0.13f)};
 			const FLinearColor Shutter = ShutterPaint[VarietyOf(Building, 5) % 5u];
-			const bool bShutters = bHome && VarietyOf(Building, 8) % 2u == 0u;
+			const bool bShutters = bHome && (Building.HomeStyle == 1 || Building.HomeStyle == 3) && VarietyOf(Building, 8) % 3u != 0u;
 			const FWindowDressing Dressing{bHome ? &Trim : &Concrete, bHome ? White : Stone, !bHome, bShutters ? &Shutter : nullptr};
 			for (FFacade& Face : Faces)
 			{
@@ -806,9 +845,11 @@ namespace DTGMeshBuilder
 				}
 				for (int32 Floor = 0; Floor < Floors; ++Floor)
 				{
-					const double Sill = Footing + Floor * StoreyHeight + (bCivic ? 1.4 : 0.95) * S;
-					const double Tall = bCivic ? 0.9 * S : FMath::Min(1.4 * S, StoreyHeight - 1.4 * S);
-					AddWindowRow(Meshes, Face, Sill, Sill + Tall, bCivic ? 0.6 * S : 1.0 * S, bCivic ? 2.6 * S : 2.8 * S, S, Recess,
+					const bool bDoubleWide = bHome && Building.HomeStyle == 2;
+					const bool bFarmhouse = bHome && Building.HomeStyle == 3;
+					const double Sill = Footing + Floor * StoreyHeight + (bCivic ? 1.4 : (bDoubleWide ? 1.1 : 0.95)) * S;
+					const double Tall = bCivic ? 0.9 * S : (bDoubleWide ? 0.9 * S : FMath::Min((bFarmhouse ? 1.7 : 1.4) * S, StoreyHeight - 1.4 * S));
+					AddWindowRow(Meshes, Face, Sill, Sill + Tall, bCivic ? 0.6 * S : (bDoubleWide ? 0.85 * S : 1.0 * S), bCivic ? 2.6 * S : (bDoubleWide ? 2.3 * S : 2.8 * S), S, Recess,
 						Palette.Window, FrameColour, Floor == 0, Walls, Palette.Wall, Dressing);
 				}
 			}
@@ -834,9 +875,9 @@ namespace DTGMeshBuilder
 		// Houses: a front porch on most, steps up to the door, and a chimney on some.
 		if (bHome)
 		{
-			const double Depth = 2.2 * S;
-			const bool bPorch = VarietyOf(Building, 3) % 3u != 0u;
-			const double HalfWide = bPorch ? FMath::Min(0.3 * Front.Width, 3.2 * S) : 0.9 * S;
+			const double Depth = (Building.HomeStyle == 3 ? 2.6 : 2.2) * S;
+			const bool bPorch = Building.HomeStyle == 3 || (Building.HomeStyle != 2 && VarietyOf(Building, 3) % 3u != 0u);
+			const double HalfWide = Building.HomeStyle == 3 ? 0.5 * Front.Width - 0.3 * S : (bPorch ? FMath::Min(0.3 * Front.Width, 3.2 * S) : 0.9 * S);
 			const double U0 = FMath::Max(0.2 * S, Front.DoorU - HalfWide);
 			const double U1 = FMath::Min(Front.Width - 0.2 * S, Front.DoorU + HalfWide);
 			const double Deck = bPorch ? Depth : 1.2 * S;
@@ -845,7 +886,8 @@ namespace DTGMeshBuilder
 			if (bPorch)
 			{
 				const double PostTop = Footing + 2.6 * S;
-				for (const double U : {U0 + 0.1 * S, U1 - 0.3 * S})
+				// Posts at the ends, and along a farmhouse's full-width porch every two and a half metres.
+				for (double U = U0 + 0.1 * S; U <= U1 - 0.3 * S + 1.0; U += Building.HomeStyle == 3 ? 2.5 * S : (U1 - U0 - 0.4 * S))
 				{
 					FacadeBox(Trim, Front, U, U + 0.2 * S, Footing, PostTop, Depth - 0.3 * S, Depth - 0.1 * S, White);
 				}
@@ -863,22 +905,36 @@ namespace DTGMeshBuilder
 
 		// Roof: pitched on a house, a church or a one-storey shed, with eaves; flat behind a cornice and a
 		// parapet on everything else, with plant rooms on the towers.
-		const bool bPitched = bHome || bChurch || (Floors <= 1 && !bShop);
+		// A crossroads community's store has a metal gable like its houses; a town's shop a flat roof and a parapet.
+		const bool bPitched = bHome || bChurch || (Floors <= 1 && (!bShop || Building.bRural));
 		if (bPitched)
 		{
-			const bool bShingled = bHome || bChurch;
+			const bool bHip = bHome && Building.HomeStyle == 0;
+			const bool bDoubleWide = bHome && Building.HomeStyle == 2;
+			const bool bShingled = bChurch || (bHome && Building.HomeStyle <= 1);
 			FDTGMesh& Roof = Meshes[bShingled ? EDTGSurface::ShingleRoof : EDTGSurface::MetalRoof];
-			const double Ridge = FMath::Min(FMath::Min(MaxX - MinX, MaxY - MinY) * 0.35, 4.0 * S);
-			const double Eave = 0.45 * S;
+			const double Ridge = bDoubleWide ? 0.55 * S : FMath::Min(FMath::Min(MaxX - MinX, MaxY - MinY) * (Building.HomeStyle == 3 ? 0.45 : 0.35), 4.5 * S);
+			const double Eave = (bDoubleWide ? 0.25 : 0.45) * S;
 			// Dropped so the roof meets the wall top exactly at the wall line instead of floating above it,
 			// and gable ends built in the wall, where a real house has them, rather than in shingle.
 			const bool bAlongX = MaxX - MinX >= MaxY - MinY;
 			const double HalfSpan = 0.5 * (bAlongX ? MaxY - MinY : MaxX - MinX);
 			const double Drop = Ridge * Eave / (HalfSpan + Eave);
 			const double Apex = Top - Drop + Ridge;
-			Roof.AddRoof(FVector(MinX - Eave, MinY - Eave, Top - Drop), FVector(MaxX + Eave, MaxY + Eave, Top - Drop), Ridge, Palette.Roof,
-				/*bGableEnds*/ false);
-			if (bAlongX)
+			if (bHip)
+			{
+				Roof.AddHipRoof(FVector(MinX - Eave, MinY - Eave, Top - Drop), FVector(MaxX + Eave, MaxY + Eave, Top - Drop), Ridge, Palette.Roof);
+			}
+			else
+			{
+				Roof.AddRoof(FVector(MinX - Eave, MinY - Eave, Top - Drop), FVector(MaxX + Eave, MaxY + Eave, Top - Drop), Ridge, Palette.Roof,
+					/*bGableEnds*/ false);
+			}
+			if (bHip)
+			{
+				// No gable ends: the hip's slopes close the roof on all four sides.
+			}
+			else if (bAlongX)
 			{
 				const double MidY = 0.5 * (MinY + MaxY);
 				Walls.AddTri(FVector(MinX, MinY, Top), FVector(MinX, MidY, Apex), FVector(MinX, MaxY, Top), FVector(-1.0, 0.0, 0.0), Palette.Wall);

@@ -764,6 +764,7 @@ namespace dtg::sim
 			Building.Name = Name;
 			Building.Param = Param;
 			Building.bDowntown = Where.Where == Zone::Downtown;
+			Building.bRural = Config.Style == CityStyle::Rural;
 			Building.ColorRgb = Info(Role).Color;
 
 			// Footprint: shrink the lot by a setback; homes are smaller and sit toward the street.
@@ -773,10 +774,19 @@ namespace dtg::sim
 			Area.MaxX -= Setback;
 			Area.MinY += Setback;
 			Area.MaxY -= Setback;
+			// A house is one of four kinds a Horry County street shows: a brick ranch, a siding ranch, a
+			// double-wide, and the two-storey farmhouse. The kind is chosen here, with the plan, so the
+			// footprint fits it: a double-wide is a long narrow box, 8.5 m deep.
+			int HomeStyle = 0;
 			if (Role == LotRole::Home)
 			{
-				const double Width = Random.Range(14.0, 20.0);
-				const double Depth = Random.Range(12.0, 16.0);
+				const int Pick = Random.RangeInt(0, 99);
+				HomeStyle = Pick < 38 ? 0 : (Pick < 70 ? 1 : (Pick < 88 ? 2 : 3));
+			}
+			if (Role == LotRole::Home)
+			{
+				const double Width = HomeStyle == 2 ? Random.Range(18.0, 22.0) : Random.Range(14.0, 20.0);
+				const double Depth = HomeStyle == 2 ? 8.5 : Random.Range(12.0, 16.0);
 				const double Cx = Area.CenterX();
 				Area.MinX = Cx - 0.5 * Width;
 				Area.MaxX = Cx + 0.5 * Width;
@@ -816,12 +826,13 @@ namespace dtg::sim
 			case Zone::Mid: Floors = Config.Style == CityStyle::Beach ? Random.RangeInt(2, 4) : Random.RangeInt(2, 6); break;
 			case Zone::Outer: Floors = Random.RangeInt(1, 2); break;
 			}
-			if (Role == LotRole::Home) Floors = Random.RangeInt(1, 2);
+			if (Role == LotRole::Home) Floors = HomeStyle == 3 ? 2 : 1;
+			Building.HomeStyle = HomeStyle;
 			if (Role == LotRole::Dealership || Role == LotRole::ModShop || Role == LotRole::GardenCenter || Role == LotRole::FurnitureStore) Floors = 1;
 			if (Role == LotRole::Stadium || Role == LotRole::TrackField || Role == LotRole::PowerPlant) Floors = 3;
 			if (Role == LotRole::Church) Floors = 2;
 			// Single-storey in a crossroads community, bar the church with its roof.
-			if (Config.Style == CityStyle::Rural && Role != LotRole::Church) Floors = 1;
+			if (Config.Style == CityStyle::Rural && Role != LotRole::Church && !(Role == LotRole::Home && HomeStyle == 3)) Floors = 1;
 			Building.Floors = Floors;
 			Building.HeightM = Floors * 3.6 + 1.0;
 

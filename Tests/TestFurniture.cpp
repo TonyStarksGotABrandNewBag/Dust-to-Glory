@@ -434,6 +434,49 @@ DTG_TEST(BarriersOnlyWhereTheDeckIsRaised)
 }
 
 // A crossroads community has no boulevard: its trees are in its yards, and Vegetation plants those.
+DTG_TEST(CrossroadsTownsLightOnlyTheirJunctions)
+{
+	using namespace detail_furniture_test;
+	const GameState& State = dtg_test::LoadedState();
+	const FurnitureRules Rules;
+	int Checked = 0;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		if (Town.Style != CityStyle::Rural)
+		{
+			continue;
+		}
+		++Checked;
+		const std::vector<Prop> Lamps = OfKind(FurnitureIn(State.Map, State.City, Town.Bounds), PropKind::StreetLamp);
+		EXPECT_MSG(!Lamps.empty(), "no lamp at all in " + Town.Name);
+		// Every lamp stands within one lamp spacing of a cross street, measured to the street's edge, so
+		// each junction is lit and the blocks between are dark.
+		int Stray = 0;
+		for (const Prop& Lamp : Lamps)
+		{
+			double Nearest = 1e18;
+			for (const RoadPlan& Road : State.City.Roads)
+			{
+				const bool bOnThisRoad = Lamp.X >= Road.Area.MinX - Rules.LampSetbackM - 0.1 && Lamp.X <= Road.Area.MaxX + Rules.LampSetbackM + 0.1 &&
+										 Lamp.Y >= Road.Area.MinY - Rules.LampSetbackM - 0.1 && Lamp.Y <= Road.Area.MaxY + Rules.LampSetbackM + 0.1;
+				if (bOnThisRoad)
+				{
+					continue;
+				}
+				const double Dx = std::max({Road.Area.MinX - Lamp.X, 0.0, Lamp.X - Road.Area.MaxX});
+				const double Dy = std::max({Road.Area.MinY - Lamp.Y, 0.0, Lamp.Y - Road.Area.MaxY});
+				Nearest = std::min(Nearest, std::hypot(Dx, Dy));
+			}
+			if (Nearest > Rules.LampSpacingM)
+			{
+				++Stray;
+			}
+		}
+		EXPECT_MSG(Stray == 0, std::to_string(Stray) + " of " + std::to_string(Lamps.size()) + " lamps stand along a block in " + Town.Name);
+	}
+	EXPECT_MSG(Checked > 0, "no crossroads community to check");
+}
+
 DTG_TEST(CrossroadsTownsHaveNoStreetTrees)
 {
 	using namespace detail_furniture_test;

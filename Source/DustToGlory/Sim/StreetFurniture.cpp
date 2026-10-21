@@ -243,7 +243,15 @@ namespace dtg::sim
 						continue;
 					}
 					// Nor crowding a junction: a lamp at a block corner stood 0.35 m off the cross street.
-					if (ToOtherStreet(World, &Road, X, Y) < Rules.LampSetbackM + 1.5)
+					const double ToJunction = ToOtherStreet(World, &Road, X, Y);
+					if (ToJunction < Rules.LampSetbackM + 1.5)
+					{
+						continue;
+					}
+					// A county road is lit at its junctions and dark between them: a crossroads community
+					// keeps the lamp nearest each cross street and none along the block.
+					const CityInfo* const Town = World.CityAt(X, Y);
+					if (Town != nullptr && Town->Style == CityStyle::Rural && ToJunction > Rules.LampSpacingM)
 					{
 						continue;
 					}

@@ -1,5 +1,6 @@
 #include "Game/DTGWorldBuilder.h"
 
+#include "Sim/Lots.h"
 #include "Sim/RoadMarkings.h"
 #include "Sim/StreetFurniture.h"
 #include "Sim/Vegetation.h"
@@ -33,6 +34,56 @@ using namespace dtg::sim;
 
 namespace detail_worldbuilder
 {
+	/**
+	 * A county road: the asphalt as a strip whose edges wander a hand's width with the ground's noise,
+	 * and a sand shoulder beside each edge out to where the ditch begins (Sim/Lots DitchFromM), tucked
+	 * under the asphalt's edge so no seam shows. Every two metres along the road.
+	 */
+	void AddRaggedRoad(FDTGMesh& Asphalt, FDTGMesh& Shoulder, const dtg::sim::StatePlan& Map, const dtg::sim::RoadPlan& Road, double Z,
+		const FLinearColor& AsphaltColour, const FLinearColor& SandColour)
+	{
+		const double S = DTGMetresToUnreal;
+		const double From = Road.bHorizontal ? Road.Area.MinX : Road.Area.MinY;
+		const double To = Road.bHorizontal ? Road.Area.MaxX : Road.Area.MaxY;
+		const double Lo = Road.bHorizontal ? Road.Area.MinY : Road.Area.MinX;
+		const double Hi = Road.bHorizontal ? Road.Area.MaxY : Road.Area.MaxX;
+		const double ShoulderM = dtg::sim::DitchFromM + 0.2;
+		auto Point = [&](double Along, double Across, double Height)
+		{
+			return Road.bHorizontal ? FVector(Along * S, Across * S, Height * S) : FVector(Across * S, Along * S, Height * S);
+		};
+		auto Edge = [&](double Along, double Side)
+		{
+			// Outward is positive: the crumble eats into the asphalt, so the edge only ever moves in.
+			const double Wander = 0.3 * (0.5 + 0.5 * Map.Noise(Road.bHorizontal ? Along : Side, Road.bHorizontal ? Side : Along, 5.0));
+			return Side < 0.5 * (Lo + Hi) ? Lo + Wander : Hi - Wander;
+		};
+		const double Step = 2.0;
+		double PrevLo = Edge(From, Lo);
+		double PrevHi = Edge(From, Hi);
+		for (double Along = From; Along < To - 1e-6; Along += Step)
+		{
+			const double Next = FMath::Min(To, Along + Step);
+			const double NextLo = Edge(Next, Lo);
+			const double NextHi = Edge(Next, Hi);
+			// The asphalt between the two edges.
+			if (Road.bHorizontal)
+			{
+				Asphalt.AddQuad(Point(Along, PrevLo, Z), Point(Next, NextLo, Z), Point(Next, NextHi, Z), Point(Along, PrevHi, Z), FVector::UpVector, AsphaltColour);
+			}
+			else
+			{
+				Asphalt.AddQuad(Point(Along, PrevLo, Z), Point(Along, PrevHi, Z), Point(Next, NextHi, Z), Point(Next, NextLo, Z), FVector::UpVector, AsphaltColour);
+			}
+			// The shoulder is the ground itself, coloured sand by the chunk (BuildChunk), not a strip laid on it:
+			// a strip in any one surface read as a painted band from above.
+			(void)Shoulder;
+			(void)SandColour;
+			(void)ShoulderM;
+			PrevLo = NextLo;
+			PrevHi = NextHi;
+		}
+	}
 	/** A street lamp at full dark. Real lamps are 5000 to 10000 lumens; this sun is six units, not a hundred thousand. */
 	// A real street lamp, now that the camera meters physical light: a 150 W sodium lamp puts out about
 	// this much. At 2000 it was a porch light.
@@ -171,10 +222,20 @@ void ADTGWorldBuilder::BuildTownStreets()
 
 	FDTGSurfaceMeshes Meshes;
 	FDTGMesh& Mesh = Meshes[EDTGSurface::Asphalt];
+	const FLinearColor Sand(0.42f, 0.37f, 0.28f);
 	for (const RoadPlan& Road : City.Roads)
 	{
 		// A street sits a hair above its town's pad so it reads as a surface, not z-fighting with the ground.
 		const double Z = Map.HeightAt(Road.Area.CenterX(), Road.Area.CenterY()) + 0.04;
+		const CityInfo* const Town = City.CityAt(Road.Area.CenterX(), Road.Area.CenterY());
+		if (Town != nullptr && Town->Style == CityStyle::Rural)
+		{
+			// A county road: the asphalt's edge wanders a hand's width either way where it has crumbled, and
+			// a sand shoulder runs beside it out to where the ditch begins, under the asphalt's edge so no
+			// seam shows. The edge is a strip of quads every two metres along the road.
+			detail_worldbuilder::AddRaggedRoad(Mesh, Meshes[EDTGSurface::Dirt], Map, Road, Z, Asphalt, Sand);
+			continue;
+		}
 		AddSlab(Mesh, Road.Area.MinX, Road.Area.MinY, Road.Area.MaxX, Road.Area.MaxY, Z, Asphalt);
 	}
 	// A block is a kerbed sidewalk round its edge and a lawn inside, as a Carolina street is. Paved edge to
@@ -193,11 +254,11 @@ void ADTGWorldBuilder::BuildTownStreets()
 	{
 		const double Base = Map.HeightAt(Block.CenterX(), Block.CenterY());
 		const double Top = Base + KerbM;
-		// A crossroads community has no sidewalk and no kerb: lawn and sand run to the road's edge.
+		// A crossroads community has no sidewalk and no kerb, and no lawn slab either: the ground itself,
+		// with its ditch beside the street, shows through, and the lots lay their drives on it.
 		const CityInfo* const Town = City.CityAt(Block.CenterX(), Block.CenterY());
 		if (Town != nullptr && Town->Style == CityStyle::Rural)
 		{
-			AddSlab(Meshes[EDTGSurface::Grass], Block.MinX, Block.MinY, Block.MaxX, Block.MaxY, Base + 0.05, Grass);
 			continue;
 		}
 		bool bPaved = Block.Width() < 4.0 * WalkM || Block.Depth() < 4.0 * WalkM;
@@ -624,6 +685,128 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 	}
 }
 
+void ADTGWorldBuilder::BuildChunkLots(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh, const std::vector<dtg::sim::LotFeatures>& Lots)
+{
+	(void)ChunkX;
+	(void)ChunkY;
+	if (Mesh == nullptr)
+	{
+		return;
+	}
+	// Sections 3 to 5 of the chunk's component: concrete, gravel, and the painted and built things.
+	Mesh->ClearMeshSection(3);
+	Mesh->ClearMeshSection(4);
+	Mesh->ClearMeshSection(5);
+	if (Lots.empty())
+	{
+		return;
+	}
+	const dtg::sim::StatePlan& Map = Game->Sim().Map;
+	const double S = DTGMetresToUnreal;
+	const FLinearColor ConcreteGrey(0.55f, 0.54f, 0.5f);
+	const FLinearColor Gravel(0.5f, 0.47f, 0.4f);
+	const FLinearColor Post(0.22f, 0.16f, 0.1f);
+	const FLinearColor BoxPaint[] = {FLinearColor(0.08f, 0.08f, 0.08f), FLinearColor(0.7f, 0.7f, 0.68f), FLinearColor(0.3f, 0.06f, 0.05f)};
+	const FLinearColor Headwall(0.5f, 0.49f, 0.46f);
+	const FLinearColor Dark(0.03f, 0.03f, 0.03f);
+	const FLinearColor ShedPaint[] = {FLinearColor(0.6f, 0.58f, 0.5f), FLinearColor(0.3f, 0.32f, 0.3f), FLinearColor(0.55f, 0.45f, 0.3f), FLinearColor(0.72f, 0.72f, 0.7f)};
+	const FLinearColor Tin(0.4f, 0.4f, 0.42f);
+	FDTGMesh Concrete;
+	FDTGMesh Dirt;
+	FDTGMesh Built;
+	TArray<FTransform> Panels;
+	const double PanelM = DTGPropModels::FenceLengthM();
+	for (const dtg::sim::LotFeatures& Lot : Lots)
+	{
+		// The drive, the pad and the walk, laid flat at the lot's level: over the ditch the drive is a
+		// little bridge, with the culvert's headwalls either side of it below.
+		const double Level = Map.HeightAt(Lot.Pad.CenterX(), Lot.Pad.CenterY()) + 0.06;
+		FDTGMesh& Paving = Lot.Paving == dtg::sim::LotPaving::Concrete ? Concrete : Dirt;
+		const FLinearColor& PavingColour = Lot.Paving == dtg::sim::LotPaving::Concrete ? ConcreteGrey : Gravel;
+		AddSlab(Paving, Lot.Driveway.MinX, Lot.Driveway.MinY, Lot.Driveway.MaxX, Lot.Driveway.MaxY, Level, PavingColour);
+		AddSlab(Paving, Lot.Pad.MinX, Lot.Pad.MinY, Lot.Pad.MaxX, Lot.Pad.MaxY, Level, PavingColour);
+		AddSlab(Concrete, Lot.Path.MinX, Lot.Path.MinY, Lot.Path.MaxX, Lot.Path.MaxY, Level + 0.01, ConcreteGrey);
+		if (Lot.bCulvert)
+		{
+			// Two headwalls flanking the drive, standing in the ditch, with a dark mouth each.
+			const bool bAlongX = FMath::Abs(FMath::Cos(Lot.CulvertYaw)) > 0.5;
+			const double Ground = Map.HeightAt(Lot.CulvertX, Lot.CulvertY);
+			const double HalfDrive = 0.5 * 3.2 + 0.25;
+			for (const double Side : {-1.0, 1.0})
+			{
+				const double Cx = Lot.CulvertX + (bAlongX ? 0.0 : Side * HalfDrive);
+				const double Cy = Lot.CulvertY + (bAlongX ? Side * HalfDrive : 0.0);
+				const double Hx = bAlongX ? 0.8 : 0.15;
+				const double Hy = bAlongX ? 0.15 : 0.8;
+				// Up to just under the drive's surface, which bridges the ditch above them.
+				Built.AddBox(FVector((Cx - Hx) * S, (Cy - Hy) * S, (Ground - 0.1) * S), FVector((Cx + Hx) * S, (Cy + Hy) * S, (Level - 0.1) * S), Headwall, false);
+				const double Mx = bAlongX ? 0.3 : 0.16;
+				const double My = bAlongX ? 0.16 : 0.3;
+				Built.AddBox(FVector((Cx - Mx) * S, (Cy - My) * S, (Ground + 0.02) * S), FVector((Cx + Mx) * S, (Cy + My) * S, FMath::Min(Ground + 0.45, Level - 0.15) * S), Dark, false);
+			}
+		}
+		if (Lot.bMailbox)
+		{
+			const double Ground = Map.HeightAt(Lot.MailboxX, Lot.MailboxY);
+			const bool bLongX = FMath::Abs(FMath::Cos(Lot.MailboxYaw)) > 0.5;
+			Built.AddBox(FVector((Lot.MailboxX - 0.05) * S, (Lot.MailboxY - 0.05) * S, Ground * S), FVector((Lot.MailboxX + 0.05) * S, (Lot.MailboxY + 0.05) * S, (Ground + 1.1) * S), Post);
+			const double Lx = bLongX ? 0.26 : 0.1;
+			const double Ly = bLongX ? 0.1 : 0.26;
+			Built.AddBox(FVector((Lot.MailboxX - Lx) * S, (Lot.MailboxY - Ly) * S, (Ground + 1.1) * S), FVector((Lot.MailboxX + Lx) * S, (Lot.MailboxY + Ly) * S, (Ground + 1.32) * S),
+				BoxPaint[static_cast<uint32>(Lot.BuildingId) % 3u], false);
+		}
+		if (Lot.bShed)
+		{
+			const double Ground = Map.HeightAt(Lot.Shed.CenterX(), Lot.Shed.CenterY());
+			const FVector Min(Lot.Shed.MinX * S, Lot.Shed.MinY * S, (Ground + 0.05) * S);
+			const FVector Max(Lot.Shed.MaxX * S, Lot.Shed.MaxY * S, (Ground + 2.3) * S);
+			Built.AddBox(Min, Max, ShedPaint[static_cast<uint32>(Lot.BuildingId) % 4u]);
+			Built.AddRoof(FVector(Min.X - 0.25 * S, Min.Y - 0.25 * S, Max.Z), FVector(Max.X + 0.25 * S, Max.Y + 0.25 * S, Max.Z), 0.9 * S, Tin, true);
+		}
+		for (const dtg::sim::LotLine& Line : Lot.Fence)
+		{
+			const double Dx = Line.Bx - Line.Ax;
+			const double Dy = Line.By - Line.Ay;
+			const double Length = FMath::Sqrt(Dx * Dx + Dy * Dy);
+			if (Length < PanelM)
+			{
+				continue;
+			}
+			const double Yaw = FMath::RadiansToDegrees(FMath::Atan2(Dy, Dx));
+			for (double Along = 0.0; Along + PanelM <= Length + 1e-6; Along += PanelM)
+			{
+				const double X = Line.Ax + Dx / Length * Along;
+				const double Y = Line.Ay + Dy / Length * Along;
+				Panels.Add(FTransform(FRotator(0.0, Yaw, 0.0), FVector(X * S, Y * S, Map.HeightAt(X, Y) * S)));
+			}
+		}
+	}
+	UE_LOG(LogDTG, Log, TEXT("Lots in chunk %d,%d: %d lots; concrete %d, gravel %d, built %d vertices; %d fence panels"), ChunkX, ChunkY,
+		static_cast<int32>(Lots.size()), Concrete.Verts.Num(), Dirt.Verts.Num(), Built.Verts.Num(), Panels.Num());
+	// The drives carry cars, so they cook collision: a few quads per chunk, cooked with the chunk.
+	if (!Concrete.IsEmpty())
+	{
+		Mesh->CreateMeshSection_LinearColor(3, Concrete.Verts, Concrete.Tris, Concrete.Normals, Concrete.Uvs, Concrete.Colors, Concrete.Tangents, /*bCreateCollision*/ true);
+		Mesh->SetMaterial(3, DTGSurface::Material(EDTGSurface::Concrete));
+	}
+	if (!Dirt.IsEmpty())
+	{
+		Mesh->CreateMeshSection_LinearColor(4, Dirt.Verts, Dirt.Tris, Dirt.Normals, Dirt.Uvs, Dirt.Colors, Dirt.Tangents, /*bCreateCollision*/ true);
+		Mesh->SetMaterial(4, DTGSurface::Material(EDTGSurface::Sand));
+	}
+	if (!Built.IsEmpty())
+	{
+		Mesh->CreateMeshSection_LinearColor(5, Built.Verts, Built.Tris, Built.Normals, Built.Uvs, Built.Colors, Built.Tangents, /*bCreateCollision*/ false);
+		Mesh->SetMaterial(5, DTGSurface::Material(EDTGSurface::Matte));
+	}
+	if (!Panels.IsEmpty() && DTGPropModels::Mesh(DTGPropModels::FenceMesh()))
+	{
+		UInstancedStaticMeshComponent* Instances = PropComponent(Part, DTGPropModels::FenceMesh());
+		Instances->AddInstances(Panels, /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+		Instances->SetVisibility(true);
+	}
+}
+
 void ADTGWorldBuilder::BuildChunkWires(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh)
 {
 	if (!Mesh)
@@ -682,21 +865,29 @@ void ADTGWorldBuilder::BuildChunkWires(int32 ChunkX, int32 ChunkY, UProceduralMe
 	Mesh->SetMaterial(2, DTGSurface::Material(EDTGSurface::Rubber));
 }
 
-void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh)
+void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh, const std::vector<dtg::sim::Plant>& Wild)
 {
 	if (!bPlantVegetation || Mesh == nullptr)
 	{
 		return;
 	}
-	const dtg::sim::StatePlan& Map = Game->Sim().Map;
-	const dtg::sim::CityPlan& City = Game->Sim().City;
 	const double S = DTGMetresToUnreal;
 	const double OriginX = ChunkX * static_cast<double>(ChunkSizeM);
 	const double OriginY = ChunkY * static_cast<double>(ChunkSizeM);
 	const dtg::sim::Rect Area{OriginX, OriginY, OriginX + ChunkSizeM, OriginY + ChunkSizeM};
 
-	dtg::sim::PlantingRules Rules;
-	const std::vector<dtg::sim::Plant> Grown = dtg::sim::PlantsIn(Map, City, Area, Rules);
+	// What grew wild, and the shrubs the lots plant along their front walls (Sim/Lots).
+	std::vector<dtg::sim::Plant> Grown = Wild;
+	for (const dtg::sim::LotFeatures& Lot : dtg::sim::LotsIn(Game->Sim().Map, Game->Sim().City, Area))
+	{
+		for (const dtg::sim::Plant& Shrub : Lot.Shrubs)
+		{
+			if (Area.Contains(Shrub.X, Shrub.Y))
+			{
+				Grown.push_back(Shrub);
+			}
+		}
+	}
 	ClearPlants(Part);
 	if (Grown.empty())
 	{
@@ -997,10 +1188,66 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	const double S = DTGMetresToUnreal;
 	// The cell count is rounded first and the spacing derived from it, so chunks tile exactly however
 	// coarse the vertex spacing is set.
-	const int32 Cells = FMath::Max(1, FMath::RoundToInt(ChunkSizeM / FMath::Max(1.0f, VertexSpacingM)));
-	const double Spacing = static_cast<double>(ChunkSizeM) / Cells;
 	const double OriginX = ChunkX * static_cast<double>(ChunkSizeM);
 	const double OriginY = ChunkY * static_cast<double>(ChunkSizeM);
+	const dtg::sim::Rect Area{OriginX, OriginY, OriginX + ChunkSizeM, OriginY + ChunkSizeM};
+	// A crossroads community's ground carries a ditch three metres wide beside every street, which a
+	// vertex every three metres cannot hold: there, a vertex every metre.
+	float Spacing0 = FMath::Max(1.0f, VertexSpacingM);
+	for (const dtg::sim::StateCity& Town : Map.Cities)
+	{
+		const dtg::sim::Rect Near{Town.Bounds.MinX - 8.0, Town.Bounds.MinY - 8.0, Town.Bounds.MaxX + 8.0, Town.Bounds.MaxY + 8.0};
+		if (Town.Style == dtg::sim::CityStyle::Rural && Near.Overlaps(Area))
+		{
+			Spacing0 = 1.0f;
+		}
+	}
+	const int32 Cells = FMath::Max(1, FMath::RoundToInt(ChunkSizeM / Spacing0));
+	const double Spacing = static_cast<double>(ChunkSizeM) / Cells;
+	// What grows here is decided once for the ground's colour, the plants and the lots alike.
+	dtg::sim::PlantingRules PlantRules;
+	const std::vector<dtg::sim::Plant> Grown = bPlantVegetation ? dtg::sim::PlantsIn(Map, Game->Sim().City, Area, PlantRules) : std::vector<dtg::sim::Plant>();
+	const std::vector<dtg::sim::LotFeatures> Lots = dtg::sim::LotsIn(Map, Game->Sim().City, Area);
+	// Pine straw: the ground under a pine or an oak is needles and leaf litter, not lawn. A coarse grid
+	// of the trees so each vertex asks only its neighbours; the trees just over the chunk's edge count
+	// too, or the litter would stop dead at the seam.
+	const dtg::sim::Rect Wider{OriginX - 8.0, OriginY - 8.0, OriginX + ChunkSizeM + 8.0, OriginY + ChunkSizeM + 8.0};
+	const std::vector<dtg::sim::Plant> Shading = bPlantVegetation ? dtg::sim::PlantsIn(Map, Game->Sim().City, Wider, PlantRules) : std::vector<dtg::sim::Plant>();
+	const double Bucket = 8.0;
+	const int32 Buckets = FMath::CeilToInt(ChunkSizeM / Bucket) + 4;
+	TArray<TArray<int32>> Shade;
+	Shade.SetNum(Buckets * Buckets);
+	for (int32 Index = 0; Index < static_cast<int32>(Shading.size()); ++Index)
+	{
+		const dtg::sim::Plant& Tree = Shading[Index];
+		if (Tree.Kind != dtg::sim::PlantKind::Pine && Tree.Kind != dtg::sim::PlantKind::Oak)
+		{
+			continue;
+		}
+		const int32 Bx = FMath::Clamp(FMath::FloorToInt((Tree.X - OriginX) / Bucket) + 2, 0, Buckets - 1);
+		const int32 By = FMath::Clamp(FMath::FloorToInt((Tree.Y - OriginY) / Bucket) + 2, 0, Buckets - 1);
+		Shade[By * Buckets + Bx].Add(Index);
+	}
+	auto Litter = [&](double X, double Y)
+	{
+		const int32 Bx = FMath::FloorToInt((X - OriginX) / Bucket) + 2;
+		const int32 By = FMath::FloorToInt((Y - OriginY) / Bucket) + 2;
+		double Nearest = 1e9;
+		for (int32 J = FMath::Max(0, By - 1); J <= FMath::Min(Buckets - 1, By + 1); ++J)
+		{
+			for (int32 I = FMath::Max(0, Bx - 1); I <= FMath::Min(Buckets - 1, Bx + 1); ++I)
+			{
+				for (const int32 Index : Shade[J * Buckets + I])
+				{
+					const dtg::sim::Plant& Tree = Shading[Index];
+					const double Reach = FMath::Max(2.5, 0.8 * Tree.RadiusM);
+					const double D = FMath::Sqrt((Tree.X - X) * (Tree.X - X) + (Tree.Y - Y) * (Tree.Y - Y)) / Reach;
+					Nearest = FMath::Min(Nearest, D);
+				}
+			}
+		}
+		return FMath::Clamp(1.2 - Nearest, 0.0, 1.0); // 1 at the trunk, fading out past the crown
+	};
 
 	TArray<FVector> Verts;
 	TArray<int32> Tris;
@@ -1021,6 +1268,23 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 			Uvs.Add(FVector2D(X / 8.0, Y / 8.0));
 			// Sand near the water line, grass inland, rock on the steep upstate slopes, lake and river beds dark.
 			FLinearColor Colour(0.17f, 0.3f, 0.12f);
+			if (!Info.bWater)
+			{
+				// Needles and leaf litter under the trees: the terrain material reads this colour as its dirt.
+				const double Vx = OriginX + I * Spacing;
+				const double Vy = OriginY + J * Spacing;
+				const float Straw = static_cast<float>(Litter(Vx, Vy));
+				Colour = FLinearColor(FMath::Lerp(0.17f, 0.25f, Straw), FMath::Lerp(0.3f, 0.22f, Straw), FMath::Lerp(0.12f, 0.16f, Straw));
+				// A sand shoulder beside a crossroads community's street, the first stride off the asphalt and then grass down into the ditch; the
+				// terrain material reads the beach colour as its sand.
+				// Sand or grass, never a colour between (the material reads the midway colours as clay),
+				// with the edge wandering a little with the ground's noise.
+				const double OffStreet = Map.StreetEdgeDistance(Vx, Vy);
+				if (OffStreet < 0.8 + 0.5 * Map.Noise(Vx, Vy, 3.0))
+				{
+					Colour = FLinearColor(0.62f, 0.56f, 0.42f);
+				}
+			}
 			if (Info.bWater)
 			{
 				Colour = Info.bOcean ? FLinearColor(0.5f, 0.45f, 0.34f) : FLinearColor(0.22f, 0.2f, 0.16f);
@@ -1083,9 +1347,10 @@ void ADTGWorldBuilder::BuildChunk(int32 ChunkX, int32 ChunkY)
 	Mesh->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ true);
 	// One material for the whole grid, blending grass, sand and clay by the class colours above.
 	Mesh->SetMaterial(0, DTGSurface::Material(EDTGSurface::Terrain));
-	BuildChunkPlants(ChunkX, ChunkY, Part, Mesh);
+	BuildChunkPlants(ChunkX, ChunkY, Part, Mesh, Grown);
 	BuildChunkProps(ChunkX, ChunkY, Part);
 	BuildChunkWires(ChunkX, ChunkY, Mesh);
+	BuildChunkLots(ChunkX, ChunkY, Part, Mesh, Lots);
 	Mesh->SetVisibility(true);
 
 	FDTGTerrainChunk Chunk;

@@ -14,6 +14,7 @@
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGVehicle.h"
+#include "Sim/Lots.h"
 #include "Sim/Pavement.h"
 
 #include <array>
@@ -248,12 +249,25 @@ void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSecond
 		const FVector At = NodeLocation(Node);
 		if (!At.IsNearlyZero() && FVector::Dist(At, Around) < SpawnRadiusM * DTGMetresToUnreal && !IsOccupied(At))
 		{
-			if (ADTGVehicle* Car = SpawnCar(At + FVector(0.0f, 0.0f, 60.0f), FMath::FRandRange(0.0f, 360.0f), false))
+			// Facing the way it is about to go, with that as its first leg. A random heading had it make
+			// a U-turn in the crossroads to get going, across the shoulder; since the ditch went into the
+			// ground that rolled one onto its roof.
+			int32 Next = Node;
+			if (const Intersection* Found = Game->Sim().City.FindIntersection(Node))
+			{
+				if (!Found->Links.empty())
+				{
+					Next = Found->Links[FMath::RandHelper(static_cast<int32>(Found->Links.size()))];
+				}
+			}
+			const FVector Toward = NodeLocation(Next);
+			const double Yaw = Next != Node ? FMath::RadiansToDegrees(FMath::Atan2(Toward.Y - At.Y, Toward.X - At.X)) : FMath::FRandRange(0.0, 360.0);
+			if (ADTGVehicle* Car = SpawnCar(At + FVector(0.0f, 0.0f, 60.0f), Yaw, false))
 			{
 				FDTGDriver Driver;
 				Driver.Car = Car;
 				Driver.FromNode = Node;
-				Driver.ToNode = Node;
+				Driver.ToNode = Next;
 				Drivers.Add(Driver);
 			}
 		}
@@ -647,9 +661,26 @@ void ADTGTrafficDirector::UpdateParkedCars(const FVector& Around)
 		Car->Chassis().SetStepRate(120.0);
 		Car->ConfigureFromModel(UTF8_TO_TCHAR(Listing.ModelId.c_str()));
 		Car->SetParkedCarId(CarId);
+		// On the pad beside the house where the lot has one (Sim/Lots), nose up the drive; else by the door.
+		FVector Stand = Game->ToUnreal(Building.DoorX, Building.DoorY, Game->Sim().Map.HeightAt(Building.DoorX, Building.DoorY)) + FVector(0.0f, 300.0f, 60.0f);
+		double Heading = 0.0;
+		const dtg::sim::Rect Near{Building.Footprint.MinX - 60.0, Building.Footprint.MinY - 60.0, Building.Footprint.MaxX + 60.0, Building.Footprint.MaxY + 60.0};
+		for (const dtg::sim::LotFeatures& Lot : dtg::sim::LotsIn(Game->Sim().Map, Game->Sim().City, Near))
+		{
+			if (Lot.BuildingId != Building.Id)
+			{
+				continue;
+			}
+			const double Px = Lot.Pad.CenterX();
+			const double Py = Lot.Pad.CenterY();
+			Stand = Game->ToUnreal(Px, Py, Game->Sim().Map.HeightAt(Px, Py)) + FVector(0.0f, 0.0f, 60.0f);
+			Heading = FMath::RadiansToDegrees(FMath::Atan2(Py - Lot.Driveway.CenterY(), Px - Lot.Driveway.CenterX()));
+			break;
+		}
 		const double Z = Game->Sim().Map.HeightAt(Building.DoorX, Building.DoorY);
 		// Just off the door, nose to the kerb.
-		Car->PlaceAt(Game->ToUnreal(Building.DoorX, Building.DoorY, Z) + FVector(0.0f, 300.0f, 60.0f), 0.0);
+		(void)Z;
+		Car->PlaceAt(Stand, Heading);
 		Parked.Add(Car);
 		if (Parked.Num() >= MaxParkedCars)
 		{

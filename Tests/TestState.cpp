@@ -763,7 +763,8 @@ DTG_TEST(CrossroadsBuildingsAreSmall)
 			{
 				++TooBig;
 			}
-			if (Building.Floors > (Building.Role == LotRole::Church ? 2 : 1))
+			const bool bTwoStoreys = Building.Role == LotRole::Church || (Building.Role == LotRole::Home && Building.HomeStyle == 3);
+			if (Building.Floors > (bTwoStoreys ? 2 : 1))
 			{
 				++TooTall;
 			}
@@ -772,4 +773,43 @@ DTG_TEST(CrossroadsBuildingsAreSmall)
 	EXPECT_MSG(Checked > 0, "no crossroads buildings to check");
 	EXPECT_MSG(TooBig == 0, std::to_string(TooBig) + " of " + std::to_string(Checked) + " crossroads buildings are over 26 m long");
 	EXPECT_MSG(TooTall == 0, std::to_string(TooTall) + " crossroads buildings are taller than a storey");
+}
+
+// A street of houses is not one house: four kinds, the double-wides long and narrow, the farmhouses two
+// storeys, and never all of one kind in a crossroads community.
+DTG_TEST(HomesComeInKinds)
+{
+	const GameState& State = dtg_test::LoadedState();
+	int Kinds[4] = {0, 0, 0, 0};
+	int WrongShape = 0;
+	int WrongHeight = 0;
+	for (const BuildingPlan& Building : State.City.Buildings)
+	{
+		if (Building.Role != LotRole::Home)
+		{
+			continue;
+		}
+		EXPECT_MSG(Building.HomeStyle >= 0 && Building.HomeStyle <= 3, "a home of kind " + std::to_string(Building.HomeStyle));
+		if (Building.HomeStyle < 0 || Building.HomeStyle > 3)
+		{
+			continue;
+		}
+		++Kinds[Building.HomeStyle];
+		const double Short = std::min(Building.Footprint.Width(), Building.Footprint.Depth());
+		const double Long = std::max(Building.Footprint.Width(), Building.Footprint.Depth());
+		if (Building.HomeStyle == 2 && (Short > 9.0 || Long < 17.0))
+		{
+			++WrongShape;
+		}
+		if ((Building.HomeStyle == 3) != (Building.Floors == 2))
+		{
+			++WrongHeight;
+		}
+	}
+	for (int Kind = 0; Kind < 4; ++Kind)
+	{
+		EXPECT_MSG(Kinds[Kind] > 0, "no homes of kind " + std::to_string(Kind));
+	}
+	EXPECT_MSG(WrongShape == 0, std::to_string(WrongShape) + " double-wides are not long and narrow");
+	EXPECT_MSG(WrongHeight == 0, std::to_string(WrongHeight) + " homes have the wrong number of storeys for their kind");
 }

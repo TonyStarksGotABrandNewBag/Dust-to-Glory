@@ -71,6 +71,8 @@ struct FDTGMesh
 	 * caller builds those itself, in the wall, where a real house has them.
 	 */
 	void AddRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour, bool bGableEnds = true);
+	/** A hip roof over a rectangle: four slopes to a short ridge along the long axis, no gable ends. */
+	void AddHipRoof(const FVector& Min, const FVector& Max, double RidgeHeightUu, const FLinearColor& Colour);
 };
 
 /** Geometry sorted by what it is made of: one mesh per surface kind, each drawn with its own material. */

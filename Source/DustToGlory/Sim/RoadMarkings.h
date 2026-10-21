@@ -65,7 +65,7 @@ namespace dtg::sim
 		 * about a millimetre thick, but a depth buffer a kilometre deep cannot tell a millimetre
 		 * from nothing: at this draw distance a thinner lift flickers in and out along the road.
 		 */
-		double LiftM = 0.035;
+		double LiftM = 0.07;
 		std::size_t Limit = 60000;
 	};
 

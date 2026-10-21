@@ -193,6 +193,141 @@ Still missing:
   in the chassis simulation is the likely answer. Not verified: what happens to a pedestrian a moving car
   drives into now that the body blocks them (the character's own depenetration decides).
 
+## Environmental realism milestone 2: Longs as an inhabited place, 21 October
+
+Kenny's brief: coordinated property-level generation, roads and terrain that meet, buildings and
+properties as archetypes, layered coastal-plain vegetation, the towers traced, and one camera judged
+against photographs at day, night and rain; preserve the gameplay, simulation, weather, saves and the
+performance work. Every change is a rule in Sim/ with a mutation-tested test, drawn by the world
+builder; nothing is scattered by hand. The views are `longs-noon`, `longs-golden`, `longs-night`,
+`longs-rain` (one eye on the shoulder of the main road) and `longs-above` (the crossroads from 45 m).
+
+**Properties (Sim/Lots).** Each building in a crossroads community gets its lot back from the block it
+stands in and, in the lot's own axes (along the road, out from it), a gravel or concrete drive from the
+road's edge to a parking pad beside the house on the side with room, a walk from the pad to the door,
+a mailbox at the road's edge on the far side of the drive facing the road, foundation shrubs a stride
+apart along the front wall clear of the door, a chain-link fence (Poly Haven `SM_ChainlinkFence`, laid
+end to end) round a third of the lots on their sides and back from behind the pad, a shed on half of
+them in the back corner that faces into the block (never the side road of a corner lot), and the
+culvert's two headwalls where the drive crosses the ditch. `EveryCrossroadsLotHasADriveToTheRoad`,
+`LotsAreStableInWorldSpace` and the mutations M8 (a drive that starts off the road), M9 (shrubs three
+metres out) and M13 (sheds on the road side) each fail exactly their test.
+
+**Roads and ground.** A crossroads community's streets are county roads: a solid double yellow centre
+line and white edge lines (`CrossroadsStreetsAreMarkedAsCountyRoads`, mutation M12), the asphalt's
+edge wandering a hand's width where it has crumbled (a strip of quads every two metres with the
+ground's noise), a sand shoulder that is the ground itself coloured sand out to where the ditch
+begins, and a ditch along every street in the ground the cars and people stand on
+(`StatePlan::DitchBesideStreets`, flat shoulder to 1.4 m, a 45 cm swale to 4.6 m;
+`CrossroadsStreetsHaveDitches`, mutation M10), with the terrain at a vertex every metre where a
+crossroads community is so the swale holds its shape. Road paint had been laid 3.5 cm above the ground
+under a slab 4 cm above it, so no street had ever shown its lines; it sits 7 cm up now. The ground
+under the pines and oaks is needles and leaf litter (the terrain's dirt weight by the trees in the
+chunk), not lawn.
+
+**Buildings.** A house is one of four kinds decided with the plan (`BuildingPlan::HomeStyle`): a brick
+ranch with a hip roof (`FDTGMesh::AddHipRoof`, new) and no shutters, a siding ranch with a porch and
+shutters, a double-wide (a long 8.5 m box, small windows, a low metal lid, steps and no porch) and a
+two-storey farmhouse (full-width porch with posts, metal gable, tall windows). A crossroads community's
+stores have metal gables, not a town's flat roof and parapet. `HomesComeInKinds` and mutations M14
+(every house a siding ranch) and M15 (double-wides as deep as houses).
+
+**Vegetation.** The country round a crossroads community is pine woods for 260 m whatever the stand
+noise says (`CrossroadsWoodsM`), and the woods have a floor: an understory of bush, fern, palmetto and
+low shrub on a 4.5 m grid where the canopy is dense and thin where it is open
+(`CrossroadsStandInTheWoodsWithAnUnderstory`, mutation M11). The species-mix test now counts trees,
+not the floor under them. Yard trees keep five metres from the street, out of the ditch.
+
+**Towers.** Traced: the world builder draws every building of the state in one component at any
+distance, with no culling; the towers in Longs' views are North Myrtle Beach's oceanfront row (560 m
+at the state's 25:1 compression, 6 to 14 floors since the first audit) and Myrtle Beach's hub. The
+woods round Longs now stand between the street and them at eye level; from above, and from the
+highway, they remain, as they should at this scale. Myrtle Beach and North Myrtle Beach are unchanged.
+
+**What the captures showed, and what they changed (21 October).** Inspected, not assumed; each
+view is in `Saved/Photos/m2` (first pass) and `Saved/Photos/m2f` (after the fixes below):
+
+- `longs-lot` (a double-wide from 16 m up): sand drive from the road's edge to a pad beside the house,
+  the household's car on the pad nose to the house, a concrete walk to the door, the mailbox at the
+  edge on the far side of the drive, foundation shrubs, the neighbours' sheds and chain-link. The
+  culvert's headwalls stay under the drive. Also in the frame: a traffic car on its roof on the
+  shoulder beside a lamp it had knocked over. Traffic had always spawned at a crossroads with a random
+  heading and U-turned to get going, across the shoulder; the ditch in the ground turned that into a
+  rollover. A car now spawns facing its first leg (`ADTGTrafficDirector::UpdateTraffic`). That is a
+  fix to the evident cause, not a proven one: the second pass shows no car on its roof, which is one
+  sample.
+- `longs-above` (the crossroads from 45 m): county-road markings, the ragged edge, drives, pads,
+  sheds in the back corners, chain-link round a third of the lots (from above, a standing fence and
+  its shadow read as a ladder; it is standing), litter under the trees. Twin-lantern street lamps every
+  32 m along the blocks were a town's furniture on a county road: a crossroads community now keeps the
+  lamp nearest each junction and none along the block (`CrossroadsTownsLightOnlyTheirJunctions`;
+  mutation M16 puts 16 of Longs' 28 lamps back along the blocks and fails exactly that test). The
+  night view is darker between the junctions for it, which is what Longs is.
+- The four shoulder views: the sand shoulder had been coloured out to where the ditch begins, three
+  metres of bright sand with a red line at its far edge. The line is the terrain material: it weights
+  five class colours with Gaussians (`Tools/Art/build_materials.py`), and the colour a triangle
+  interpolates between grass and sand passes nearest its rock and lake-bed classes, so the metre
+  between a sand vertex and a grass vertex reads as clay. The sand is now the first 0.8 m off the
+  asphalt (one vertex row at the 1 m spacing) and the ditch is grassed; the clay seam is one vertex
+  wide and remains. Removing it means the material reading a mask channel instead of classifying
+  colours, which is a material-asset change and needs the editor.
+
+**Measured (1600×900, `-DTGGpuProfile`, the main view's GPU time; DLSS Quality against native with
+`r.NGX.DLSS.Enable 0, r.ScreenPercentage 100`).**
+
+| View          | DLSS fps | DLSS GPU ms | Native fps | Native GPU ms |
+|---------------|---------:|------------:|-----------:|--------------:|
+| longs-noon    | 41       | 23.8        | 35         | 23.8          |
+| longs-golden  | 29       | 23.5        | –          | –             |
+| longs-night   | 28       | 25.5        | 25         | 29.0          |
+| longs-rain    | 29       | 22.3        | 26         | 25.0          |
+| longs-lot     | 29       | 23.0        | –          | –             |
+| longs-above   | 36       | 17.7        | –          | –             |
+
+Noon's GPU time did not move with the internal resolution, so that view is bound by work that does
+not scale with pixels: the non-Nanite shadow cost the fidelity audit measured at 6 to 8 ms is the
+known candidate. The fps column is one sample at the capture and moves run to run: the second pass
+(after the fixes above, DLSS) gave noon 38, night 29, lot 30 and above 37 against the first pass's
+41, 28, 29 and 36, so read the GPU column and treat the fps as ±3. The 14 crossroads chunks drew 1 to 12 lots each, under 2,000 built vertices and
+under 800 fence panels per chunk (`Lots in chunk` in the log). The VSM marking-queue warning fires
+once in each pass, at frame 2, while the state's 1,156 building shells are the only thing in the
+shadow map before the first chunk arrives, and not again; no ray-tracing budget warning in either.
+
+**Fab and other assets the slice uses, by path.** Quixel Megascans (via Fab): `Alexandra_Palm_ukgkcilia`
+(the palmetto understory), `Kikuyu_Grass_wiljearqx` and `Wild_Grass_vlkhcbxia` (ground grass),
+`Modular_Curb_Kit_xbttdihdw` (towns only; a crossroads community has no kerb), `Trash_Can_ucynedrfa`,
+`Old_Wooden_Pole` (utility poles). Epic City Sample: the vehicles and the crowd bodies and clothes.
+Poly Haven (CC0, fetched by `Tools/Art/fetch_models.py` into `/Game/Art/Models`): `ChainlinkFence`
+(modular_chainlink_fence), `Pine`, `Shrub2`, `Fern`, `Shrub4`, `StreetLamp1`/`StreetLamp2`
+(street_lamp_01), `UtilityPoles`. The houses, sheds, mailboxes, drives, pads, walks and culvert
+headwalls are built geometry (`FDTGMesh`), not assets. `Fine_American_Road` and the `Yellow_Road_Line`
+decal are in the project and unused: the road is the built slab with the painted lines, and swapping
+the surface is a material job for the editor.
+
+**Still wrong, in the order it shows.**
+
+1. The pines read as bare at eye level: the `Pine` model's crown is sparse and the stand is thin. The
+   woods belt round a crossroads community (`CrossroadsWoodsM`, density floor 0.45) does not read as
+   woods from the road; a loblolly stand wants trees four to six metres apart, which over the belt is
+   about 20,000 more instances, and that is a measured performance change, not a one-line one.
+2. The stores along the crossroads are one archetype: a long metal-gabled box with a row of windows.
+   The four house kinds vary; the commercial frontage does not yet (a gas canopy, a church with a
+   steeple, a brick storefront with a sign band are the next three).
+3. People walk the carriageway and the yards where there is no pavement, and three men in the night
+   view are the same body in the same clothes in step. Crowd variety and the rural walking routes are
+   outside this milestone and still open.
+4. Utility poles carry wires along the roads (section 2 of the chunk) but no drop to any house, and
+   there is no mailbox post reflector, no bins, no vehicles in the yards beyond the one car.
+5. The red clay seam at the shoulder (above), and the dirt texture itself is red, where Horry County's
+   soil is grey-brown sand: both are material-asset changes.
+6. The far ground is bare beyond the chunk reach (`ViewDistanceM` 900), and North Myrtle Beach's row
+   stands 560 m away at the state's 25:1 compression, so it is in every eastward frame. Real OSM or
+   county parcel data for Longs is still not in the project.
+
+The milestone's own test: Kenny's brief says it is complete only when the rendered area visibly
+resembles an inhabited South Carolina neighbourhood. From the road at noon it reads as a county road
+through a rural crossroads with lots, drives and mailboxes, under a southern sky; it does not yet read
+as Longs, for reasons 1 and 2 above, and nobody should say otherwise until the pines stand thick.
 ## World-generation audit: why Longs did not look like Longs, 20 October
 
 Kenny's second brief: the environment looked generated and not like South Carolina; audit the generator

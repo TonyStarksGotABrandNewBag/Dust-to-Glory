@@ -61,6 +61,10 @@ namespace dtg::sim
 		double RoadClearM = 11.0;
 		/** Kept out of town pads, so streets and lots are not overgrown. Parks are planted anyway. */
 		bool bAvoidTowns = true;
+		/** The woods round a crossroads community reach this far out from its edge whatever the stand noise says. */
+		double CrossroadsWoodsM = 260.0;
+		/** Understory: shrubs and ferns on a finer grid under the canopy, this close together. Zero for none. */
+		double UnderstorySpacingM = 4.5;
 		/** Nothing above this height: the upstate balds and rock. */
 		double TreeLineM = 1500.0;
 		/** Slopes steeper than this grow scrub at most. */

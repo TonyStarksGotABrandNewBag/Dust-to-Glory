@@ -64,7 +64,7 @@ namespace dtg::sim
 		{
 			return false;
 		}
-		constexpr double Pavement = 3.0;   // the sidewalk ring, and a little
+		constexpr double Pavement = 5.0;   // the shoulder and the ditch (Sim/Lots), and a little
 		constexpr double Clearing = 3.0;   // round each building
 		bool bInABlock = false;
 		for (const Rect& Block : World.Blocks)
@@ -92,6 +92,24 @@ namespace dtg::sim
 			}
 		}
 		return true;
+	}
+
+	/** Whether a spot lies within Reach of a crossroads community's edge, outside it. */
+	bool NearCrossroads(const CityPlan& World, double X, double Y, double Reach)
+	{
+		for (const CityInfo& Town : World.Cities)
+		{
+			if (Town.Style != CityStyle::Rural)
+			{
+				continue;
+			}
+			const Rect& B = Town.Bounds;
+			if (X > B.MinX - Reach && X < B.MaxX + Reach && Y > B.MinY - Reach && Y < B.MaxY + Reach)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	bool CanPlantAt(const StatePlan& Map, const CityPlan& World, double X, double Y,
@@ -149,6 +167,72 @@ namespace dtg::sim
 		return true;
 	}
 
+	namespace detail_vegetation
+	{
+		/**
+		 * Shrubs and ferns under the trees: wax myrtle, yaupon and fern in the pine woods, on a grid finer than
+		 * the canopy's and only where the canopy is dense, so the woods have a floor and the fields do not.
+		 */
+		void Understory(const StatePlan& Map, const CityPlan& World, const Rect& Area, const PlantingRules& Rules, std::vector<Plant>& Out)
+		{
+			if (Rules.UnderstorySpacingM <= 0.0)
+			{
+				return;
+			}
+			const double Spacing = std::max(1.0, Rules.UnderstorySpacingM);
+			const std::int64_t FromX = static_cast<std::int64_t>(std::floor(Area.MinX / Spacing));
+			const std::int64_t ToX = static_cast<std::int64_t>(std::floor(Area.MaxX / Spacing));
+			const std::int64_t FromY = static_cast<std::int64_t>(std::floor(Area.MinY / Spacing));
+			const std::int64_t ToY = static_cast<std::int64_t>(std::floor(Area.MaxY / Spacing));
+			for (std::int64_t Cy = FromY; Cy <= ToY; ++Cy)
+			{
+				for (std::int64_t Cx = FromX; Cx <= ToX; ++Cx)
+				{
+					if (Out.size() >= Rules.Limit)
+					{
+						return;
+					}
+					const double X = (static_cast<double>(Cx) + 0.1 + 0.8 * CellValue(Cx, Cy, 7)) * Spacing;
+					const double Y = (static_cast<double>(Cy) + 0.1 + 0.8 * CellValue(Cx, Cy, 8)) * Spacing;
+					if (X < Area.MinX || X > Area.MaxX || Y < Area.MinY || Y > Area.MaxY)
+					{
+						continue;
+					}
+					const double Stand = 0.5 + 0.5 * Map.Noise(X, Y, 520.0);
+					double Canopy = Stand * Stand;
+					if (const CityInfo* Town = World.CityAt(X, Y); Town != nullptr && Town->Style == CityStyle::Rural)
+					{
+						Canopy = std::max(Canopy, 0.5);
+					}
+					else if (NearCrossroads(World, X, Y, Rules.CrossroadsWoodsM))
+					{
+						Canopy = std::max(Canopy, 0.45);
+					}
+					// Thin under a thin canopy, and the odd shrub in a yard, which is how yards are.
+					if (CellValue(Cx, Cy, 9) > Canopy * 0.55)
+					{
+						continue;
+					}
+					SurfaceInfo Info;
+					if (!CanPlantAt(Map, World, X, Y, Rules, &Info))
+					{
+						continue;
+					}
+					Plant Shrub;
+					Shrub.X = X;
+					Shrub.Y = Y;
+					Shrub.GroundM = Info.GroundM;
+					Shrub.Kind = PlantKind::Scrub;
+					const double Size = CellValue(Cx, Cy, 10);
+					Shrub.HeightM = 0.5 + 1.6 * Size;
+					Shrub.RadiusM = 0.4 + 0.6 * Size;
+					Shrub.Spin = 6.2831853 * CellValue(Cx, Cy, 11);
+					Out.push_back(Shrub);
+				}
+			}
+		}
+	}
+
 	std::vector<Plant> PlantsIn(const StatePlan& Map, const CityPlan& World, const Rect& Area,
 		const PlantingRules& Rules)
 	{
@@ -203,6 +287,12 @@ namespace dtg::sim
 				if (const CityInfo* Town = World.CityAt(X, Y); Town != nullptr && Town->Style == CityStyle::Rural)
 				{
 					Density = std::max(Density, 0.5);
+				}
+				// And the country round it is pine woods: a Horry County crossroads stands in the trees, not
+				// in a field, and from its streets the woods are the horizon.
+				else if (NearCrossroads(World, X, Y, Rules.CrossroadsWoodsM))
+				{
+					Density = std::max(Density, 0.45);
 				}
 				// Thin out as the ground steepens, and stop at the tree line.
 				const double Slope = std::fabs(Map.SurfaceAt(X + 4.0, Y).GroundM - Info.GroundM) / 4.0 +
@@ -298,6 +388,7 @@ namespace dtg::sim
 				Out.push_back(Grown);
 			}
 		}
+		Understory(Map, World, Area, Rules, Out);
 		return Out;
 	}
 

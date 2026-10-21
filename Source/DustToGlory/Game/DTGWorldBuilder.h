@@ -8,6 +8,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+
+#include "Sim/Lots.h"
+#include "Sim/Vegetation.h"
+
+#include <vector>
 #include "GameFramework/Actor.h"
 
 #include "Game/DTGMeshBuilder.h"
@@ -105,7 +110,12 @@ private:
 	 * Trees and scrub for one streamed chunk: instanced real models (DTGPlantModels) when they have been
 	 * imported, otherwise generated geometry as a second section on that chunk's component.
 	 */
-	void BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh);
+	void BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh, const std::vector<dtg::sim::Plant>& Grown);
+	/**
+	 * What the properties add round their buildings (Sim/Lots): drives, pads and walks as sections of the
+	 * chunk's component, mailboxes, culvert headwalls and sheds as generated geometry, fences as instances.
+	 */
+	void BuildChunkLots(int32 ChunkX, int32 ChunkY, int32 Part, UProceduralMeshComponent* Mesh, const std::vector<dtg::sim::LotFeatures>& Lots);
 	/** The instanced component drawing Model for terrain part Part, made on first use and kept with the part. */
 	UInstancedStaticMeshComponent* PlantComponent(int32 Part, int32 Model);
 	/** Empties and hides a part's plant instances, when its chunk is released. */

@@ -274,3 +274,41 @@ DTG_TEST(MarkingsReachTheTownStreets)
 	EXPECT_MSG(Crossings > Bars * 3, "crosswalks are not drawn as ladders (" +
 		std::to_string(Crossings) + " rungs for " + std::to_string(Bars) + " stop bars)");
 }
+
+// A crossroads community's streets are painted as county roads: a double yellow centre and white edges.
+DTG_TEST(CrossroadsStreetsAreMarkedAsCountyRoads)
+{
+	const GameState& State = dtg_test::LoadedState();
+	const auto HeightAt = [](double X, double Y, const void* User) -> double
+	{
+		return static_cast<const StatePlan*>(User)->HeightAt(X, Y);
+	};
+	const std::vector<RoadMark> Marks = MarkStreets(State.City, HeightAt, &State.Map);
+	int RuralDouble = 0;
+	int RuralEdge = 0;
+	int RuralBroken = 0;
+	int HubBroken = 0;
+	int HubDouble = 0;
+	for (const RoadMark& Mark : Marks)
+	{
+		const CityInfo* Town = State.City.CityAt(0.5 * (Mark.Ax + Mark.Bx), 0.5 * (Mark.Ay + Mark.By));
+		if (Town == nullptr)
+		{
+			continue;
+		}
+		if (Town->Style == CityStyle::Rural)
+		{
+			RuralDouble += Mark.Kind == MarkKind::CentreDouble ? 1 : 0;
+			RuralEdge += Mark.Kind == MarkKind::EdgeWhite ? 1 : 0;
+			RuralBroken += Mark.Kind == MarkKind::CentreBroken ? 1 : 0;
+		}
+		else if (Town->Style == CityStyle::Hub)
+		{
+			HubBroken += Mark.Kind == MarkKind::CentreBroken ? 1 : 0;
+			HubDouble += Mark.Kind == MarkKind::CentreDouble ? 1 : 0;
+		}
+	}
+	EXPECT_MSG(RuralDouble > 0 && RuralEdge > 0, "crossroads streets carry " + std::to_string(RuralDouble) + " double-yellow and " + std::to_string(RuralEdge) + " edge lines");
+	EXPECT_MSG(RuralBroken == 0, std::to_string(RuralBroken) + " crossroads streets are painted like town streets");
+	EXPECT_MSG(HubBroken > 0 && HubDouble == 0, "the hub's streets changed: " + std::to_string(HubBroken) + " broken, " + std::to_string(HubDouble) + " double");
+}

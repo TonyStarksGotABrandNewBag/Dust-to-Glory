@@ -99,6 +99,10 @@ namespace dtg::sim
 		double CoastDistance(double X, double Y) const;
 		/** The side of a town that faces the sea (0 south, 1 east, 2 north, 3 west), or -1 when the sea is not at its edge. */
 		int CoastSideOf(const StateCity& City) const;
+		/** How far the ground is dug below the pad here by the ditch beside a crossroads community's street; 0 off one. */
+		double DitchBesideStreets(double X, double Y) const;
+		/** How far a point is out from the asphalt's edge of the nearest crossroads community street (0 on one), or a huge number far from any. */
+		double StreetEdgeDistance(double X, double Y) const;
 		bool IsOcean(double X, double Y) const;
 
 		/**

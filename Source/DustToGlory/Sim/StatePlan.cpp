@@ -1,5 +1,7 @@
 #include "Sim/StatePlan.h"
 
+#include "Sim/Lots.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -606,7 +608,14 @@ namespace dtg::sim
 		// highway ramping in from lower ground must not drag the ground down with it. Outside the pad
 		// -- including the fade around it -- the road wins, which is what lets it hold its own grade
 		// right up to the edge of town and meet the pad there, where its anchors are pinned to it.
-		const double LandHeight = (bOnRoad && !Pads.bCore) ? PadHeight + (RoadHeight - PadHeight) * RoadWeight : PadHeight;
+		double LandHeight = (bOnRoad && !Pads.bCore) ? PadHeight + (RoadHeight - PadHeight) * RoadWeight : PadHeight;
+		// A crossroads community's streets have a ditch along them, a shoulder's width out from the
+		// asphalt: the pad is level, the lots sit beyond, and the swale between is what a Carolina
+		// county road looks like from a car. The town's street grid is known from its data alone.
+		if (Pads.bCore)
+		{
+			LandHeight -= DitchBesideStreets(X, Y);
+		}
 		Info.bRoad = bOnRoad && RoadWeight > 0.999;
 		Info.RoadNearness = bOnRoad ? RoadWeight : 0.0;
 		if (Info.bWater)
@@ -627,6 +636,45 @@ namespace dtg::sim
 		}
 		Info.RoadGradeM = LandHeight;
 		return Info;
+	}
+
+	double StatePlan::DitchBesideStreets(double X, double Y) const
+	{
+		return DitchDepthM(StreetEdgeDistance(X, Y));
+	}
+
+	double StatePlan::StreetEdgeDistance(double X, double Y) const
+	{
+		using namespace detail_stateplan;
+		double Nearest = 1e18;
+		for (const StateCity& City : Cities)
+		{
+			if (City.Style != CityStyle::Rural)
+			{
+				continue;
+			}
+			const double Width = RoadWidthFor(City.Style);
+			const Rect Area = CityRect(City, 0.0);
+			if (X < Area.MinX - DitchToM || X > Area.MaxX + DitchToM || Y < Area.MinY - DitchToM || Y > Area.MaxY + DitchToM)
+			{
+				continue;
+			}
+			const double Pitch = BlockSize + Width;
+			// Distance out from the nearest street edge, on each axis; on a street it is zero.
+			auto OffEdge = [&](double Along, double Min, int Count)
+			{
+				double Best = 1e18;
+				for (int K = 0; K <= Count; ++K)
+				{
+					const double Start = Min + K * Pitch;
+					const double Off = Along < Start ? Start - Along : (Along > Start + Width ? Along - Start - Width : 0.0);
+					Best = std::min(Best, Off);
+				}
+				return Best;
+			};
+			Nearest = std::min(Nearest, std::min(OffEdge(X, Area.MinX, City.Grid), OffEdge(Y, Area.MinY, City.Grid)));
+		}
+		return Nearest;
 	}
 
 	double StatePlan::RoadHeightAt(double X, double Y) const

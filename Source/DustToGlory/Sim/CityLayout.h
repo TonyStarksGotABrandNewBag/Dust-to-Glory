@@ -105,6 +105,10 @@ namespace dtg::sim
 		double DoorX = 0.0;
 		double DoorY = 0.0;
 		bool bDowntown = false;
+		/** In a crossroads community (CityStyle::Rural): single-storey, metal roofs, a yard, a drive. */
+		bool bRural = false;
+		/** A home's kind: 0 a brick ranch with a hip roof, 1 a siding ranch with a porch, 2 a double-wide, 3 a two-storey farmhouse. */
+		int HomeStyle = 0;
 		Money Price = 0;             // for homes and apartments
 	};
 

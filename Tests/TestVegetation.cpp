@@ -241,11 +241,13 @@ DTG_TEST(VegetationSuitsItsSurroundings)
 			" plants across the whole state");
 		EXPECT_MSG(HighPalms == 0, std::string(Which) + " has " + std::to_string(HighPalms) +
 			" palm trees up a mountain");
-		// Pine is the backbone of both Carolinas and most of inland Florida: it should not be rare.
-		EXPECT_MSG(Counts[static_cast<std::size_t>(PlantKind::Pine)] * 6 > Total,
+		// Pine is the backbone of both Carolinas and most of inland Florida: it should not be rare among the
+		// trees. The understory (scrub on a finer grid under the canopy) is not a tree and is not counted.
+		const std::size_t Trees = Total - Counts[static_cast<std::size_t>(PlantKind::Scrub)];
+		EXPECT_MSG(Counts[static_cast<std::size_t>(PlantKind::Pine)] * 6 > Trees,
 			std::string(Which) + " is only " +
-				std::to_string(Counts[static_cast<std::size_t>(PlantKind::Pine)] * 100 / (Total ? Total : 1)) +
-				"% pine, which is not the Southeast");
+				std::to_string(Counts[static_cast<std::size_t>(PlantKind::Pine)] * 100 / (Trees ? Trees : 1)) +
+				"% pine among its trees, which is not the Southeast");
 	}
 }
 
@@ -335,4 +337,44 @@ DTG_TEST(CrossroadsLotsAreWooded)
 	EXPECT_MSG(OnRoads == 0, std::to_string(OnRoads) + " yard trees stand on a street");
 	EXPECT_MSG(InBuildings == 0, std::to_string(InBuildings) + " yard trees stand in or against a building");
 	EXPECT_MSG(InTownLots == 0, std::to_string(InTownLots) + " trees on the lots of towns that keep them clear");
+}
+
+// The country round a crossroads community is woods, and the woods have a floor: shrubs under the
+// canopy, few in the open.
+DTG_TEST(CrossroadsStandInTheWoodsWithAnUnderstory)
+{
+	const GameState& State = dtg_test::LoadedState();
+	const CityInfo* Longs = nullptr;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		if (Town.bStart)
+		{
+			Longs = &Town;
+		}
+	}
+	EXPECT_MSG(Longs != nullptr, "no start town");
+	if (!Longs)
+	{
+		return;
+	}
+	// A strip of country 60 to 200 m east of the town's edge, well inside the woods' reach.
+	const Rect Country{Longs->Bounds.MaxX + 60.0, Longs->Bounds.MinY, Longs->Bounds.MaxX + 200.0, Longs->Bounds.MaxY};
+	int Trees = 0;
+	int Shrubs = 0;
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Country))
+	{
+		(Value.Kind == PlantKind::Scrub ? Shrubs : Trees) += 1;
+	}
+	const double Hectares = Country.Width() * Country.Depth() / 10000.0;
+	EXPECT_MSG(Trees / Hectares > 35.0, std::to_string(Trees) + " trees on " + std::to_string(Hectares) + " ha beside Longs: not woods");
+	EXPECT_MSG(Shrubs / Hectares > 60.0, std::to_string(Shrubs) + " shrubs on " + std::to_string(Hectares) + " ha beside Longs: no understory");
+	// And without the understory pass, no shrubs at all from a finer grid.
+	PlantingRules Bare;
+	Bare.UnderstorySpacingM = 0.0;
+	int BareShrubs = 0;
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Country, Bare))
+	{
+		BareShrubs += Value.Kind == PlantKind::Scrub ? 1 : 0;
+	}
+	EXPECT_MSG(BareShrubs < Shrubs / 2, "the understory rule is not what grows the shrubs");
 }
