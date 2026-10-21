@@ -28,6 +28,7 @@ namespace dtg::sim
 		Woodland,   // pine woods with an understory
 		Field,      // open farmland between the woods
 		Town,       // a town's paved blocks and parks (planted as they always were)
+		Beach,      // the sand along the sea: nothing grows on it
 		Count
 	};
 	const char* LandCoverName(LandCover Cover);
@@ -39,8 +40,10 @@ namespace dtg::sim
 		/** The noise that lays fields among the woods, and the share of it that is field. */
 		double FieldWavelengthM = 480.0;
 		double FieldAbove = 0.52;
-		/** No fields this close to the sea: the coast strip is palms and dunes, not crops (250 m is six real kilometres at the state's compression). */
+		/** No fields this close to the sea: the coast strip is palms and dunes, not crops. */
 		double FieldCoastM = 250.0;
+		/** The beach: this far in from the sea the ground is sand (the world builder colours it so) and bare. */
+		double BeachM = 90.0;
 		/** Woods all round a crossroads community whatever the fields do beyond, so from its streets the woods are the horizon. */
 		double CrossroadsWoodsM = 220.0;
 	};
@@ -72,4 +75,9 @@ namespace dtg::sim
 
 	/** Whether a point lies within Reach of a crossroads community's edge, outside it. */
 	bool NearCrossroads(const CityPlan& World, double X, double Y, double Reach);
+	/**
+	 * Whether open country here is a field rather than woods: the one rule, so the far land the world
+	 * builder draws to the horizon lies the same way as the trees and the ground under them.
+	 */
+	bool FieldCountryAt(const StatePlan& Map, double X, double Y, const LandCoverRules& Rules);
 }

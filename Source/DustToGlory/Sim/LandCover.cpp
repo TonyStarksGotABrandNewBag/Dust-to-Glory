@@ -17,6 +17,7 @@ namespace dtg::sim
 		case LandCover::Woodland: return "woodland";
 		case LandCover::Field: return "field";
 		case LandCover::Town: return "town";
+		case LandCover::Beach: return "beach";
 		case LandCover::Count: break;
 		}
 		return "land";
@@ -37,6 +38,17 @@ namespace dtg::sim
 			}
 		}
 		return false;
+	}
+
+	bool FieldCountryAt(const StatePlan& Map, double X, double Y, const LandCoverRules& Rules)
+	{
+		// Fields among the woods on a long noise: cultivated country, not uniform scatter. Not on the coast strip.
+		if (Map.CoastDistance(X, Y) <= Rules.FieldCoastM)
+		{
+			return false;
+		}
+		const double Stand = 0.5 + 0.5 * Map.Noise(X, Y, Rules.FieldWavelengthM);
+		return Stand < Rules.FieldAbove;
 	}
 
 	namespace detail_landcover
@@ -110,6 +122,12 @@ namespace dtg::sim
 		{
 			return LandCover::Roadside;
 		}
+		// The beach, before the town: a beach town's blocks reach the sand, and pines stood on Myrtle
+		// Beach's shore until this was a kind of ground.
+		if (Map.CoastDistance(X, Y) < Settings.BeachM)
+		{
+			return LandCover::Beach;
+		}
 		if (Town != nullptr)
 		{
 			if (Town->Style != CityStyle::Rural)
@@ -149,15 +167,7 @@ namespace dtg::sim
 		{
 			return LandCover::Woodland;
 		}
-		// Beyond, fields among the woods: cultivated country, not uniform scatter. Not on the coast strip.
-		if (Map.CoastDistance(X, Y) > Settings.FieldCoastM)
-		{
-			const double Stand = 0.5 + 0.5 * Map.Noise(X, Y, Settings.FieldWavelengthM);
-			if (Stand < Settings.FieldAbove)
-			{
-				return LandCover::Field;
-			}
-		}
-		return LandCover::Woodland;
+		// Beyond, fields among the woods.
+		return FieldCountryAt(Map, X, Y, Settings) ? LandCover::Field : LandCover::Woodland;
 	}
 }

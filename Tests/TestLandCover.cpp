@@ -4,6 +4,8 @@
 // have fields between them.
 #include "Sim/LandCover.h"
 
+#include "Sim/Vegetation.h"
+
 #include "TestFramework.h"
 #include "TestSupport.h"
 
@@ -126,22 +128,79 @@ DTG_TEST(LandCoverTellsYardsFromLotsFromRoads)
 		const LandCoverMap There(State.Map, State.City, Around(Mid[0], Mid[1], 50.0));
 		EXPECT_MSG(There.At(Mid[0], Mid[1]) == LandCover::Road, "the middle of a highway is not a road");
 	}
+	// Open water is water: the rivers' own points (a river is eight metres wide, which a grid of samples
+	// misses), and every lake's middle.
 	int Water = 0;
 	int Wet = 0;
-	for (double X = Cx - 3000.0; X <= Cx + 3000.0 && Wet < 20; X += 150.0)
+	for (const StateRiver& River : State.Map.Rivers)
 	{
-		for (double Y = Cy - 3000.0; Y <= Cy + 3000.0 && Wet < 20; Y += 150.0)
+		for (const Point2& Point : River.Points)
 		{
-			if (State.Map.InsideState(X, Y) && State.Map.SurfaceAt(X, Y).bWater)
+			if (State.Map.InsideState(Point[0], Point[1]) && State.Map.SurfaceAt(Point[0], Point[1]).bWater)
 			{
 				++Wet;
-				const LandCoverMap There(State.Map, State.City, Around(X, Y, 50.0));
-				Water += There.At(X, Y) == LandCover::Water ? 1 : 0;
+				const LandCoverMap There(State.Map, State.City, Around(Point[0], Point[1], 50.0));
+				Water += There.At(Point[0], Point[1]) == LandCover::Water ? 1 : 0;
 			}
 		}
 	}
-	EXPECT_MSG(Wet > 0, "no open water within three kilometres of Longs");
+	for (const StateLake& Lake : State.Map.Lakes)
+	{
+		if (State.Map.InsideState(Lake.X, Lake.Y) && State.Map.SurfaceAt(Lake.X, Lake.Y).bWater)
+		{
+			++Wet;
+			const LandCoverMap There(State.Map, State.City, Around(Lake.X, Lake.Y, 50.0));
+			Water += There.At(Lake.X, Lake.Y) == LandCover::Water ? 1 : 0;
+		}
+	}
+	EXPECT_MSG(Wet > 0, "no river or lake point is wet");
 	EXPECT_MSG(Water == Wet, std::to_string(Wet - Water) + " of " + std::to_string(Wet) + " wet points are not water");
+}
+
+// The beach is sand and bare: on Myrtle Beach's shore, where the photo tour stands, nothing grows.
+DTG_TEST(BeachesAreBareSand)
+{
+	using namespace detail_landcover_test;
+	const GameState& State = dtg_test::LoadedState();
+	const CityInfo* Hub = State.City.FindCity("Myrtle Beach");
+	EXPECT_MSG(Hub != nullptr, "no Myrtle Beach");
+	if (!Hub)
+	{
+		return;
+	}
+	// The nearest dry sand to the hub's centre, as the tour finds it.
+	double Sx = 0.0;
+	double Sy = 0.0;
+	bool bSand = false;
+	for (double Radius = 50.0; Radius < 4000.0 && !bSand; Radius += 50.0)
+	{
+		for (int Step = 0; Step < 36 && !bSand; ++Step)
+		{
+			const double Angle = 2.0 * 3.14159265358979 * Step / 36.0;
+			const double X = Hub->Bounds.CenterX() + Radius * std::cos(Angle);
+			const double Y = Hub->Bounds.CenterY() + Radius * std::sin(Angle);
+			const SurfaceInfo Info = State.Map.SurfaceAt(X, Y);
+			if (!Info.bWater && Info.GroundM < 1.2 && State.Map.CoastDistance(X, Y) < 40.0)
+			{
+				Sx = X;
+				Sy = Y;
+				bSand = true;
+			}
+		}
+	}
+	EXPECT_MSG(bSand, "no dry sand within four kilometres of Myrtle Beach's centre");
+	if (!bSand)
+	{
+		return;
+	}
+	const LandCoverMap Cover(State.Map, State.City, Around(Sx, Sy, 80.0));
+	EXPECT_MSG(Cover.At(Sx, Sy) == LandCover::Beach, std::string("the sand is ") + LandCoverName(Cover.At(Sx, Sy)) + ", not beach");
+	int Trees = 0;
+	for (const Plant& Value : PlantsIn(State.Map, State.City, Around(Sx, Sy, 60.0)))
+	{
+		Trees += (Value.Kind != PlantKind::Scrub && Cover.At(Value.X, Value.Y) == LandCover::Beach) ? 1 : 0;
+	}
+	EXPECT_MSG(Trees < 3, std::to_string(Trees) + " trees stand on the beach");
 }
 
 // Beyond the woods round a crossroads community the country is fields among woods, a fair share of

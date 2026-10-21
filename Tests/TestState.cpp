@@ -775,6 +775,122 @@ DTG_TEST(CrossroadsBuildingsAreSmall)
 	EXPECT_MSG(TooTall == 0, std::to_string(TooTall) + " crossroads buildings are taller than a storey");
 }
 
+// Longs is sixteen real kilometres from the sea and stands in the country. At the state's compression the
+// sea and the next town's blocks must both be far enough off that neither is Longs' horizon (at 25:1 the
+// sea was 640 m from its centre and North Myrtle Beach's blocks 300 m), and the beach towns must still
+// have the sea at their door.
+DTG_TEST(LongsIsInlandAndTheBeachesAreNot)
+{
+	const GameState& State = dtg_test::LoadedState();
+	const CityInfo* Longs = State.City.FindCity("Longs");
+	EXPECT_MSG(Longs != nullptr, "no Longs");
+	if (!Longs)
+	{
+		return;
+	}
+	const double Cx = Longs->Bounds.CenterX();
+	const double Cy = Longs->Bounds.CenterY();
+	const double ToSea = State.Map.CoastDistance(Cx, Cy);
+	EXPECT_MSG(ToSea > 1200.0, "the sea is " + std::to_string(static_cast<int>(ToSea)) + " m from Longs' centre: an ocean horizon");
+	double Nearest = 1e18;
+	std::string Who;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		if (&Town == Longs)
+		{
+			continue;
+		}
+		const double Dx = std::max({Town.Bounds.MinX - Cx, 0.0, Cx - Town.Bounds.MaxX});
+		const double Dy = std::max({Town.Bounds.MinY - Cy, 0.0, Cy - Town.Bounds.MaxY});
+		const double Distance = std::hypot(Dx, Dy);
+		if (Distance < Nearest)
+		{
+			Nearest = Distance;
+			Who = Town.Name;
+		}
+	}
+	EXPECT_MSG(Nearest > 900.0, Who + "'s blocks begin " + std::to_string(static_cast<int>(Nearest)) + " m from Longs' centre");
+	// Every beach town has the sea at its door, and the hub at Myrtle Beach stands by the shore.
+	int Beaches = 0;
+	for (const CityInfo& Town : State.City.Cities)
+	{
+		const bool bHub = Town.Name == "Myrtle Beach";
+		if (Town.Style != CityStyle::Beach && !bHub)
+		{
+			continue;
+		}
+		Beaches += bHub ? 0 : 1;
+		double Closest = 1e18;
+		for (double X = Town.Bounds.MinX; X <= Town.Bounds.MaxX + 1.0; X += 50.0)
+		{
+			for (double Y = Town.Bounds.MinY; Y <= Town.Bounds.MaxY + 1.0; Y += 50.0)
+			{
+				Closest = std::min(Closest, State.Map.CoastDistance(X, Y));
+			}
+		}
+		// Within 400 m: Hilton Head Island's centre is a real 2.6 km from its ocean beach.
+		EXPECT_MSG(Closest < (bHub ? 600.0 : 400.0), Town.Name + " stands " + std::to_string(static_cast<int>(Closest)) + " m from the sea");
+	}
+	EXPECT_MSG(Beaches > 0, "no beach town");
+}
+
+// The shore is a slope, not a cliff: from twenty metres inland to twenty out to sea at Myrtle Beach the
+// ground never steps more than a hand's width in a metre. A town's pad a metre above the sea ran to
+// the water's edge, and the terrain grid drew the step as a sawtooth.
+DTG_TEST(TheShoreIsASlopeNotACliff)
+{
+	const GameState& State = dtg_test::LoadedState();
+	const CityInfo* Hub = State.City.FindCity("Myrtle Beach");
+	EXPECT_MSG(Hub != nullptr, "no Myrtle Beach");
+	if (!Hub)
+	{
+		return;
+	}
+	// The nearest dry sand to the hub's centre with the sea 120 m off in some direction, as the tour finds it.
+	int Checked = 0;
+	double Worst = 0.0;
+	std::string Where;
+	for (double Radius = 50.0; Radius < 4000.0 && Checked == 0; Radius += 50.0)
+	{
+		for (int Step = 0; Step < 36 && Checked == 0; ++Step)
+		{
+			const double Angle = 2.0 * 3.14159265358979 * Step / 36.0;
+			const double X = Hub->Bounds.CenterX() + Radius * std::cos(Angle);
+			const double Y = Hub->Bounds.CenterY() + Radius * std::sin(Angle);
+			const SurfaceInfo Info = State.Map.SurfaceAt(X, Y);
+			if (Info.bWater || Info.GroundM > 1.2 || State.Map.CoastDistance(X, Y) > 40.0)
+			{
+				continue;
+			}
+			for (int Look = 0; Look < 16 && Checked == 0; ++Look)
+			{
+				const double Heading = 2.0 * 3.14159265358979 * Look / 16.0;
+				const double Dx = std::cos(Heading);
+				const double Dy = std::sin(Heading);
+				const SurfaceInfo Out = State.Map.SurfaceAt(X + 120.0 * Dx, Y + 120.0 * Dy);
+				if (!(Out.bWater && Out.bOcean))
+				{
+					continue;
+				}
+				double Last = State.Map.SurfaceAt(X - 20.0 * Dx, Y - 20.0 * Dy).GroundM;
+				for (double Along = -19.0; Along <= 20.0; Along += 1.0)
+				{
+					const double Here = State.Map.SurfaceAt(X + Along * Dx, Y + Along * Dy).GroundM;
+					if (std::fabs(Here - Last) > Worst)
+					{
+						Worst = std::fabs(Here - Last);
+						Where = std::to_string(static_cast<int>(Along)) + " m along from the sand at (" + std::to_string(static_cast<int>(X)) + ", " + std::to_string(static_cast<int>(Y)) + ")";
+					}
+					Last = Here;
+					++Checked;
+				}
+			}
+		}
+	}
+	EXPECT_MSG(Checked > 0, "no shore found at Myrtle Beach");
+	EXPECT_MSG(Worst < 0.15, "the shore steps " + std::to_string(Worst) + " m in a metre at " + Where);
+}
+
 // A street of houses is not one house: four kinds, the double-wides long and narrow, the farmhouses two
 // storeys, and never all of one kind in a crossroads community.
 DTG_TEST(HomesComeInKinds)

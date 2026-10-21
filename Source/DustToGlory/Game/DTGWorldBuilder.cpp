@@ -10,6 +10,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "GameFramework/Pawn.h"
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "Game/DTGCharacter.h"
+#include "Game/DTGVehicle.h"
 #include "Game/DTGGameSubsystem.h"
 #include "Game/DTGMeshBuilder.h"
 #include "Game/DTGPlantModels.h"
@@ -147,6 +149,14 @@ ADTGWorldBuilder::ADTGWorldBuilder()
 	// covers every page of the shadow map at every level, which is what overflowed the virtual shadow
 	// maps' non-Nanite marking queue every frame ("[VSM] Non-Nanite Marking Job Queue overflow").
 	Water->SetCastShadow(false);
+
+	FarLand = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("FarLand"));
+	FarLand->SetupAttachment(Root);
+	FarLand->SetMobility(EComponentMobility::Static);
+	// Under the streamed chunks where they exist and never stood on: nothing collides with it, and it
+	// casts no shadow, for the same reason as the water.
+	FarLand->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FarLand->SetCastShadow(false);
 }
 
 void ADTGWorldBuilder::BeginPlay()
@@ -211,6 +221,7 @@ void ADTGWorldBuilder::BuildStaticWorld()
 	BuildVenues();
 	Marks[5] = FPlatformTime::Seconds();
 	BuildWater();
+	BuildFarLand(Game->ToUnreal(Game->Sim().City.SpawnX, Game->Sim().City.SpawnY, 0.0));
 	Marks[6] = FPlatformTime::Seconds();
 	CookBuildingCollision();
 	Marks[7] = FPlatformTime::Seconds();
@@ -475,8 +486,10 @@ UInstancedStaticMeshComponent* ADTGWorldBuilder::PlantComponent(int32 Part, int3
 		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
 		Instances->SetupAttachment(GetRootComponent());
 		Instances->SetMobility(EComponentMobility::Static);
-		Instances->RegisterComponent();
+		// The mesh before the component registers: made mid-play, a component that registered empty and
+		// took its mesh and instances afterwards never drew them (Milestone 4, every chunk rebuilt bare).
 		Instances->SetStaticMesh(DTGPlantModels::Mesh(Model));
+		Instances->RegisterComponent();
 		detail_worldbuilder::ApplyScalarOverride(Instances, this);
 		// As before: no collision. A car that clips a pine is a smaller problem than cooking collision
 		// for hundreds of trees every time a chunk streams in.
@@ -494,8 +507,13 @@ void ADTGWorldBuilder::ClearPlants(int32 Part)
 		const int32 Index = Part * DTGPlantModels::Count() + Model;
 		if (PlantInstances.IsValidIndex(Index) && PlantInstances[Index])
 		{
-			PlantInstances[Index]->ClearInstances();
-			PlantInstances[Index]->SetVisibility(false);
+			// Destroyed, and made again when the part is next used, rather than emptied and hidden: a part
+			// taken back from the pool after the player had moved on came back with its trees, grass and
+			// fences missing. Every chunk round Longs was bare after the photo tour's jump to Myrtle Beach
+			// and back, while chunks on new parts grew (Milestone 4). Emptied and refilled, the component
+			// kept nothing; a new one is a few hundred microseconds a chunk.
+			PlantInstances[Index]->DestroyComponent();
+			PlantInstances[Index] = nullptr;
 		}
 	}
 }
@@ -512,8 +530,10 @@ UInstancedStaticMeshComponent* ADTGWorldBuilder::PropComponent(int32 Part, int32
 		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(this);
 		Instances->SetupAttachment(GetRootComponent());
 		Instances->SetMobility(EComponentMobility::Static);
-		Instances->RegisterComponent();
+		// The mesh before the component registers: made mid-play, a component that registered empty and
+		// took its mesh and instances afterwards never drew them (Milestone 4, every chunk rebuilt bare).
 		Instances->SetStaticMesh(DTGPropModels::Mesh(Mesh));
+		Instances->RegisterComponent();
 		// Drawn, not collided with, for now: a car body sweep against thousands of poles is its own job.
 		Instances->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Instances->SetCastShadow(true);
@@ -541,8 +561,9 @@ void ADTGWorldBuilder::ClearProps(int32 Part)
 		const int32 Index = Part * DTGPropModels::MeshCount() + Mesh;
 		if (PropInstances.IsValidIndex(Index) && PropInstances[Index])
 		{
-			PropInstances[Index]->ClearInstances();
-			PropInstances[Index]->SetVisibility(false);
+			// As the plants: made again, not refilled (see ClearPlants).
+			PropInstances[Index]->DestroyComponent();
+			PropInstances[Index] = nullptr;
 		}
 	}
 }
@@ -693,6 +714,8 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 		}
 		UInstancedStaticMeshComponent* Instances = PropComponent(Part, Mesh);
 		Instances->AddInstances(PerMesh[Mesh], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+		// Rebuilt outright, not updated in place: the in-place update reached a component with no scene proxy yet.
+		Instances->MarkRenderStateDirty();
 		Instances->SetVisibility(true);
 	}
 	for (int32 Model = 0; Model < PerTree.Num(); ++Model)
@@ -703,6 +726,7 @@ void ADTGWorldBuilder::BuildChunkProps(int32 ChunkX, int32 ChunkY, int32 Part)
 		}
 		UInstancedStaticMeshComponent* Instances = PlantComponent(Part, Model);
 		Instances->AddInstances(PerTree[Model], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+		Instances->MarkRenderStateDirty();
 		Instances->SetVisibility(true);
 	}
 }
@@ -825,6 +849,7 @@ void ADTGWorldBuilder::BuildChunkLots(int32 ChunkX, int32 ChunkY, int32 Part, UP
 	{
 		UInstancedStaticMeshComponent* Instances = PropComponent(Part, DTGPropModels::FenceMesh());
 		Instances->AddInstances(Panels, /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+		Instances->MarkRenderStateDirty();
 		Instances->SetVisibility(true);
 	}
 }
@@ -930,6 +955,7 @@ void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, 
 				PerModel[Model].Add(DTGPlantModels::TransformFor(Value, Model));
 			}
 		}
+		int32 Placed = 0;
 		for (int32 Model = 0; Model < PerModel.Num(); ++Model)
 		{
 			if (PerModel[Model].IsEmpty())
@@ -938,8 +964,11 @@ void ADTGWorldBuilder::BuildChunkPlants(int32 ChunkX, int32 ChunkY, int32 Part, 
 			}
 			UInstancedStaticMeshComponent* Instances = PlantComponent(Part, Model);
 			Instances->AddInstances(PerModel[Model], /*bShouldReturnIndices*/ false, /*bWorldSpace*/ true);
+			Instances->MarkRenderStateDirty();
 			Instances->SetVisibility(true);
+			Placed += PerModel[Model].Num();
 		}
+		UE_LOG(LogDTG, Log, TEXT("Plants in chunk %d,%d: %d instances on part %d"), ChunkX, ChunkY, Placed, Part);
 		Mesh->ClearMeshSection(1);
 		return;
 	}
@@ -1112,6 +1141,95 @@ void ADTGWorldBuilder::BuildWater()
 	Water->SetMaterial(0, DTGSurface::Material(EDTGSurface::Water));
 }
 
+void ADTGWorldBuilder::BuildFarLand(const FVector& Around)
+{
+	// The land beyond the streamed chunks: a coarse sheet, a vertex every hundred metres, out to the
+	// horizon, with the ground's make-up from the land cover -- fields sand, woods the floor's brown
+	// through the green, towns lawn. Without it the chunks ended 900 m out and the sea sheet, which runs
+	// under the whole state at sea level, showed beyond them in every direction: the ocean on Longs'
+	// northern horizon, where the next thing is North Carolina. It sits 40 cm under the chunks' ground, so
+	// where they exist they cover it, and the step at their edge is below a wheel.
+	if (!Game || !Game->IsContentLoaded() || !FarLand)
+	{
+		return;
+	}
+	// -DTGFarLand=0 leaves it out, for telling its effects from everything else's in a capture.
+	int32 Wanted = 1;
+	FParse::Value(FCommandLine::Get(), TEXT("DTGFarLand="), Wanted);
+	if (Wanted == 0)
+	{
+		return;
+	}
+	const double Started = FPlatformTime::Seconds();
+	const StatePlan& Map = Game->Sim().Map;
+	const CityPlan& World = Game->Sim().City;
+	const double S = DTGMetresToUnreal;
+	const double Pitch = FMath::Max(20.0, static_cast<double>(FarPitchM));
+	const double Reach = FMath::Max(Pitch * 4.0, static_cast<double>(FarReachM));
+	const FVector2D Centre = Game->ToSim(Around);
+	// Snapped to the pitch, so a rebuild round a new centre lays its vertices where the last did.
+	const double OriginX = FMath::FloorToDouble((Centre.X - Reach) / Pitch) * Pitch;
+	const double OriginY = FMath::FloorToDouble((Centre.Y - Reach) / Pitch) * Pitch;
+	const int32 Cells = FMath::CeilToInt(2.0 * Reach / Pitch);
+	const dtg::sim::LandCoverRules CoverRules;
+	TArray<FVector> Verts;
+	TArray<int32> Tris;
+	TArray<FVector> Normals;
+	TArray<FVector2D> Uvs;
+	TArray<FLinearColor> Colors;
+	TArray<FProcMeshTangent> Tangents;
+	Verts.Reserve((Cells + 1) * (Cells + 1));
+	for (int32 J = 0; J <= Cells; ++J)
+	{
+		for (int32 I = 0; I <= Cells; ++I)
+		{
+			const double X = OriginX + I * Pitch;
+			const double Y = OriginY + J * Pitch;
+			const SurfaceInfo Info = Map.SurfaceAt(X, Y);
+			double Z = Info.GroundM - 0.4;
+			FLinearColor Colour(1.0f, 0.0f, 0.0f, 0.0f);
+			if (Info.bWater)
+			{
+				// Well under the water, so the sheet from the last dry vertex dives below the surface within a
+				// few metres of it: at the sea bed's own depth it reached out as sand teeth a hundred metres
+				// into the sea in the Myrtle Beach capture.
+				Z = Info.bOcean ? -8.0 : Info.WaterM - 6.0;
+				Colour = Info.bOcean ? FLinearColor(0.0f, 1.0f, 0.0f, 0.0f) : FLinearColor(0.0f, 0.0f, 1.0f, 0.0f);
+			}
+			else if (Map.CoastDistance(X, Y) < CoverRules.BeachM)
+			{
+				Colour = FLinearColor(0.0f, 1.0f, 0.0f, 0.0f);
+			}
+			else if (World.CityAt(X, Y) == nullptr)
+			{
+				const bool bWoods = dtg::sim::NearCrossroads(World, X, Y, CoverRules.CrossroadsWoodsM) || !dtg::sim::FieldCountryAt(Map, X, Y, CoverRules);
+				Colour = bWoods ? FLinearColor(0.55f, 0.0f, 0.0f, 0.45f) : FLinearColor(0.3f, 0.7f, 0.0f, 0.0f);
+			}
+			Verts.Add(FVector(X * S, Y * S, Z * S));
+			Normals.Add(FVector::UpVector);
+			Uvs.Add(FVector2D(X / 8.0, Y / 8.0));
+			Colors.Add(Colour);
+			Tangents.Add(FProcMeshTangent(1.0f, 0.0f, 0.0f));
+		}
+	}
+	for (int32 J = 0; J < Cells; ++J)
+	{
+		for (int32 I = 0; I < Cells; ++I)
+		{
+			const int32 A = J * (Cells + 1) + I;
+			const int32 B = A + 1;
+			const int32 C = A + Cells + 1;
+			const int32 D = C + 1;
+			Tris.Append({A, C, D, A, D, B});
+		}
+	}
+	FarLand->CreateMeshSection_LinearColor(0, Verts, Tris, Normals, Uvs, Colors, Tangents, /*bCreateCollision*/ false);
+	FarLand->SetMaterial(0, DTGSurface::Material(EDTGSurface::Terrain));
+	FarLandCentre = Around;
+	UE_LOG(LogDTG, Log, TEXT("Far land: %d vertices to %.0f m round (%.0f, %.0f) m in %.2f s"), Verts.Num(), Reach, Centre.X, Centre.Y,
+		FPlatformTime::Seconds() - Started);
+}
+
 // ============================================================================================ Terrain streaming
 
 void ADTGWorldBuilder::Tick(float DeltaSeconds)
@@ -1140,6 +1258,7 @@ void ADTGWorldBuilder::Tick(float DeltaSeconds)
 		}
 	}
 	FVector Around = FVector::ZeroVector;
+	TArray<FVector> Centres;
 	if (const APlayerController* Controller = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
 	{
 		if (const APawn* Pawn = Controller->GetPawn())
@@ -1147,43 +1266,108 @@ void ADTGWorldBuilder::Tick(float DeltaSeconds)
 			// The car while driving, and the street outside while indoors -- interiors are a pocket
 			// far below the map, and streaming the ground around *that* would unload the whole state.
 			Around = ADTGCharacter::InterestPointFor(Pawn);
+			Centres.Add(Around);
+			// And the ground under the player themselves and under their own cars, wherever the world is
+			// being built round: the photo tour's jump to Myrtle Beach unloaded Longs, and the player's car
+			// on its pad fell through where the ground had been, at 548 km/h by the first capture.
+			const FVector PawnAt = Pawn->GetActorLocation();
+			if (FVector::Dist2D(PawnAt, Around) > ChunkSizeM * DTGMetresToUnreal)
+			{
+				Centres.Add(PawnAt);
+			}
 		}
 		else
 		{
 			FRotator Unused;
 			Controller->GetPlayerViewPoint(Around, Unused);
+			Centres.Add(Around);
+		}
+		// With or without a pawn (the photo tour has none): the player's own cars keep their ground.
+		for (TActorIterator<ADTGVehicle> It(GetWorld()); It; ++It)
+		{
+			if (It->OwnedUid().IsEmpty())
+			{
+				continue;
+			}
+			const FVector CarAt = It->GetActorLocation();
+			bool bCovered = false;
+			for (const FVector& Centre : Centres)
+			{
+				bCovered = bCovered || FVector::Dist2D(CarAt, Centre) < ChunkSizeM * DTGMetresToUnreal;
+			}
+			if (!bCovered)
+			{
+				Centres.Add(CarAt);
+			}
 		}
 	}
-	UpdateChunks(Around);
+	if (FParse::Param(FCommandLine::Get(), TEXT("DTGChunkLog")) && GFrameCounter % 120 == 0)
+	{
+		FString Where;
+		for (const FVector& Centre : Centres)
+		{
+			Where += FString::Printf(TEXT(" (%.0f, %.0f)"), Centre.X / DTGMetresToUnreal, Centre.Y / DTGMetresToUnreal);
+		}
+		UE_LOG(LogDTG, Log, TEXT("Chunks: streaming round%s m."), *Where);
+	}
+	UpdateChunks(Centres);
 }
 
-void ADTGWorldBuilder::UpdateChunks(const FVector& Around)
+void ADTGWorldBuilder::UpdateChunks(const TArray<FVector>& Centres)
 {
+	if (Centres.IsEmpty())
+	{
+		return;
+	}
+	const FVector& Around = Centres[0];
+	// -DTGChurn releases every chunk once, five seconds in, so a capture shows what the chunks look like
+	// after the player has driven away and back: the Milestone 4 tour's jump to Myrtle Beach and back
+	// came back with every rebuilt chunk bare of trees, grass and fences.
+	if (!bChurned && GetWorld() && GetWorld()->GetTimeSeconds() > 5.0 && FParse::Param(FCommandLine::Get(), TEXT("DTGChurn")))
+	{
+		bChurned = true;
+		for (int32 Index = Chunks.Num() - 1; Index >= 0; --Index)
+		{
+			ReleaseChunk(Index);
+		}
+		UE_LOG(LogDTG, Log, TEXT("Chunks: every chunk released on purpose (-DTGChurn)."));
+	}
+	// The far land follows the player, a third of its reach at a time.
+	if (FVector::Dist2D(Around, FarLandCentre) > FarReachM * 0.35 * DTGMetresToUnreal)
+	{
+		BuildFarLand(Around);
+	}
 	const double ChunkUu = ChunkSizeM * DTGMetresToUnreal;
 	const int32 Radius = FMath::Max(1, FMath::CeilToInt(ViewDistanceM / ChunkSizeM));
 	const int32 CentreX = FMath::FloorToInt32(Around.X / ChunkUu);
 	const int32 CentreY = FMath::FloorToInt32(Around.Y / ChunkUu);
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 
-	// Note which chunks should exist, nearest first so the ground under the player is never the last to arrive.
+	// Note which chunks should exist round every centre, nearest the first first so the ground under the
+	// player is never the last to arrive.
 	Pending.Reset();
-	for (int32 Y = CentreY - Radius; Y <= CentreY + Radius; ++Y)
+	for (const FVector& Centre : Centres)
 	{
-		for (int32 X = CentreX - Radius; X <= CentreX + Radius; ++X)
+		const int32 AtX = FMath::FloorToInt32(Centre.X / ChunkUu);
+		const int32 AtY = FMath::FloorToInt32(Centre.Y / ChunkUu);
+		for (int32 Y = AtY - Radius; Y <= AtY + Radius; ++Y)
 		{
-			if (FMath::Square(X - CentreX) + FMath::Square(Y - CentreY) > FMath::Square(Radius))
+			for (int32 X = AtX - Radius; X <= AtX + Radius; ++X)
 			{
-				continue;
-			}
-			if (const int32* Found = ChunkAt.Find(FIntPoint(X, Y)))
-			{
-				if (Chunks.IsValidIndex(*Found))
+				if (FMath::Square(X - AtX) + FMath::Square(Y - AtY) > FMath::Square(Radius))
 				{
-					Chunks[*Found].LastSeen = Now;
 					continue;
 				}
+				if (const int32* Found = ChunkAt.Find(FIntPoint(X, Y)))
+				{
+					if (Chunks.IsValidIndex(*Found))
+					{
+						Chunks[*Found].LastSeen = Now;
+						continue;
+					}
+				}
+				Pending.AddUnique(FIntPoint(X, Y));
 			}
-			Pending.Add(FIntPoint(X, Y));
 		}
 	}
 	Pending.Sort([CentreX, CentreY](const FIntPoint& A, const FIntPoint& B)
@@ -1509,6 +1693,10 @@ void ADTGWorldBuilder::ReleaseChunk(int32 Index)
 		TerrainParts[Chunks[Index].Part]->ClearMeshSection(2);
 		TerrainParts[Chunks[Index].Part]->SetVisibility(false);
 		FreeParts.Add(Chunks[Index].Part);
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("DTGChunkLog")))
+	{
+		UE_LOG(LogDTG, Log, TEXT("Chunk %d,%d released."), Chunks[Index].X, Chunks[Index].Y);
 	}
 	ChunkAt.Remove(FIntPoint(Chunks[Index].X, Chunks[Index].Y));
 	Chunks.RemoveAtSwap(Index);

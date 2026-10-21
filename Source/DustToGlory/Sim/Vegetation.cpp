@@ -280,6 +280,7 @@ namespace dtg::sim
 				case LandCover::Roadside: Density = Rules.RoadsideDensity; break;
 				case LandCover::Town: Density = Stand * Stand * (0.45 + 0.55 * Patch); break;
 				case LandCover::Field:
+				case LandCover::Beach:
 				case LandCover::Water:
 				case LandCover::Road:
 				case LandCover::Street:

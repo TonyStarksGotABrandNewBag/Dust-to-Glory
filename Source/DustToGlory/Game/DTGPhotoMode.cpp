@@ -20,7 +20,9 @@
 
 #include "Sim/StreetFurniture.h"
 
+#include "Components/InstancedStaticMeshComponent.h"
 #include "EngineUtils.h"
+#include "UObject/UObjectIterator.h"
 
 #include "Game/DTGBody.h"
 #include "Game/DTGCharacter.h"
@@ -89,6 +91,11 @@ void ADTGPhotoMode::BeginPlay()
 {
 	Super::BeginPlay();
 	detail_photo::SeedFromCommandLine();
+	// Lit, whatever view mode the last session left: one capture pass came back in shader complexity.
+	if (GEngine)
+	{
+		GEngine->Exec(GetWorld(), TEXT("viewmode lit"));
+	}
 	Game = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDTGGameSubsystem>() : nullptr;
 	if (!Game || !Game->IsContentLoaded())
 	{
@@ -170,6 +177,35 @@ void ADTGPhotoMode::Tick(float DeltaSeconds)
 			UE_LOG(LogDTG, Log, TEXT("Photo mode: car %s at (%.1f, %.1f) m, yaw %.0f, %.0f km/h, %.1f m off the street's edge, highway nearness %.2f, %s"),
 				*It->GetName(), Where.X, Where.Y, It->GetActorRotation().Yaw, It->SpeedKph(), Game->Sim().Map.StreetEdgeDistance(Where.X, Where.Y), Under.RoadNearness,
 				It->ParkedCarId().IsEmpty() ? TEXT("traffic") : TEXT("parked"));
+		}
+		// And the instanced meshes (trees, grass, fences, poles) whose bounds come within 150 m of the camera:
+		// how many instances they hold and whether they are registered and visible, because one capture
+		// pass showed none of them where the log said hundreds had been placed.
+		{
+			int32 Components = 0;
+			int32 InstancesHeld = 0;
+			int32 Hidden = 0;
+			int32 Unregistered = 0;
+			int32 Empty = 0;
+			for (TObjectIterator<UInstancedStaticMeshComponent> It; It; ++It)
+			{
+				if (It->GetWorld() != GetWorld() || It->GetInstanceCount() == 0 && It->GetNumMaterials() == 0)
+				{
+					continue;
+				}
+				const FBoxSphereBounds Bounds = It->Bounds;
+				if (FVector::Dist2D(Bounds.Origin, GetActorLocation()) > 150.0 * DTGMetresToUnreal + Bounds.SphereRadius)
+				{
+					continue;
+				}
+				++Components;
+				InstancesHeld += It->GetInstanceCount();
+				Hidden += It->IsVisible() ? 0 : 1;
+				Unregistered += It->IsRegistered() ? 0 : 1;
+				Empty += It->GetInstanceCount() == 0 ? 1 : 0;
+			}
+			UE_LOG(LogDTG, Log, TEXT("Photo mode: %d instanced components within 150 m hold %d instances; %d hidden, %d unregistered, %d empty."),
+				Components, InstancesHeld, Hidden, Unregistered, Empty);
 		}
 		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Photos"), Shots[Current].Name + TEXT(".png"));
 		FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI*/ false, /*bAddFilenameSuffix*/ false);
@@ -505,6 +541,40 @@ void ADTGPhotoMode::PlanShots()
 		}
 	}
 
+	// Myrtle Beach's shore: the nearest dry sand to the hub's centre, looking along the beach with the sea
+	// to one side and the oceanfront row to the other, at noon -- the coast where the coast is.
+	if (const CityInfo* Hub = City.FindCity("Myrtle Beach"))
+	{
+		bool bShore = false;
+		for (double Radius = 50.0; Radius < 4000.0 && !bShore; Radius += 50.0)
+		{
+			for (int32 Step = 0; Step < 36 && !bShore; ++Step)
+			{
+				const double Angle = 2.0 * UE_PI * Step / 36.0;
+				const double X = Hub->Bounds.CenterX() + Radius * FMath::Cos(Angle);
+				const double Y = Hub->Bounds.CenterY() + Radius * FMath::Sin(Angle);
+				const SurfaceInfo Info = Map.SurfaceAt(X, Y);
+				if (Info.bWater || Info.GroundM > 1.2 || Map.CoastDistance(X, Y) > 40.0)
+				{
+					continue;
+				}
+				for (int32 Look = 0; Look < 16 && !bShore; ++Look)
+				{
+					const double Heading = 2.0 * UE_PI * Look / 16.0;
+					const SurfaceInfo Out = Map.SurfaceAt(X + 120.0 * FMath::Cos(Heading), Y + 120.0 * FMath::Sin(Heading));
+					if (Out.bWater && Out.bOcean)
+					{
+						FDTGPhotoShot Shore{TEXT("myrtle-beach"), At(X, Y, Info.GroundM + 1.8), FRotator(-2.0, FMath::RadiansToDegrees(Heading) - 55.0, 0.0)};
+						Shore.ClockMinutes = 12.5 * 60.0;
+						Shore.ForceWeather = static_cast<int>(Weather::Clear);
+						Shots.Add(Shore);
+						bShore = true;
+					}
+				}
+			}
+		}
+	}
+
 	// A country road: the nearest run of utility poles outside town, from the lane, looking down the lines.
 	{
 		FurnitureRules Rules;
@@ -591,6 +661,21 @@ void ADTGPhotoMode::PlanShots()
 		Above.ClockMinutes = 12.5 * 60.0;
 		Above.ForceWeather = static_cast<int>(Weather::Clear);
 		Shots.Add(Above);
+		// The pines, close and far: from the woods' edge east of the town, off the highway's line, looking
+		// into the stand and then along it, so the same eye sees a trunk at five metres and the belt at 300.
+		{
+			const double Ex = Town.Bounds.MaxX + 14.0;
+			const double Ey = Town.Bounds.CenterY() + 45.0;
+			const FVector PineEye = At(Ex, Ey, Map.HeightAt(Ex, Ey) + 1.7);
+			FDTGPhotoShot Close{TEXT("longs-pines-close"), PineEye, FRotator(6.0, 0.0, 0.0)};
+			Close.ClockMinutes = 12.5 * 60.0;
+			Close.ForceWeather = static_cast<int>(Weather::Clear);
+			Shots.Add(Close);
+			FDTGPhotoShot Far{TEXT("longs-pines-far"), PineEye, FRotator(3.0, 90.0, 0.0)};
+			Far.ClockMinutes = 12.5 * 60.0;
+			Far.ForceWeather = static_cast<int>(Weather::Clear);
+			Shots.Add(Far);
+		}
 	}
 
 	// A person: the nearest out on the street when the shot comes up (framed then, in Frame), or the player

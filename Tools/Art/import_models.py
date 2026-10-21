@@ -31,6 +31,9 @@ TRIANGLE_BUDGET = 600_000
 # Foliage: Nanite's area preservation stops thin leaves and needles from eroding away as it simplifies.
 VEGETATION = {"Pine", "Fir", "Palm1", "Palm2", "Palm3", "Jacaranda", "SmallTree", "Bermuda", "GrassA",
               "GrassB", "Shrub1", "Shrub2", "Shrub3", "Shrub4", "Fern"}
+# The needle trees: millions of needle triangles that the legacy area-preserving mode collapsed into
+# flat dark flags a hundred metres off (the "dead pines" of Milestones 2 and 3). Voxelize keeps a cloud a cloud.
+CONIFERS = {"Pine", "Fir"}
 
 assets = unreal.EditorAssetLibrary
 
@@ -76,8 +79,11 @@ def finish_role(role, asset_id):
         trim = tris > TRIANGLE_BUDGET and role not in VEGETATION
         settings.set_editor_property("keep_percent_triangles", max(0.01, TRIANGLE_BUDGET / float(tris)) if trim else 1.0)
         if role in VEGETATION and hasattr(unreal, "NaniteShapePreservation"):
-            # UE 5.8's foliage mode: keeps thin leaves and needles from eroding as Nanite simplifies.
-            settings.set_editor_property("shape_preservation", unreal.NaniteShapePreservation.PRESERVE_AREA)
+            # UE 5.8's foliage modes: area preservation (the legacy one) for leaves, voxelize for needles.
+            preservation = unreal.NaniteShapePreservation.PRESERVE_AREA
+            if role in CONIFERS and hasattr(unreal.NaniteShapePreservation, "VOXELIZE"):
+                preservation = unreal.NaniteShapePreservation.VOXELIZE
+            settings.set_editor_property("shape_preservation", preservation)
         mesh.set_editor_property("nanite_settings", settings)
         log("%s: %s, %d triangles%s" % (role, mesh.get_name(), tris,
             " (keeping %.0f%%)" % (100.0 * TRIANGLE_BUDGET / tris) if trim else ""))
@@ -135,7 +141,11 @@ def build_model_master(name, masked):
     material.set_editor_property("used_with_nanite", True)
     if masked:
         material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
-        material.set_editor_property("opacity_mask_clip_value", 0.4)
+        # 0.3, not 0.4: the pine's alpha trims a tenth of its needle edges at 0.4, at every mip.
+        material.set_editor_property("opacity_mask_clip_value", 0.3)
+        # Foliage shading: light comes through a leaf, so a crown with the sun behind it glows rather
+        # than going black, which is most of what made the pines read as dead.
+        material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
     base = unreal.load_asset(GLTF_BASE)
 
     def texture(param, sampler, y):
@@ -165,6 +175,9 @@ def build_model_master(name, masked):
     factor.set_editor_property("default_value", unreal.LinearColor(1.0, 1.0, 1.0, 1.0))
     mel.connect_material_property(multiply(colour, "RGB", factor, "RGB", -400), "", unreal.MaterialProperty.MP_BASE_COLOR)
     if masked:
+        # The leaf's own colour, dimmed, as what the light through it carries.
+        mel.connect_material_property(multiply(colour, "RGB", scalar("SubsurfaceFactor", 0.6, -300), "", -300), "",
+                                      unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
         # Poly Haven ships leaf colour as JPG (no alpha) and the cut-out as a separate map, so the
         # mask is OpacityTexture (white by default) times the colour's own alpha: either source works.
         opacity = texture("OpacityTexture", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, -550)

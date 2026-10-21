@@ -185,6 +185,14 @@ cloning.
   `longs-lot` (one double-wide from 16 m up, for the drive, pad, walk and mailbox);
   `-DTGPhotoShots=longs-noon,longs-golden,longs-night,longs-rain,longs-above,longs-lot`. Each chunk
   logs `Lots in chunk x,y: ...` with what its properties drew.
+- **The state is 10 real metres to the game metre** (`"scale"` in `Content/Data/state.json`); the sea is
+  1.6 km from Longs and the beach towns stand on the coast (`LongsIsInlandAndTheBeachesAreNot`). The far
+  land (`ADTGWorldBuilder::BuildFarLand`) carries the ground to 12 km beyond the 900 m chunks; `-DTGFarLand=0`
+  leaves it out of a capture, `-DTGChurn` releases every chunk five seconds in to test rebuilds, and each
+  capture logs the instanced components near the camera. An instanced component must have its mesh before
+  it registers, or one made in play never draws.
+- **Conifers import with Nanite's voxelizing foliage mode** and the leaf master is two-sided foliage
+  (`Tools/Art/import_models.py`); the pine mix is the pine's own three trees. There is no loblolly asset.
 - **Land cover is a Sim module** (`Sim/LandCover.h`): `LandCoverMap::At` says what any point of the
   state is for (water, highway, street, yard, store lot, roadside, woods, field, town), and the trees
   (`Vegetation`), the ground's make-up (`BuildChunk`'s vertex colour: R grass, G sand, B clay, A forest

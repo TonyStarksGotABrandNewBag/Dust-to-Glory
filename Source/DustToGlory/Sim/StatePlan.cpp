@@ -15,6 +15,7 @@ namespace dtg::sim
 		constexpr double BlockSize = 110.0;
 		constexpr double CityPad = 20.0;        // level ground around a city's outer road
 		constexpr double CityFade = 120.0;      // ...blending back into the land over this distance
+		constexpr double ShoreFeatherM = 25.0;  // a pad feathers down to the water line over this, from the sea
 		constexpr double VenuePad = 15.0;
 		constexpr double VenueFade = 80.0;
 		constexpr double RoadShoulder = 2.0;
@@ -372,7 +373,10 @@ namespace dtg::sim
 		const double Coast = CoastDistance(X, Y);
 		if (IsOcean(X, Y))
 		{
-			return -2.0 - std::min(12.0, Coast * 0.02); // the continental shelf
+			// Wet sand sloping away under the water for the first fifty metres, then the shelf. The sea bed
+			// began two metres down at the water's edge, a cliff that the terrain grid turned into a sawtooth
+			// shoreline of three-metre teeth (the Milestone 4 Myrtle Beach capture).
+			return -0.1 - std::min(2.0, Coast * 0.04) - std::min(12.0, std::max(0.0, Coast - 50.0) * 0.02);
 		}
 		const double RealKm = Coast * Scale / 1000.0;
 		// Coastal plain rising through the sandhills to the Piedmont, with rolling hills that grow inland.
@@ -398,7 +402,8 @@ namespace dtg::sim
 		double Height = std::max(0.0, Real) / Scale * VerticalScale;
 		if (Coast < 60.0)
 		{
-			Height = 0.6 + (Height - 0.6) * detail_stateplan::Smooth(Coast / 60.0); // the beach
+			// The beach: a hand's width above the water at its edge, rising to the land over sixty metres.
+			Height = 0.05 + (Height - 0.05) * detail_stateplan::Smooth(Coast / 60.0);
 		}
 		return Height;
 	}
@@ -535,7 +540,18 @@ namespace dtg::sim
 		{
 			Pads.Add(RectDistance(detail_stateplan::Expand(VenueLayouts[Index].Area, VenuePad), X, Y), VenueFade, Venues[Index].LevelM);
 		}
-		const double PadHeight = Pads.Apply(Info.GroundM);
+		double PadHeight = Pads.Apply(Info.GroundM);
+		// A town's pad stops at the beach: feathered down to the water line over the last 25 m. The pad's
+		// level, a metre up, had run to the water's edge at Myrtle Beach, and the terrain grid drew that
+		// step as a sawtooth of three-metre teeth (Milestone 4).
+		if (Pads.bCore || PadHeight != Info.GroundM)
+		{
+			const double ToSea = CoastDistance(X, Y);
+			if (ToSea < ShoreFeatherM)
+			{
+				PadHeight = 0.05 + (PadHeight - 0.05) * detail_stateplan::Smooth(ToSea / ShoreFeatherM);
+			}
+		}
 
 		// Then the roads, on top of the pads rather than under them. A road is cut and filled to its own
 		// graded profile (see GradeHighways) and that profile has to hold right up to the edge of a town

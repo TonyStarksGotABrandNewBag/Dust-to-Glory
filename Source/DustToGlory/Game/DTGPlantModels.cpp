@@ -46,12 +46,21 @@ namespace detail_plantmodels
 		{TEXT("WildB"), TEXT("Wild_Grass_vlkhcbxia/Raw/vlkhcbxia_tier_0/StaticMeshes/SM_vlkhcbxia_VarB")},
 		{TEXT("WildC"), TEXT("Wild_Grass_vlkhcbxia/Raw/vlkhcbxia_tier_0/StaticMeshes/SM_vlkhcbxia_VarC")},
 		{TEXT("WildD"), TEXT("Wild_Grass_vlkhcbxia/Raw/vlkhcbxia_tier_0/StaticMeshes/SM_vlkhcbxia_VarD")},
+		// 31-32: the Poly Haven pine's other two trees, shorter and bushier than the main one, imported
+		// with it and never drawn until Milestone 4.
+		{TEXT("PineB"), TEXT("/Game/Art/Models/Pine/pine_tree_01_2k/pine_tree_01_b_LOD0")},
+		{TEXT("PineC"), TEXT("/Game/Art/Models/Pine/pine_tree_01_2k/pine_tree_01_c_LOD0")},
 	};
 	constexpr int32 RoleCount = static_cast<int32>(sizeof(Models) / sizeof(Models[0]));
 
 	FString PathOf(int32 Index)
 	{
 		const FModel& Model = Models[Index];
+		if (Model.Path && FString(Model.Path).StartsWith(TEXT("/Game/")))
+		{
+			const FString Leaf = FString(Model.Path).RightChop(FString(Model.Path).Find(TEXT("/"), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1);
+			return FString::Printf(TEXT("%s.%s"), Model.Path, *Leaf);
+		}
 		if (Model.Path)
 		{
 			const FString Leaf = FString(Model.Path).RightChop(FString(Model.Path).Find(TEXT("/"), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1);
@@ -73,7 +82,9 @@ namespace detail_plantmodels
 	{
 		switch (Kind)
 		{
-		case PlantKind::Pine: return {{0, 0, 0, 1}, 4};
+		// The pine's three trees, the bushier two twice over; the fir, a narrow northern conifer, was a
+		// quarter of every stand and the thinnest thing in it.
+		case PlantKind::Pine: return {{0, 31, 32, 32}, 4};
 		case PlantKind::Oak: return {{2, 3, 0, 0}, 2};      // spreading crowns stand in for live oak
 		case PlantKind::Palm: return {{4, 5, 6, 0}, 3};
 		case PlantKind::Palmetto: return {{15, 16, 17, 18}, 4}; // the Megascans palm shrubs; the fern stands in without them

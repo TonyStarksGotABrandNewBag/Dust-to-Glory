@@ -95,6 +95,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Terrain")
 	int32 ChunksPerFrame = 2;
 
+	/** The far land beyond the streamed chunks: how far it reaches and how far apart its vertices are, in metres. */
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Terrain")
+	float FarReachM = 12000.0f;
+	UPROPERTY(EditAnywhere, Category = "Dust to Glory|Terrain")
+	float FarPitchM = 100.0f;
+
 private:
 	void BuildStaticWorld();
 	void BuildTownStreets();
@@ -102,6 +108,8 @@ private:
 	void BuildBuildings();
 	void BuildVenues();
 	void BuildWater();
+	/** The land from the chunks' reach to the horizon, coarse, round a point; rebuilt when the player has gone far from it. */
+	void BuildFarLand(const FVector& Around);
 	/** Cooks the building shells' collision once, after every section is in; per section it took six minutes. */
 	void CookBuildingCollision();
 	/** The paint on the highways and the town streets, from Sim/RoadMarkings. */
@@ -128,7 +136,8 @@ private:
 	void ClearProps(int32 Part);
 	/** The lines between the utility poles, as a third section on the chunk's component (Sim/StreetFurniture WiresIn). */
 	void BuildChunkWires(int32 ChunkX, int32 ChunkY, UProceduralMeshComponent* Mesh);
-	void UpdateChunks(const FVector& Around);
+	/** Streams the chunks round every centre given, nearest the first one first, and releases the rest. */
+	void UpdateChunks(const TArray<FVector>& Centres);
 	void BuildChunk(int32 ChunkX, int32 ChunkY);
 	void ReleaseChunk(int32 Index);
 	/** True when that square of ground is already built. */
@@ -168,6 +177,11 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Water;
+	/** The far land (BuildFarLand), and where it was last built round. */
+	UPROPERTY()
+	TObjectPtr<UProceduralMeshComponent> FarLand;
+	FVector FarLandCentre = FVector(1.0e9f, 1.0e9f, 0.0f);
+	bool bChurned = false;
 
 	/** Building shells: per town, one mesh section per surface kind. */
 	UPROPERTY()

@@ -100,7 +100,7 @@ public:
 	void Reset();
 
 private:
-	void DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds);
+	void DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds, bool bYield = false);
 	/** Whether the streamed ground is built under a point yet: nothing is spawned on to nothing. */
 	bool GroundUnder(const FVector& At) const;
 	ADTGVehicle* SpawnCar(const FVector& At, double YawDegrees, bool bPolice);

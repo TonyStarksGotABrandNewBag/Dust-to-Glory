@@ -9,7 +9,7 @@
 {
   "name": "South Carolina",
   "abbreviation": "SC",
-  "scale": 25.0,
+  "scale": 10.0,
   "verticalScale": 3.0,
   "origin": [-78.725, 33.937],
   "outline": [

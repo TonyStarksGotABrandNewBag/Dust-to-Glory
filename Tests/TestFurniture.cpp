@@ -112,9 +112,11 @@ DTG_TEST(LampsStandOnSidewalksBesideStreets)
 	using namespace detail_furniture_test;
 	const GameState& State = dtg_test::LoadedState();
 	const FurnitureRules Rules;
-	const std::vector<Prop> Lamps = OfKind(FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 900.0)),
+	const std::vector<Prop> Lamps = OfKind(FurnitureIn(State.Map, State.City, Around(State.City.FindCity("Myrtle Beach")->Bounds.CenterX(), State.City.FindCity("Myrtle Beach")->Bounds.CenterY(), 900.0)),
 		PropKind::StreetLamp);
-	EXPECT_MSG(Lamps.size() > 10, std::to_string(Lamps.size()) + " lamps in the start town");
+	// Sampled round the hub, not the start town: a crossroads community lights its junctions only, and at
+	// ten real metres to the game metre nothing else is within 900 m of the spawn.
+	EXPECT_MSG(Lamps.size() > 10, std::to_string(Lamps.size()) + " lamps in Myrtle Beach");
 	for (const Prop& Lamp : Lamps)
 	{
 		double Nearest = 1e18;
@@ -150,7 +152,7 @@ DTG_TEST(HydrantsOnePerBlockOnACorner)
 	using namespace detail_furniture_test;
 	const GameState& State = dtg_test::LoadedState();
 	const FurnitureRules Rules;
-	const std::vector<Prop> Hydrants = OfKind(FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 900.0)),
+	const std::vector<Prop> Hydrants = OfKind(FurnitureIn(State.Map, State.City, Around(State.City.FindCity("Myrtle Beach")->Bounds.CenterX(), State.City.FindCity("Myrtle Beach")->Bounds.CenterY(), 900.0)),
 		PropKind::Hydrant);
 	EXPECT(!Hydrants.empty());
 	std::map<std::size_t, int> PerBlock;
@@ -186,7 +188,7 @@ DTG_TEST(BinsOnePerBlockAcrossFromTheHydrant)
 	using namespace detail_furniture_test;
 	const GameState& State = dtg_test::LoadedState();
 	const FurnitureRules Rules;
-	const std::vector<Prop> All = FurnitureIn(State.Map, State.City, Around(State.City.SpawnX, State.City.SpawnY, 900.0));
+	const std::vector<Prop> All = FurnitureIn(State.Map, State.City, Around(State.City.FindCity("Myrtle Beach")->Bounds.CenterX(), State.City.FindCity("Myrtle Beach")->Bounds.CenterY(), 900.0));
 	const std::vector<Prop> Bins = OfKind(All, PropKind::Bin);
 	const std::vector<Prop> Hydrants = OfKind(All, PropKind::Hydrant);
 	EXPECT(!Bins.empty());

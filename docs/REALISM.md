@@ -193,6 +193,134 @@ Still missing:
   in the chassis simulation is the likely answer. Not verified: what happens to a pedestrian a moving car
   drives into now that the body blocks them (the character's own depenetration decides).
 
+## Milestone 4: the sea where the sea is, and the pines, 21 October
+
+Kenny's brief: find out why the Atlantic is on Longs' horizon and fix it without moving the ocean to
+an arbitrary distance; find out why the pines are thin; verify with fixed cameras and seeds at Longs
+(street, air, night), on Myrtle Beach's shore, and close and far on the pines. Before is
+`Saved/Photos/m3e`, after `Saved/Photos/m4h`; the passes between (`m4a` to `m4g`) are the fixes arriving.
+
+**Why the sea was on the horizon: two causes, both verified.** The lot camera looks north. North of
+Longs is North Carolina, and the band of sea along the top of that frame was not the Atlantic. The
+ocean is one sheet at sea level under the whole state and four kilometres past it
+(`ADTGWorldBuilder::BuildWater`), and the land is streamed in chunks to 900 m (`ViewDistanceM`), so
+beyond the chunks the sheet showed through in every direction below the horizon. That is the
+"infinite water plane" of the brief, and it is the first cause. The second is the compression:
+`state.json` placed every town at its real longitude and latitude at 25 real metres to the game
+metre, which put the coast 640 m from Longs' centre (16 real km) and North Myrtle Beach's blocks
+186 m from it, so the real sea, and the next town, were in the frame to the south and east as well.
+Neither was the coordinate conversion (`StatePlan::ToWorld` is a plain equirectangular projection
+from the state's origin), the coastline (the state's outline polygon has the coast where it is), or
+streaming or LOD of anything but the ground itself.
+
+**The far land.** A coarse sheet of the state's own terrain, a vertex every 100 m to 12 km round the
+player (58,081 vertices, 40 ms to build, rebuilt a third of its reach at a time as the player moves),
+40 cm under the streamed chunks so they cover it where they exist, no collision, no shadow, coloured
+by the land cover: fields sand, woods the floor's brown through the green, towns lawn, sea bed well
+under the water so the sheet dives below the surface within a few metres of the shore. The horizon
+is land in every direction now, out to where the atmosphere takes it.
+
+**The compression: 10 real metres to the game metre, from 25.** The one number in `state.json` that
+sets how far apart places are; buildings and streets stay full size. Every town keeps its real
+position and every relationship between them holds: Longs to North Myrtle Beach 14.1 real km is
+1.41 km, to Myrtle Beach 31 km is 3.1 km, Columbia to Charleston 160 km is 16 km. The coast is now
+1.6 km from Longs' centre and the nearest town's blocks 1.08 km, and the beach towns still have the
+sea at their door (`LongsIsInlandAndTheBeachesAreNot`; at 25:1 it fails with the figures above, M23).
+Two tests that had quietly relied on North Myrtle Beach being 300 m from the spawn were moved to the
+hub. The other states' files keep 25:1 until they are looked at. Driving times are two and a half
+times what they were; Longs to Myrtle Beach is about three minutes at the limit.
+
+**The pines: three causes, two fixed, one named.** The investigation read the glTF itself:
+`pine_tree_01` is Poly Haven's plantation pine, a 20 m tree with 6.8 million modelled needles in an
+open layered crown eight metres across with dead twigs on the lower trunk, and `fir_tree_01`, a
+narrow northern fir, was drawn as every fourth pine and every cypress. The scale and height were right
+(the inventory's 8.6 m was the X extent, and `docs/REALISM.md` had it wrong). What made them read as
+dead was Nanite: the models were imported with the legacy area-preserving foliage mode, which
+collapsed the needle cloud into a few hundred flat dark triangles at a hundred metres, the "flags" in
+every crown of the Milestone 2 and 3 captures. Fixed: the conifers import with the voxelizing mode
+(`Tools/Art/import_models.py`, `CONIFERS`), the leaf master shades as two-sided foliage with the
+leaf's own colour as subsurface and clips at 0.3 instead of 0.4 (a tenth of the needle edges had been
+cut at every mip), and the pine mix is the pine's own three trees, the two bushier ones twice over,
+with the fir kept for cypress (`DTGPlantModels::VariantsFor`). Named, not fixed: no loblolly or
+longleaf exists in Poly Haven's twenty tree models, and nothing of the kind is installed from Fab
+(`Content/Fab` holds the Alexandra palm, two grasses, a kerb kit, a pole and a bin). A bare-trunked,
+domed-crown southern pine is an asset to be found and bought, not a rule to be written.
+
+**Found on the way, and fixed.** The tour's jump to Myrtle Beach and back came back to a Longs with
+no trees, grass, fences or poles, while the log said hundreds of instances had been placed in every
+rebuilt chunk. `-DTGChurn`, which releases every chunk five seconds in, reproduced it in a plain Longs
+run, and the capture's new count of instanced components near the camera showed them registered,
+visible and full. The cause: an instanced component made in play registered empty and was given its
+mesh and instances afterwards, and never drew them; the ones made before the first frame had theirs
+at the first render. The mesh is set before the component registers now and the render state is
+rebuilt outright after every batch of instances, and a chunk a player drives away from and back to
+is whole again -- this was a gameplay bug, not a photo-mode one. The ground now also stays under the
+player and under the player's own cars wherever the world is being built round
+(`ADTGWorldBuilder::Tick` streams round every one of them): the same jump had dropped the player's
+car through the start house's pad at 548 km/h. And a view mode a previous session had left on is
+reset to lit for every capture.
+
+**Also found and fixed.** Pines stood on Myrtle Beach's sand: the beach is a kind of ground now
+(`LandCover::Beach`, 90 m in from the sea, bare; `BeachesAreBareSand`, M24). The shoreline was a
+sawtooth of three-metre teeth, twice over: the sea bed began two metres down at the water's edge,
+and when that was made a slope the teeth stayed, because the town's pad (a metre up, feathered over
+120 m) ran to the water's edge too. The sea bed is wet sand sloping away under the water now, and a
+pad feathers down to the water line over its last 25 m (`TheShoreIsASlopeNotACliff`, which samples the
+shore profile every metre and fails at the old pad, M25). Two cars that met in Longs' crossroads at
+speed left one on its roof in the main street: a car within 20 m of its junction now waits at its
+edge while a car earlier in the list is within 15 m of it (`ADTGTrafficDirector::UpdateTraffic`).
+
+**What the captures show (before `Saved/Photos/m3e`, after `Saved/Photos/m4h`).** Judged image by
+image, with crops:
+
+- Longs from the road at noon: the horizon at the end of the main street is trees, where it was
+  North Myrtle Beach's towers; cars keep right and queue at the crossroads. The pines along the
+  street are still the thin plantation pine.
+- Longs from the air: yards, woods, fields and roads to the horizon; no sea anywhere in the frame.
+- Longs at night: the junction's lamps, lit windows, a car passing on its own side.
+- The lot: the household's car on its pad, the woods behind the house back after the rebuild bug,
+  the far fields beyond the trees.
+- Myrtle Beach's shore: sand, a smooth water line running away along the beach, the oceanfront row
+  behind, no trees on the sand.
+- The pines, close: a stand with a floor under it and light through the broadleaf crowns; the pine
+  crowns themselves are open and the lower trunks carry the dead twigs the model was scanned with.
+  Far: a belt of tall thin trunks with sparse tops along the road. The two settings changed the
+  crowns' brightness, not their shape. This is the model.
+
+**Measured (1600×900, DLSS Quality, main-view GPU ms; before is the Milestone 3 pass).**
+
+| View               | Before ms | After ms | After fps |
+|--------------------|----------:|---------:|----------:|
+| longs-noon         | 21.8      | 22.3     | 30        |
+| longs-above        | 15.6      | 17.9     | 44        |
+| longs-night        | 22.9      | 25.6     | 28        |
+| longs-lot          | 19.7      | 22.6     | 29        |
+| myrtle-beach       | –         | 25.7     | 43        |
+| longs-pines-close  | –         | 27.1     | 31        |
+| longs-pines-far    | –         | 23.8     | 26        |
+
+Every Longs view is one to three milliseconds dearer: the pine mix draws two bushier trees
+where a fir stood, and the foliage shading costs its subsurface term. The far land is under a
+millisecond in every view. The pines-close view carries the most foliage of any frame and is the
+dearest; the measurement of a drive, rather than a standing view, is still owed.
+
+**Geographic data sources.** The state's outline, coast segments, mountains, lakes, rivers, highway
+routes and the towns' positions are the longitude and latitude values in `Content/Data/state.json`,
+hand-entered from public maps when the state was first laid out; no new data was added. The
+compression is the only number changed. The real distances quoted above are from those coordinates.
+
+**Not done, and not claimed.**
+
+1. The pines are the wrong tree. Poly Haven has no loblolly or longleaf, nothing of the kind is
+   installed from Fab, and the voxelizing Nanite mode and the foliage shading, both verified in the
+   assets, change the look less than hoped. A southern pine asset has to be found and brought in;
+   until then the woods read as a northern plantation.
+2. Beyond the far land's 12 km the horizon is the atmosphere; beyond the streamed chunks there are
+   no trees, so from the air the far country is coloured ground, not forest.
+3. Traffic yields by list order, which queues cars at a busy junction; it does not take turns.
+4. The other states' files keep 25:1.
+5. A drive out of Longs and back, in play, is the measurement of the rebuilt-chunk fix still owed
+   beyond `-DTGChurn`.
 ## Procedural world quality milestone 3: one answer for what the ground is for, 21 October
 
 Kenny's brief: audit the systems behind roads, terrain, parcels, architecture, roofs, vegetation,
@@ -515,8 +643,8 @@ it. No markings are drawn anywhere yet (the marking plan exists; roads-ground br
 
 **Trees oversized, repetitive, in the way.** The plant heights are right (pines 13 to 27 m, live oaks 8
 to 16, `Vegetation.cpp`) but the models are not those sizes: `DTGPlantModels::TransformFor` scales a
-model to the plant's height, and the Poly Haven pine scan is 8.6 m tall, so it is drawn at two to three
-times its size with bark and needles to match; the Jacaranda and SmallTree scans stand in for live oak
+model to the plant's height; the Poly Haven pine is 20.4 m tall (the 8.6 m this said before was its width,
+read from the wrong column of the inventory; Milestone 4), so it is drawn at 0.6 to 1.3 times its size; the Jacaranda and SmallTree scans stand in for live oak
 with low wide crowns that, at 8 to 16 m, reach over the road; the Megascans Alexandra palm shrub stands
 in for the 6 to 13 m cabbage palm at three times its size. And every town had a boulevard: a street
 tree every 11 m along every block with a lawn (`StreetFurniture.cpp`, `TreeSpacingM`), 3.3 m in from the

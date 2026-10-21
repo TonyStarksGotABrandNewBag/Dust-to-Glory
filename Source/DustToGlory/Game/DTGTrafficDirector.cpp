@@ -259,7 +259,21 @@ void ADTGTrafficDirector::UpdateTraffic(const FVector& Around, float DeltaSecond
 				Driver.ToNode = Node->Links[FMath::RandHelper(static_cast<int32>(Node->Links.size()))];
 			}
 		}
-		DriveToward(Driver, LaneTarget(Driver.FromNode, Driver.ToNode), DeltaSeconds);
+		// Yielding at a junction: a car within 20 m of its junction waits at its edge while a car earlier in
+		// the list is within 15 m of the same junction, unless it is already inside it. Two cars that met in
+		// Longs' crossroads at speed left one on its roof in the middle of the main street (Milestone 4).
+		bool bYield = false;
+		const FVector Junction = NodeLocation(Driver.ToNode);
+		const double ToJunction = FVector::Dist2D(Driver.Car->GetActorLocation(), Junction);
+		if (ToJunction < 2000.0 && ToJunction > 700.0)
+		{
+			for (int32 Other = 0; Other < Index && !bYield; ++Other)
+			{
+				const FDTGDriver& First = Drivers[Other];
+				bYield = First.Car && FVector::Dist2D(First.Car->GetActorLocation(), Junction) < 1500.0;
+			}
+		}
+		DriveToward(Driver, LaneTarget(Driver.FromNode, Driver.ToNode), DeltaSeconds, bYield);
 	}
 
 	// Keep the roads as busy as the simulation says they should be: an outbreak thins them out.
@@ -356,7 +370,7 @@ void ADTGTrafficDirector::UpdatePolice(const FVector& Around)
 	}
 }
 
-void ADTGTrafficDirector::DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds)
+void ADTGTrafficDirector::DriveToward(FDTGDriver& Driver, const FVector& Target, float DeltaSeconds, bool bYield)
 {
 	if (!Driver.Car)
 	{
@@ -396,6 +410,11 @@ void ADTGTrafficDirector::DriveToward(FDTGDriver& Driver, const FVector& Target,
 			Input.Throttle = 0.0;
 			Input.Brake = 0.9;
 		}
+	}
+	if (bYield)
+	{
+		Input.Throttle = 0.0;
+		Input.Brake = 0.8;
 	}
 	Driver.Car->SetDriverInput(Input);
 	Driver.Patience = FMath::Max(0.0, Driver.Patience - DeltaSeconds * 0.01);
